@@ -7,7 +7,7 @@ import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
 import { installIntegratedFooter, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
 import { persistentEnforcementControl, type EnforcementControl } from "./settings.ts";
-import { formatFooterStatus, showJittorPanel } from "./tui.ts";
+import { buildFooterBudget, formatFooterStatus, showJittorPanel } from "./tui.ts";
 import { showUsagePanel } from "./usage.ts";
 
 export { formatFooterStatus } from "./tui.ts";
@@ -34,7 +34,7 @@ async function refreshFooter(client: JittorExtensionClient, state: IntegratedFoo
 		? { source: "codex-subscription", metric: "used-fraction", limit: 100, order: "desc" }
 		: provider === "openrouter" ? { source: "openrouter", metric: "usage", limit: 10, order: "desc" } : null;
 	const metrics = query ? await client.call("metrics.query", query) as StoredMetricObservation[] : [];
-	state.providerUsage = formatFooterStatus(status, metrics);
+	state.providerBudget = buildFooterBudget(status, metrics);
 	state.requestRender?.();
 }
 
@@ -170,13 +170,16 @@ export function registerJittorExtension(
 	client: JittorExtensionClient = daemonClient,
 	enforcement: EnforcementControl = persistentEnforcementControl(),
 ): void {
-	const footerState: IntegratedFooterState = { providerUsage: "" };
+	const footerState: IntegratedFooterState = { providerBudget: null };
+	const showFooter = (ctx: ExtensionContext): void => {
+		if (enforcement.isFooterEnabled()) installIntegratedFooter(ctx, footerState, () => pi.getThinkingLevel());
+		else ctx.ui.setFooter(undefined);
+	};
 	const disable = (ctx: ExtensionContext): void => {
 		enforcement.setEnabled(false);
-		footerState.providerUsage = "";
 		ctx.ui.setStatus("jittor", undefined);
-		ctx.ui.setFooter(undefined);
-		ctx.ui.notify("Jittor enforcement is off (monitor-only); provider requests will not be blocked.", "warning");
+		showFooter(ctx);
+		ctx.ui.notify("Jittor enforcement is off (monitor-only); the informational footer remains independent and provider requests will not be blocked.", "warning");
 	};
 	const enable = async (ctx: ExtensionContext): Promise<void> => {
 		try {
@@ -186,12 +189,12 @@ export function registerJittorExtension(
 			const readinessDecision = await client.call("router.decide", {}) as PolicyDecision;
 			if (readinessDecision.action === "halt") throw new Error(readinessDecision.reason);
 			enforcement.setEnabled(true);
-			installIntegratedFooter(ctx, footerState, () => pi.getThinkingLevel());
+			showFooter(ctx);
 			await refreshFooter(client, footerState);
 			ctx.ui.notify("Jittor enforcement enabled.", "info");
 		} catch (error) {
 			enforcement.setEnabled(false);
-			ctx.ui.setFooter(undefined);
+			showFooter(ctx);
 			const reason = error instanceof Error ? error.message : "readiness failed";
 			ctx.ui.notify(`Jittor remains monitor-only: ${reason}. ${RECOVERY_GUIDANCE}.`, "error");
 		}
@@ -203,6 +206,19 @@ export function registerJittorExtension(
 			const action = args.trim().toLowerCase();
 			if (action === "off" || action === "disable") { disable(ctx); return; }
 			if (action === "on" || action === "enable") { await enable(ctx); return; }
+			if (action === "footer off" || action === "footer disable") {
+				enforcement.setFooterEnabled(false);
+				ctx.ui.setFooter(undefined);
+				ctx.ui.notify("Jittor footer disabled; routing enforcement is unchanged.", "info");
+				return;
+			}
+			if (action === "footer on" || action === "footer enable") {
+				enforcement.setFooterEnabled(true);
+				showFooter(ctx);
+				await refreshFooter(client, footerState).catch(() => undefined);
+				ctx.ui.notify("Jittor informational footer enabled; routing enforcement is unchanged.", "info");
+				return;
+			}
 			if (!enforcement.isEnabled()) {
 				ctx.ui.notify("Jittor is monitor-only. Run /jittor on to re-enable blocking.", "info");
 				return;
@@ -225,15 +241,15 @@ export function registerJittorExtension(
 
 	pi.on("session_start", async (_event, ctx) => {
 		ctx.ui.setStatus("jittor", undefined);
-		if (!enforcement.isEnabled()) { ctx.ui.setFooter(undefined); return; }
-		installIntegratedFooter(ctx, footerState, () => pi.getThinkingLevel());
+		showFooter(ctx);
 		try {
 			await syncCurrentRoute(pi, client, ctx);
 			await syncAvailableRoutes(pi, client, ctx);
 			await client.call("telemetry.poll", {});
 			await refreshFooter(client, footerState);
 		} catch {
-			footerState.providerUsage = "";
+			footerState.providerBudget = null;
+			footerState.requestRender?.();
 		}
 	});
 
@@ -253,13 +269,11 @@ export function registerJittorExtension(
 	});
 
 	pi.on("model_select", async (event, ctx) => {
-		if (!enforcement.isEnabled()) return;
 		await syncCurrentRoute(pi, client, ctx, event.model).then(() => syncAvailableRoutes(pi, client, ctx)).catch(() => undefined);
-		await refreshFooter(client, footerState).catch(() => undefined);
+		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
 	});
 
 	pi.on("thinking_level_select", async (event, ctx) => {
-		if (!enforcement.isEnabled()) return;
 		await syncCurrentRoute(pi, client, ctx, ctx.model, event.level).catch(() => undefined);
 	});
 
@@ -283,13 +297,13 @@ export function registerJittorExtension(
 		} catch {
 			if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Codex telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
 		}
-		if (enforcement.isEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
+		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
 	});
 
 	pi.on("message_end", async (event, _ctx) => {
 		const metrics = assistantUsageMetrics(event.message, Date.now());
 		if (metrics.length > 0) await recordMetrics(client, metrics).catch(() => undefined);
-		if (enforcement.isEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
+		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {

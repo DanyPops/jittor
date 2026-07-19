@@ -27,9 +27,12 @@ class FakeClient implements JittorExtensionClient {
 
 function harness(client: FakeClient, enforcement?: EnforcementControl) {
 	let defaultEnabled = true;
+	let footerEnabled = true;
 	const control = enforcement ?? {
 		isEnabled: () => defaultEnabled,
 		setEnabled(value: boolean) { defaultEnabled = value; },
+		isFooterEnabled: () => footerEnabled,
+		setFooterEnabled(value: boolean) { footerEnabled = value; },
 	};
 	const handlers = new Map<string, Function[]>();
 	const commands = new Map<string, any>();
@@ -44,6 +47,7 @@ function harness(client: FakeClient, enforcement?: EnforcementControl) {
 	} as unknown as ExtensionAPI;
 	registerJittorExtension(pi, client, control);
 	const statuses: Array<string | undefined> = [];
+	const footers: unknown[] = [];
 	const notifications: string[] = [];
 	let aborted = false;
 	const model = { provider: "openai-codex", id: "gpt-5.3-codex" };
@@ -61,11 +65,11 @@ function harness(client: FakeClient, enforcement?: EnforcementControl) {
 		abort() { aborted = true; },
 		ui: {
 			setStatus(_key: string, value: string | undefined) { statuses.push(value); },
-			setFooter() {},
+			setFooter(footer: unknown) { footers.push(footer); },
 			notify(message: string) { notifications.push(message); },
 		},
 	} as unknown as ExtensionContext;
-	return { handlers, commands, modelChanges, thinkingChanges, statuses, notifications, ctx, aborted: () => aborted };
+	return { handlers, commands, modelChanges, thinkingChanges, statuses, footers, notifications, ctx, aborted: () => aborted };
 }
 
 describe("Jittor Pi actuator", () => {
@@ -93,9 +97,12 @@ describe("Jittor Pi actuator", () => {
 
 	it("supports a local emergency off switch without calling the daemon", async () => {
 		let enabled = true;
+		let footerEnabled = true;
 		const enforcement: EnforcementControl = {
 			isEnabled: () => enabled,
 			setEnabled(value) { enabled = value; },
+			isFooterEnabled: () => footerEnabled,
+			setFooterEnabled(value) { footerEnabled = value; },
 		};
 		const client = new FakeClient();
 		const app = harness(client, enforcement);
@@ -105,7 +112,26 @@ describe("Jittor Pi actuator", () => {
 		expect(result).toEqual({ action: "continue" });
 		expect(client.calls).toHaveLength(before);
 		expect(enabled).toBe(false);
+		expect(app.footers.at(-1)).toBeTypeOf("function");
 		expect(app.notifications.join("\n")).toContain("monitor-only");
+	});
+
+	it("toggles the informational footer without enabling monitor-only enforcement", async () => {
+		let enabled = false;
+		let footerEnabled = true;
+		const enforcement: EnforcementControl = {
+			isEnabled: () => enabled,
+			setEnabled(value) { enabled = value; },
+			isFooterEnabled: () => footerEnabled,
+			setFooterEnabled(value) { footerEnabled = value; },
+		};
+		const app = harness(new FakeClient(), enforcement);
+		await app.commands.get("jittor").handler("footer off", app.ctx);
+		expect(app.footers.at(-1)).toBeUndefined();
+		expect(enabled).toBe(false);
+		await app.commands.get("jittor").handler("footer on", app.ctx);
+		expect(app.footers.at(-1)).toBeTypeOf("function");
+		expect(enabled).toBe(false);
 	});
 
 	it("applies model and thinking decisions before a turn", async () => {
