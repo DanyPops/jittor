@@ -6,10 +6,11 @@ import type { RouterStatus } from "../src/ports/router-controller.ts";
 const status: RouterStatus = {
 	ready: true,
 	paused: false,
-	sources: [{ id: "codex-subscription", ok: true, metrics: 7 }, { id: "openrouter", ok: true, metrics: 4 }],
+	sources: [{ id: "codex-subscription", provider: "openai-codex", ok: true, metrics: 7 }, { id: "openrouter", provider: "openrouter", ok: true, metrics: 4 }],
 	lastDecision: { action: "throttle", pressure: 1.1, reason: "pressure", decidedAt: 1000, trace: [] },
 	override: null,
 	currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+	availableRoutes: [],
 };
 const metrics = [
 	{ source: "codex-subscription", scope: "codex:secondary", metric: "used-fraction", value: 0.42, unit: "ratio", observedAt: 1000, id: 1, attributes: { windowSeconds: 604_800, resetsAt: 1_800_000_000 } },
@@ -20,7 +21,7 @@ describe("Jittor status TUI", () => {
 	it("shows provider budgets, route, pressure, freshness, and next downgrade", () => {
 		const text = buildStatusView(status, metrics, 1_000).join("\n");
 		expect(text).toContain("Codex weekly: 42.0%");
-		expect(text).toContain("OpenRouter spend: $12.346");
+		expect(text).not.toContain("OpenRouter spend");
 		expect(text).toContain("Route: openai-codex/gpt-5.6-sol · high");
 		expect(text).toContain("Pressure: 1.100 · throttle");
 		expect(text).toContain("Next: lower thinking");

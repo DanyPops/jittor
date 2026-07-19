@@ -32,10 +32,12 @@ export class JittorRouter implements RouterController {
 	private override: RouteOverride | null = null;
 	private inFlightPoll: Promise<TelemetryPollResult> | null = null;
 	private currentRoute: Route;
+	private availableRoutes: Route[];
 
 	constructor(private readonly options: JittorRouterOptions) {
 		this.clock = options.clock ?? Date.now;
 		this.currentRoute = options.currentRoute;
+		this.availableRoutes = structuredClone(options.routes);
 	}
 
 	poll(): Promise<TelemetryPollResult> {
@@ -52,6 +54,7 @@ export class JittorRouter implements RouterController {
 			lastDecision: this.lastDecision ? structuredClone(this.lastDecision) : null,
 			override: this.override ? structuredClone(this.override) : null,
 			currentRoute: structuredClone(this.currentRoute),
+			availableRoutes: structuredClone(this.availableRoutes),
 		};
 	}
 
@@ -69,11 +72,12 @@ export class JittorRouter implements RouterController {
 			return this.remember({ action, route, pressure: 0, reason: "manual route override", decidedAt: now, trace: ["manual override"] });
 		}
 		if (!this.isReady()) return this.remember({ action: "halt", pressure: Number.POSITIVE_INFINITY, reason: "required telemetry is not ready", decidedAt: now, trace: ["fail closed"] });
+		const activeSourceIds = new Set(this.options.sources.filter((source) => source.provider === this.currentRoute.provider).map((source) => source.id));
 		return this.rememberPolicy(evaluateRoutingPolicy({
 			now,
-			windows: [...this.windows.values()].flat(),
+			windows: [...this.windows.entries()].filter(([sourceId]) => activeSourceIds.has(sourceId)).flatMap(([, windows]) => windows),
 			currentRoute: this.currentRoute,
-			routes: this.options.routes,
+			routes: this.availableRoutes,
 			config: this.options.policy,
 			previousDecision: this.previousPolicyDecision ?? undefined,
 		}));
@@ -90,7 +94,7 @@ export class JittorRouter implements RouterController {
 	}
 
 	setOverride(override?: RouteOverride): RouterStatus {
-		if (!override || !this.options.routes.some((route) => sameRoute(route, override.route))) throw new Error("override route is not configured");
+		if (!override || !this.availableRoutes.some((route) => sameRoute(route, override.route))) throw new Error("override route is not available in Pi");
 		if (override.expiresAt !== null && override.expiresAt <= this.clock()) throw new Error("override expiry must be in the future");
 		this.override = structuredClone(override);
 		return this.status();
@@ -107,16 +111,25 @@ export class JittorRouter implements RouterController {
 		return this.status();
 	}
 
+	setAvailableRoutes(routes: Route[]): RouterStatus {
+		if (!Array.isArray(routes)) throw new Error("available routes must be an array");
+		const valid = routes.filter((route) => typeof route?.provider === "string" && route.provider.length > 0
+			&& typeof route.model === "string" && route.model.length > 0
+			&& typeof route.thinking === "string" && route.thinking.length > 0);
+		this.availableRoutes = valid.filter((route, index) => valid.findIndex((candidate) => sameRoute(candidate, route)) === index).map((route) => structuredClone(route));
+		return this.status();
+	}
+
 	private async runPoll(): Promise<TelemetryPollResult> {
 		const statuses = await Promise.all(this.options.sources.map(async (source): Promise<TelemetrySourceStatus> => {
 			try {
 				const batch = await source.poll();
 				for (const observation of batch.metrics) this.options.metrics.record(observation);
 				this.windows.set(source.id, batch.windows);
-				return { id: source.id, ok: true, metrics: batch.metrics.length, observedAt: batch.observedAt };
+				return { id: source.id, provider: source.provider, ok: true, metrics: batch.metrics.length, observedAt: batch.observedAt };
 			} catch {
 				this.windows.delete(source.id);
-				return { id: source.id, ok: false, metrics: 0, observedAt: this.clock(), error: "poll failed" };
+				return { id: source.id, provider: source.provider, ok: false, metrics: 0, observedAt: this.clock(), error: "poll failed" };
 			}
 		}));
 		this.sourceStatuses = statuses;
@@ -124,9 +137,9 @@ export class JittorRouter implements RouterController {
 	}
 
 	private isReady(): boolean {
-		const required = this.options.sources.filter((source) => source.required);
-		if (required.length === 0) return false;
-		return required.every((source) => this.sourceStatuses.some((status) => status.id === source.id && status.ok));
+		const active = this.options.sources.filter((source) => source.provider === this.currentRoute.provider);
+		if (active.length === 0) return false;
+		return active.every((source) => this.sourceStatuses.some((status) => status.id === source.id && status.ok));
 	}
 
 	private expireOverride(): void {

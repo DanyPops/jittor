@@ -1,13 +1,7 @@
 import type { PolicyConfig, Route } from "./policy.ts";
 
-export const DEFAULT_ROUTES: Route[] = [
-	{ provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
-	{ provider: "openai-codex", model: "gpt-5.6-sol", thinking: "medium" },
-	{ provider: "openai-codex", model: "gpt-5.3-codex", thinking: "high" },
-	{ provider: "openai-codex", model: "gpt-5.3-codex", thinking: "medium" },
-	{ provider: "openai-codex", model: "gpt-5.1-codex-mini", thinking: "medium" },
-	{ provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "medium" },
-];
+/** Replaced by Pi's active model and authenticated ModelRegistry routes before enforcement. */
+export const UNCONFIGURED_ROUTE: Route = { provider: "unconfigured", model: "unconfigured", thinking: "off" };
 
 export const DEFAULT_POLICY: PolicyConfig = {
 	maxTelemetryAgeMs: 120_000,
