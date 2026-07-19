@@ -1,5 +1,5 @@
 import { LOOPBACK_HOST, MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
-import { DEFAULT_POLICY, DEFAULT_ROUTES } from "./config.ts";
+import { DEFAULT_POLICY, UNCONFIGURED_ROUTE } from "./config.ts";
 import { SQLiteMetricStore } from "./adapters/sqlite-metric-store.ts";
 import { openJittorDb } from "./db.ts";
 import { createApp, JittorService } from "./service.ts";
@@ -40,8 +40,8 @@ export function startDaemon(
 		metrics,
 		sources,
 		policy: DEFAULT_POLICY,
-		routes: DEFAULT_ROUTES,
-		currentRoute: DEFAULT_ROUTES[0]!,
+		routes: [],
+		currentRoute: UNCONFIGURED_ROUTE,
 	});
 	const service = new JittorService(metrics, router);
 	const app = createApp({ service, token });

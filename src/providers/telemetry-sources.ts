@@ -29,6 +29,7 @@ function windowsFromLimit(limit: CodexRateLimitSnapshot): BudgetWindow[] {
 
 export class CodexTelemetrySource implements TelemetrySource {
 	readonly id = "codex-subscription";
+	readonly provider = "openai-codex";
 	readonly required = true;
 
 	constructor(
@@ -51,6 +52,7 @@ export class CodexTelemetrySource implements TelemetrySource {
 
 export class OpenRouterTelemetrySource implements TelemetrySource {
 	readonly id = "openrouter";
+	readonly provider = "openrouter";
 	readonly required = false;
 
 	constructor(

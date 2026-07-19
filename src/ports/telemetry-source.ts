@@ -9,6 +9,7 @@ export interface TelemetryBatch {
 
 export interface TelemetrySource {
 	id: string;
+	provider: string;
 	required: boolean;
 	poll(): Promise<TelemetryBatch>;
 }

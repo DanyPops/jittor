@@ -33,6 +33,7 @@ const config: PolicyConfig = {
 function source(batch: TelemetryBatch | Error, required = true): TelemetrySource {
 	return {
 		id: "codex",
+		provider: "openai-codex",
 		required,
 		async poll() { if (batch instanceof Error) throw batch; return batch; },
 	};
@@ -58,7 +59,7 @@ describe("Jittor router controller", () => {
 			clock: () => now,
 		});
 
-		expect((await router.poll()).sources).toEqual([{ id: "codex", ok: true, metrics: 1, observedAt: now }]);
+		expect((await router.poll()).sources).toEqual([{ id: "codex", provider: "openai-codex", ok: true, metrics: 1, observedAt: now }]);
 		expect(router.status().ready).toBe(true);
 		expect(metrics.rows).toHaveLength(1);
 		expect(router.decide().action).toBe("continue");
@@ -70,10 +71,33 @@ describe("Jittor router controller", () => {
 			policy: config, routes, currentRoute: routes[0]!, clock: () => now,
 		});
 		const result = await router.poll();
-		expect(result.sources[0]).toEqual({ id: "codex", ok: false, metrics: 0, observedAt: now, error: "poll failed" });
+		expect(result.sources[0]).toEqual({ id: "codex", provider: "openai-codex", ok: false, metrics: 0, observedAt: now, error: "poll failed" });
 		expect(JSON.stringify(result)).not.toContain("oauth-super-secret");
 		expect(router.status().ready).toBe(false);
 		expect(router.decide().action).toBe("halt");
+	});
+
+	it("never selects a configured model that Pi did not report available", async () => {
+		const router = new JittorRouter({
+			metrics: new MemoryMetrics(),
+			sources: [source({
+				observedAt: now,
+				metrics: [],
+				windows: [{
+					id: "codex:primary@pressure", source: "codex-subscription", scope: "codex:primary",
+					usedFraction: 0.2, observedBurnPerSecond: 0.000095,
+					windowSeconds: 18_000, resetsAt: now + 14_400_000,
+					observedAt: now, freshness: "fresh", confidence: 0.8,
+				}],
+			})],
+			policy: config, routes, currentRoute: routes[0]!, clock: () => now,
+		});
+		await router.poll();
+		router.setAvailableRoutes([routes[0]!, routes[1]!]);
+		const decision = router.decide();
+		expect(decision.action).toBe("halt");
+		expect(decision.route).toBeUndefined();
+		expect(decision.trace.join("\n")).toContain("switch-model route unavailable");
 	});
 
 	it("supports explicit pause and expiring route overrides", async () => {

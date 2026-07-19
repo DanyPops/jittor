@@ -16,8 +16,8 @@ class EmptyMetricStore implements MetricStore {
 class FakeRouter implements RouterController {
 	ready = false;
 	paused = false;
-	async poll(): Promise<TelemetryPollResult> { this.ready = true; return { sources: [{ id: "codex", ok: true, metrics: 2 }], observedAt: 1000 }; }
-	status(): RouterStatus { return { ready: this.ready, paused: this.paused, sources: [], lastDecision: null, override: null, currentRoute: null }; }
+	async poll(): Promise<TelemetryPollResult> { this.ready = true; return { sources: [{ id: "codex", provider: "openai-codex", ok: true, metrics: 2 }], observedAt: 1000 }; }
+	status(): RouterStatus { return { ready: this.ready, paused: this.paused, sources: [], lastDecision: null, override: null, currentRoute: null, availableRoutes: [] }; }
 	decide(): PolicyDecision {
 		return { action: "continue", pressure: 0.5, reason: "sustainable", decidedAt: 1000, trace: ["ok"] };
 	}
@@ -26,6 +26,7 @@ class FakeRouter implements RouterController {
 	setOverride(): RouterStatus { return this.status(); }
 	clearOverride(): RouterStatus { return this.status(); }
 	setCurrentRoute(): RouterStatus { return this.status(); }
+	setAvailableRoutes(): RouterStatus { return this.status(); }
 }
 
 function get(app: { fetch(request: Request): Promise<Response> }, path: string) {
@@ -54,7 +55,7 @@ describe("production router service", () => {
 		const router = new FakeRouter();
 		const service = new JittorService(new EmptyMetricStore(), router);
 		expect(service.operationNames()).toEqual(expect.arrayContaining([
-			"telemetry.poll", "router.status", "router.decide", "router.pause", "router.resume", "router.override", "router.clear_override",
+			"telemetry.poll", "router.status", "router.decide", "router.pause", "router.resume", "router.override", "router.clear_override", "router.available_routes",
 		]));
 		expect(await service.execute("router.decide", {})).toMatchObject({ action: "continue" });
 		expect(await service.execute("router.pause", {})).toMatchObject({ paused: true });

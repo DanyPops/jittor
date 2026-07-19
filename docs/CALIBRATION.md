@@ -44,18 +44,15 @@ A consumed fraction of 99% is an unconditional hard stop. Missing, failed, older
 
 Recovery uses 10% hysteresis and a five-minute cooldown. Escalation is immediate; recovery waits, preventing route oscillation around a threshold.
 
-## Route ladder
+## Dynamic route ladder
 
-The default tested route order is:
+Jittor contains no model-ID allowlist. Before every decision, the Pi extension rebuilds the route ladder from `ModelRegistry.getAvailable()` and the active Pi model:
 
-1. `openai-codex/gpt-5.6-sol · high`
-2. `openai-codex/gpt-5.6-sol · medium`
-3. `openai-codex/gpt-5.3-codex · high`
-4. `openai-codex/gpt-5.3-codex · medium`
-5. `openai-codex/gpt-5.1-codex-mini · medium`
-6. `openrouter/openai/gpt-4.1-mini · medium`
+1. the current model and thinking level;
+2. supported lower thinking levels on that model;
+3. authenticated text models from the same current provider, ordered by advertised input-plus-output cost.
 
-The Pi extension reports the actual selected model and thinking level back to the daemon before policy evaluation. Missing or unauthenticated routes escalate to the next safe stage and ultimately halt.
+Routes from unrelated providers are intentionally excluded. Provider switching therefore halts unless a future explicit cross-provider policy is configured; Jittor does not silently start spending through another configured API. The current route and dynamic ladder are sent to the daemon before policy evaluation. A route that disappears is removed and the policy is evaluated once more instead of aborting with a stale catalog model.
 
 ## User controls
 

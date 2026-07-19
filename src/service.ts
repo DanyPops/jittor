@@ -17,6 +17,7 @@ export const EXPECTED_OPERATION_NAMES = [
 	"router.override",
 	"router.clear_override",
 	"router.current_route",
+	"router.available_routes",
 ] as const;
 
 export type OperationName = typeof EXPECTED_OPERATION_NAMES[number];
@@ -33,6 +34,7 @@ export interface OperationInputs {
 	"router.override": RouteOverride;
 	"router.clear_override": Record<string, never>;
 	"router.current_route": Route;
+	"router.available_routes": { routes: Route[] };
 }
 export interface OperationOutputs {
 	"metrics.record": StoredMetricObservation;
@@ -47,12 +49,13 @@ export interface OperationOutputs {
 	"router.override": RouterStatus;
 	"router.clear_override": RouterStatus;
 	"router.current_route": RouterStatus;
+	"router.available_routes": RouterStatus;
 }
 
 export class UnknownOperationError extends Error {}
 
 class UnavailableRouter implements RouterController {
-	private readonly unavailable: RouterStatus = { ready: false, paused: false, sources: [], lastDecision: null, override: null, currentRoute: null };
+	private readonly unavailable: RouterStatus = { ready: false, paused: false, sources: [], lastDecision: null, override: null, currentRoute: null, availableRoutes: [] };
 	async poll(): Promise<TelemetryPollResult> { return { sources: [], observedAt: Date.now() }; }
 	status(): RouterStatus { return structuredClone(this.unavailable); }
 	decide(): PolicyDecision { return { action: "halt", pressure: Number.POSITIVE_INFINITY, reason: "router is not configured", decidedAt: Date.now(), trace: ["fail closed"] }; }
@@ -61,6 +64,7 @@ class UnavailableRouter implements RouterController {
 	setOverride(): RouterStatus { return this.status(); }
 	clearOverride(): RouterStatus { return this.status(); }
 	setCurrentRoute(): RouterStatus { return this.status(); }
+	setAvailableRoutes(): RouterStatus { return this.status(); }
 }
 
 export class JittorService {
@@ -93,6 +97,7 @@ export class JittorService {
 			case "router.override": return this.router.setOverride(input as unknown as RouteOverride);
 			case "router.clear_override": return this.router.clearOverride();
 			case "router.current_route": return this.router.setCurrentRoute(input as unknown as Route);
+			case "router.available_routes": return this.router.setAvailableRoutes(Array.isArray(input["routes"]) ? input["routes"] as Route[] : []);
 			default: throw new UnknownOperationError(`unknown operation: ${operation}`);
 		}
 	}

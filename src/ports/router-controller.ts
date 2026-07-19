@@ -2,6 +2,7 @@ import type { PolicyDecision, Route } from "../policy.ts";
 
 export interface TelemetrySourceStatus {
 	id: string;
+	provider: string;
 	ok: boolean;
 	metrics: number;
 	observedAt?: number;
@@ -25,6 +26,7 @@ export interface RouterStatus {
 	lastDecision: PolicyDecision | null;
 	override: RouteOverride | null;
 	currentRoute: Route | null;
+	availableRoutes: Route[];
 }
 
 export interface RouterController {
@@ -36,4 +38,5 @@ export interface RouterController {
 	setOverride(override?: RouteOverride): RouterStatus;
 	clearOverride(): RouterStatus;
 	setCurrentRoute(route: Route): RouterStatus;
+	setAvailableRoutes(routes: Route[]): RouterStatus;
 }
