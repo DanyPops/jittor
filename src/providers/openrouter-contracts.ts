@@ -164,7 +164,13 @@ export function parseOpenRouterKey(rootValue: unknown, observedAt: number): Open
 	add("usage-monthly", snapshot.usageMonthly);
 	add("limit", limit);
 	add("limit-remaining", remaining);
-	if (limit !== null && limit > 0) snapshot.metrics.push(metric(scope, "used-fraction", usage / limit, "ratio", observedAt));
+	if (limit !== null && limit > 0 && remaining !== null) {
+		const remainingFraction = remaining / limit;
+		if (remainingFraction < 0 || remainingFraction > 1) throw new Error("OpenRouter key remaining fraction is outside its configured limit");
+		const attributes = { limit, remaining, reset: snapshot.reset };
+		snapshot.metrics.push(metric(scope, "remaining-fraction", remainingFraction, "ratio", observedAt, attributes));
+		snapshot.metrics.push(metric(scope, "used-fraction", 1 - remainingFraction, "ratio", observedAt, attributes));
+	}
 	return snapshot;
 }
 

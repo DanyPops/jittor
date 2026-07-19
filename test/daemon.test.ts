@@ -47,7 +47,7 @@ describe("Jittor daemon state", () => {
 		const daemon = startDaemon(paths);
 		try {
 			const client = connectJittorClient(paths);
-			expect(await client.health()).toEqual({ ok: true, version: "0.1.1" });
+			expect(await client.health()).toEqual({ ok: true, version: "0.1.2" });
 			await client.call("metrics.record", {
 				source: "jittor", scope: "daemon", metric: "requests", value: 1, unit: "count", observedAt: 1000,
 			});

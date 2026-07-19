@@ -28,6 +28,8 @@ describe("OpenRouter telemetry adapter", () => {
 		expect(requests[0]?.headers.get("authorization")).toBe("Bearer secret-key");
 		expect(snapshot).toMatchObject({ limit: 100, remaining: 40, usage: 60, reset: "monthly", management: false });
 		expect(snapshot.metrics.map((metric) => [metric.metric, metric.value, metric.unit])).toContainEqual(["limit-remaining", 40, "usd"]);
+		expect(snapshot.metrics.map((metric) => [metric.metric, metric.value, metric.unit])).toContainEqual(["remaining-fraction", 0.4, "ratio"]);
+		expect(snapshot.metrics.find((metric) => metric.metric === "remaining-fraction")?.attributes).toEqual({ limit: 100, remaining: 40, reset: "monthly" });
 		expect(snapshot.metrics.map((metric) => metric.metric)).toContain("usage-monthly");
 	});
 

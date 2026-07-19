@@ -1,6 +1,6 @@
 # Token-usage TUI prior art
 
-Research performed before implementing Jittor's `/usage` frontend.
+Research performed before implementing Jittor's `/jittor usage` frontend.
 
 ## Local agent implementations
 
@@ -60,5 +60,5 @@ Jittor combines the best applicable patterns:
 3. Provider/model-preserving series and input/output/cache totals.
 4. Vertically scaled, colored, stacked Unicode bars with fractional top blocks.
 5. Width-safe X/Y axes and provider/model legend.
-6. Native `/usage` panel with Left/Right range switching and refresh.
+6. Native `/jittor usage` panel with Left/Right range switching and refresh.
 7. Data access only through authenticated daemon `metrics.query`; the extension never opens SQLite or reads provider credentials.
