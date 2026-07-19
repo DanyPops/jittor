@@ -1,0 +1,30 @@
+{
+  "name": "@danypops/jittor",
+  "version": "0.1.0",
+  "description": "Just-in-Time Token Optimizing Router for Pi",
+  "type": "module",
+  "keywords": ["pi-package", "llm-router", "token-budget"],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "serve": "bun src/cli.ts serve",
+    "service:install": "bun src/cli.ts service install",
+    "guard:install": "git config core.hooksPath .githooks"
+  },
+  "pi": {
+    "extensions": ["extension/src/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanyPops/jittor.git"
+  },
+  "files": ["src", "extension", "docs", "README.md"]
+}
