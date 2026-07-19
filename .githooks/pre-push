@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+remote_url="${2:-}"
+case "$remote_url" in
+  *github.com[:/]DanyPops/jittor|*github.com[:/]DanyPops/jittor.git) exit 0 ;;
+  *)
+    echo "BLOCKED: Jittor may only be pushed to DanyPops/jittor." >&2
+    echo "Destination: $remote_url" >&2
+    exit 1
+    ;;
+esac

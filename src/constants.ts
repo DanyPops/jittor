@@ -1,0 +1,14 @@
+export const VERSION = "0.1.0";
+export const SQLITE_SCHEMA_VERSION = 1;
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+export const DEFAULT_QUERY_LIMIT = 1_000;
+export const MAX_QUERY_LIMIT = 10_000;
+export const SERVICE_MAX_BODY_BYTES = 1_048_576;
+export const MAINTENANCE_INTERVAL_MS = 15 * 60 * 1_000;
+export const TELEMETRY_POLL_INTERVAL_MS = 60_000;
+export const LOOPBACK_HOST = "127.0.0.1";
+export const JITTOR_STATE_DIRECTORY = "jittor";
+export const DATABASE_FILENAME = "jittor.db";
+export const TOKEN_FILENAME = "auth-token";
+export const HANDLE_FILENAME = "daemon.json";
+export const SYSTEMD_UNIT_NAME = "jittor.service";
