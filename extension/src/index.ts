@@ -273,8 +273,17 @@ export function registerJittorExtension(
 		finishCompaction();
 	});
 
-	pi.on("agent_settled", () => {
+	pi.on("agent_settled", async (_event, ctx) => {
 		if (footerState.compaction) finishCompaction();
+		if (!enforcement.isFooterEnabled()) return;
+		try {
+			await syncCurrentRoute(pi, client, ctx);
+			await syncAvailableRoutes(pi, client, ctx);
+			await refreshFooter(client, footerState);
+		} catch {
+			footerState.providerBudget = null;
+			footerState.requestRender?.();
+		}
 	});
 
 	pi.on("input", async (event, ctx) => {
