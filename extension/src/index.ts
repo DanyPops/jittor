@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { MAX_DYNAMIC_ROUTES } from "../../src/constants.ts";
+import { FOOTER_COMPACTION_RENDER_INTERVAL_MS, MAX_DYNAMIC_ROUTES } from "../../src/constants.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
@@ -32,7 +32,7 @@ async function refreshFooter(client: JittorExtensionClient, state: IntegratedFoo
 	const provider = status.currentRoute?.provider;
 	const query = provider === "openai-codex"
 		? { source: "codex-subscription", metric: "used-fraction", limit: 100, order: "desc" }
-		: provider === "openrouter" ? { source: "openrouter", metric: "usage", limit: 10, order: "desc" } : null;
+		: provider === "openrouter" ? { source: "openrouter", limit: 20, order: "desc" } : null;
 	const metrics = query ? await client.call("metrics.query", query) as StoredMetricObservation[] : [];
 	state.providerBudget = buildFooterBudget(status, metrics);
 	state.requestRender?.();
@@ -171,6 +171,25 @@ export function registerJittorExtension(
 	enforcement: EnforcementControl = persistentEnforcementControl(),
 ): void {
 	const footerState: IntegratedFooterState = { providerBudget: null };
+	let compactionTimer: ReturnType<typeof setInterval> | undefined;
+	const finishCompaction = (): void => {
+		if (compactionTimer) clearInterval(compactionTimer);
+		compactionTimer = undefined;
+		footerState.compaction = undefined;
+		footerState.requestRender?.();
+	};
+	const beginCompaction = (ctx: ExtensionContext, signal: AbortSignal): void => {
+		finishCompaction();
+		const usage = ctx.getContextUsage();
+		footerState.compaction = {
+			startedAt: Date.now(),
+			initialFraction: usage?.percent === null || usage?.percent === undefined ? 1 : usage.percent / 100,
+		};
+		compactionTimer = setInterval(() => footerState.requestRender?.(), FOOTER_COMPACTION_RENDER_INTERVAL_MS);
+		signal.addEventListener("abort", finishCompaction, { once: true });
+		if (signal.aborted) finishCompaction();
+		else footerState.requestRender?.();
+	};
 	const showFooter = (ctx: ExtensionContext): void => {
 		if (enforcement.isFooterEnabled()) installIntegratedFooter(ctx, footerState, () => pi.getThinkingLevel());
 		else ctx.ui.setFooter(undefined);
@@ -201,7 +220,7 @@ export function registerJittorExtension(
 	};
 
 	pi.registerCommand("jittor", {
-		description: "Inspect, enable, or disable Jittor routing",
+		description: "Inspect or control Jittor routing, budgets, and usage",
 		handler: async (args, ctx) => {
 			const action = args.trim().toLowerCase();
 			if (action === "off" || action === "disable") { disable(ctx); return; }
@@ -219,6 +238,10 @@ export function registerJittorExtension(
 				ctx.ui.notify("Jittor informational footer enabled; routing enforcement is unchanged.", "info");
 				return;
 			}
+			if (action === "usage") {
+				await showUsagePanel(ctx, client);
+				return;
+			}
 			if (!enforcement.isEnabled()) {
 				ctx.ui.notify("Jittor is monitor-only. Run /jittor on to re-enable blocking.", "info");
 				return;
@@ -226,20 +249,9 @@ export function registerJittorExtension(
 			await showJittorPanel(ctx, client);
 		},
 	});
-	pi.registerCommand("jittor-off", {
-		description: "Emergency local bypass: disable Jittor blocking without daemon access",
-		handler: async (_args, ctx) => { disable(ctx); },
-	});
-	pi.registerCommand("jittor-on", {
-		description: "Enable Jittor only after telemetry and routes pass readiness",
-		handler: async (_args, ctx) => { await enable(ctx); },
-	});
-	pi.registerCommand("usage", {
-		description: "Show Jittor token usage over time",
-		handler: async (_args, ctx) => { await showUsagePanel(ctx, client); },
-	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		finishCompaction();
 		ctx.ui.setStatus("jittor", undefined);
 		showFooter(ctx);
 		try {
@@ -251,6 +263,18 @@ export function registerJittorExtension(
 			footerState.providerBudget = null;
 			footerState.requestRender?.();
 		}
+	});
+
+	pi.on("session_before_compact", (event, ctx) => {
+		beginCompaction(ctx, event.signal);
+	});
+
+	pi.on("session_compact", () => {
+		finishCompaction();
+	});
+
+	pi.on("agent_settled", () => {
+		if (footerState.compaction) finishCompaction();
 	});
 
 	pi.on("input", async (event, ctx) => {
@@ -307,6 +331,7 @@ export function registerJittorExtension(
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
+		finishCompaction();
 		ctx.ui.setStatus("jittor", undefined);
 		ctx.ui.setFooter(undefined);
 	});

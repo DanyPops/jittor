@@ -15,10 +15,35 @@ function latest(rows: StoredMetricObservation[], predicate: (row: StoredMetricOb
 	return rows.filter(predicate).sort((left, right) => right.observedAt - left.observedAt || right.id - left.id)[0];
 }
 
-function longestCodexWindow(rows: StoredMetricObservation[]): StoredMetricObservation | undefined {
-	return rows
-		.filter((row) => row.source === "codex-subscription" && row.metric === "used-fraction" && typeof row.value === "number")
-		.sort((left, right) => Number(right.attributes["windowSeconds"] ?? 0) - Number(left.attributes["windowSeconds"] ?? 0) || right.observedAt - left.observedAt)[0];
+function sanitizedText(value: string): string {
+	return value.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim();
+}
+
+function normalizedIdentity(value: unknown): string {
+	return typeof value === "string" ? value.toLowerCase().replace(/[^a-z0-9]+/g, "") : "";
+}
+
+function longestWindow(rows: StoredMetricObservation[]): StoredMetricObservation | undefined {
+	return [...rows].sort((left, right) =>
+		Number(right.attributes["windowSeconds"] ?? 0) - Number(left.attributes["windowSeconds"] ?? 0)
+		|| right.observedAt - left.observedAt
+		|| right.id - left.id,
+	)[0];
+}
+
+function codexWindowForModel(rows: StoredMetricObservation[], model: string): StoredMetricObservation | undefined {
+	const codexRows = rows.filter((row) => row.source === "codex-subscription" && row.metric === "used-fraction" && typeof row.value === "number");
+	const modelIdentity = normalizedIdentity(model);
+	const matchingAdditional = codexRows.filter((row) => {
+		const limitId = normalizedIdentity(row.attributes["limitId"]);
+		const limitName = normalizedIdentity(row.attributes["limitName"]);
+		return limitId !== "codex" && limitName.length > 0 && limitName === modelIdentity;
+	});
+	if (matchingAdditional.length > 0) return longestWindow(matchingAdditional);
+	return longestWindow(codexRows.filter((row) => {
+		const limitId = normalizedIdentity(row.attributes["limitId"]);
+		return limitId === "codex" || (limitId.length === 0 && row.scope.startsWith("codex:"));
+	}));
 }
 
 function compactWindowName(seconds: number): string {
@@ -36,19 +61,32 @@ function windowName(seconds: number): string {
 export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObservation[]): ProviderBudget | null {
 	if (!status.ready || !status.currentRoute) return null;
 	if (status.currentRoute.provider === "openai-codex") {
-		const codex = longestCodexWindow(metrics);
+		const codex = codexWindowForModel(metrics, status.currentRoute.model);
 		if (!codex || typeof codex.value !== "number") return null;
+		const resetsAtSeconds = Number(codex.attributes["resetsAt"]);
 		return {
+			kind: "bounded",
 			label: compactWindowName(Number(codex.attributes["windowSeconds"] ?? 0)),
-			fraction: codex.value,
-			valueText: `${(codex.value * 100).toFixed(1)}% used`,
+			remainingFraction: 1 - codex.value,
 			observedAt: codex.observedAt,
+			...(Number.isFinite(resetsAtSeconds) && resetsAtSeconds > 0 ? { resetsAt: resetsAtSeconds * 1_000 } : {}),
 		};
 	}
 	if (status.currentRoute.provider === "openrouter") {
 		const openRouter = latest(metrics, (row) => row.source === "openrouter" && row.metric === "usage" && typeof row.value === "number");
+		const remaining = latest(metrics, (row) => row.source === "openrouter" && row.metric === "remaining-fraction" && typeof row.value === "number");
+		if (remaining && typeof remaining.value === "number" && (!openRouter || remaining.observedAt >= openRouter.observedAt)) {
+			const reset = typeof remaining.attributes["reset"] === "string" ? sanitizedText(remaining.attributes["reset"]) : undefined;
+			return {
+				kind: "bounded",
+				label: "OR",
+				remainingFraction: remaining.value,
+				observedAt: remaining.observedAt,
+				...(reset ? { resetText: `${reset} reset` } : {}),
+			};
+		}
 		if (!openRouter || typeof openRouter.value !== "number") return null;
-		return { label: "spend", fraction: null, valueText: `$${openRouter.value.toFixed(3)}`, observedAt: openRouter.observedAt };
+		return { kind: "unbounded", label: "spend", valueText: `$${openRouter.value.toFixed(3)}`, observedAt: openRouter.observedAt };
 	}
 	return null;
 }
@@ -56,7 +94,7 @@ export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObs
 export function formatFooterStatus(status: RouterStatus, metrics: StoredMetricObservation[]): string {
 	const budget = buildFooterBudget(status, metrics);
 	if (!budget) return "";
-	return budget.fraction === null ? budget.valueText : `${budget.label} ${(budget.fraction * 100).toFixed(1)}%`;
+	return budget.kind === "unbounded" ? budget.valueText : `${budget.label} ${(budget.remainingFraction * 100).toFixed(1)}% left`;
 }
 
 function nextAction(action: PolicyAction | undefined): string {
@@ -87,10 +125,10 @@ function burnLine(rows: StoredMetricObservation[], current: StoredMetricObservat
 
 export function buildStatusView(status: RouterStatus, metrics: StoredMetricObservation[], now = Date.now()): string[] {
 	const lines = [status.ready ? "Ready" : "Not ready"];
-	const codex = status.currentRoute?.provider === "openai-codex" ? longestCodexWindow(metrics) : undefined;
+	const codex = status.currentRoute?.provider === "openai-codex" ? codexWindowForModel(metrics, status.currentRoute.model) : undefined;
 	if (codex && typeof codex.value === "number") {
 		const seconds = Number(codex.attributes["windowSeconds"] ?? 0);
-		lines.push(`Codex ${windowName(seconds)}: ${(codex.value * 100).toFixed(1)}%`);
+		lines.push(`Codex ${windowName(seconds)}: ${((1 - codex.value) * 100).toFixed(1)}% left`);
 		lines.push(burnLine(metrics, codex, now));
 	}
 	const openRouter = status.currentRoute?.provider === "openrouter"

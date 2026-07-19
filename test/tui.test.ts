@@ -20,7 +20,7 @@ const metrics = [
 describe("Jittor status TUI", () => {
 	it("shows provider budgets, route, pressure, freshness, and next downgrade", () => {
 		const text = buildStatusView(status, metrics, 1_000).join("\n");
-		expect(text).toContain("Codex weekly: 42.0%");
+		expect(text).toContain("Codex weekly: 58.0% left");
 		expect(text).not.toContain("OpenRouter spend");
 		expect(text).toContain("Route: openai-codex/gpt-5.6-sol · high");
 		expect(text).toContain("Pressure: 1.100 · throttle");

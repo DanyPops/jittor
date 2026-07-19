@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { formatFooterStatus, registerJittorExtension, routesFromPi, type JittorExtensionClient } from "../extension/src/index.ts";
+import { buildFooterBudget } from "../extension/src/tui.ts";
 import type { EnforcementControl } from "../extension/src/settings.ts";
 import type { PolicyDecision } from "../src/policy.ts";
 import type { RouterStatus } from "../src/ports/router-controller.ts";
@@ -73,6 +74,14 @@ function harness(client: FakeClient, enforcement?: EnforcementControl) {
 }
 
 describe("Jittor Pi actuator", () => {
+	it("tracks Pi's public compaction lifecycle for footer animation and cleanup", () => {
+		const app = harness(new FakeClient());
+		expect(app.handlers.get("session_before_compact")).toHaveLength(1);
+		expect(app.handlers.get("session_compact")).toHaveLength(1);
+		expect(app.handlers.get("agent_settled")).toHaveLength(1);
+		expect(app.handlers.get("session_shutdown")).toHaveLength(1);
+	});
+
 	it("derives routes from Pi's current provider and authenticated model catalog without model IDs", () => {
 		const current = { provider: "provider-a", id: "current-model", reasoning: true, cost: { input: 4, output: 8 } };
 		const routes = routesFromPi([
@@ -180,23 +189,41 @@ describe("Jittor Pi actuator", () => {
 describe("Jittor footer status", () => {
 	const metrics = [
 		{ source: "codex-subscription", scope: "codex:primary", metric: "used-fraction", value: 0.2, unit: "ratio", observedAt: 1, id: 1, attributes: { windowSeconds: 18_000 } },
-		{ source: "codex-subscription", scope: "codex:secondary", metric: "used-fraction", value: 0.42, unit: "ratio", observedAt: 2, id: 2, attributes: { windowSeconds: 604_800 } },
-		{ source: "openrouter", scope: "key:default", metric: "usage", value: 12.3456, unit: "usd", observedAt: 3, id: 3, attributes: {} },
+		{ source: "codex-subscription", scope: "codex:secondary", metric: "used-fraction", value: 0.42, unit: "ratio", observedAt: 2, id: 2, attributes: { limitId: "codex", windowSeconds: 604_800, resetsAt: 1_800_000_000 } },
+		{ source: "codex-subscription", scope: "codex_bengalfox:primary", metric: "used-fraction", value: 0, unit: "ratio", observedAt: 3, id: 3, attributes: { limitId: "codex_bengalfox", limitName: "GPT-5.3-Codex-Spark", windowSeconds: 604_800, resetsAt: 1_800_100_000 } },
+		{ source: "openrouter", scope: "key:default", metric: "remaining-fraction", value: 0.4, unit: "ratio", observedAt: 5, id: 5, attributes: { limit: 100, remaining: 40, reset: "monthly" } },
+		{ source: "openrouter", scope: "key:default", metric: "usage", value: 60, unit: "usd", observedAt: 4, id: 4, attributes: {} },
 	] as any[];
 
-	it("shows only Codex usage for the current Codex model without a Jittor label", () => {
-		const text = formatFooterStatus(
-			{ ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" }, availableRoutes: [] },
-			metrics,
-		);
-		expect(text).toBe("W 42.0%");
+	it("shows the default Codex budget remaining instead of a same-duration additional model limit", () => {
+		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" }, availableRoutes: [] };
+		const budget = buildFooterBudget(routeStatus, metrics);
+		expect(budget).toMatchObject({ kind: "bounded", label: "W", resetsAt: 1_800_000_000_000 });
+		expect(budget?.kind === "bounded" ? budget.remainingFraction : null).toBeCloseTo(0.58);
+		expect(formatFooterStatus(routeStatus, metrics)).toBe("W 58.0% left");
 	});
 
-	it("shows only raw spend for the current OpenRouter model", () => {
-		const text = formatFooterStatus(
-			{ ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "medium" }, availableRoutes: [] },
+	it("selects a named additional Codex limit only for its matching model", () => {
+		const budget = buildFooterBudget(
+			{ ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openai-codex", model: "gpt-5.3-codex-spark", thinking: "high" }, availableRoutes: [] },
 			metrics,
 		);
-		expect(text).toBe("$12.346");
+		expect(budget).toMatchObject({ kind: "bounded", label: "W", remainingFraction: 1, resetsAt: 1_800_100_000_000 });
+	});
+
+	it("shows a draining remaining-budget value for an officially bounded OpenRouter key", () => {
+		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "medium" }, availableRoutes: [] };
+		expect(buildFooterBudget(routeStatus, metrics)).toMatchObject({
+			kind: "bounded", label: "OR", remainingFraction: 0.4, resetText: "monthly reset",
+		});
+		expect(formatFooterStatus(routeStatus, metrics)).toBe("OR 40.0% left");
+	});
+
+	it("keeps OpenRouter spend text-only when the key has no official limit", () => {
+		const text = formatFooterStatus(
+			{ ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "medium" }, availableRoutes: [] },
+			metrics.filter((metric) => metric.metric !== "remaining-fraction"),
+		);
+		expect(text).toBe("$60.000");
 	});
 });

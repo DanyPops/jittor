@@ -64,6 +64,36 @@ describe("experimental Codex subscription telemetry", () => {
 		expect(snapshot.metrics.map((metric) => [metric.scope, metric.metric, metric.value])).toContainEqual(["codex:primary", "used-fraction", 0.25]);
 	});
 
+	it("parses the live primary-only weekly schema without conflating a separate model limit", () => {
+		const snapshot = parseCodexUsage({
+			plan_type: "prolite",
+			rate_limit: {
+				allowed: true,
+				limit_reached: false,
+				primary_window: { used_percent: 28, limit_window_seconds: 604_800, reset_after_seconds: 508_453, reset_at: 1_800_000_000 },
+				secondary_window: null,
+			},
+			credits: { has_credits: false, unlimited: false, balance: "0" },
+			additional_rate_limits: [{
+				limit_name: "GPT-5.3-Codex-Spark",
+				metered_feature: "codex_bengalfox",
+				rate_limit: {
+					allowed: true,
+					limit_reached: false,
+					primary_window: { used_percent: 0, limit_window_seconds: 604_800, reset_after_seconds: 604_800, reset_at: 1_800_100_000 },
+					secondary_window: null,
+				},
+			}],
+			spend_control: null,
+			rate_limit_reached_type: null,
+		}, 1_700_000_000_000);
+
+		expect(snapshot.defaultLimit).toMatchObject({ limitId: "codex", primary: { usedPercent: 28 }, secondary: null });
+		expect(snapshot.additionalLimits[0]).toMatchObject({ limitId: "codex_bengalfox", limitName: "GPT-5.3-Codex-Spark", primary: { usedPercent: 0 } });
+		expect(snapshot.metrics.map((metric) => [metric.scope, metric.value])).toContainEqual(["codex:primary", 0.28]);
+		expect(snapshot.metrics.map((metric) => [metric.scope, metric.value])).toContainEqual(["codex_bengalfox:primary", 0]);
+	});
+
 	it("parses official response-header updates for default and metered limits", () => {
 		const headers = new Headers({
 			"x-codex-primary-used-percent": "30.5",

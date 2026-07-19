@@ -6,8 +6,13 @@ import {
 	FOOTER_BAR_MIN_WIDTH,
 	FOOTER_CONTEXT_ACCENT_FRACTION,
 	FOOTER_CONTEXT_ERROR_FRACTION,
+	FOOTER_COMPACTION_DRAIN_STEP_MS,
 	FOOTER_CONTEXT_WARNING_FRACTION,
 	FOOTER_WIDE_TERMINAL_WIDTH,
+	MILLISECONDS_PER_DAY,
+	MILLISECONDS_PER_HOUR,
+	MILLISECONDS_PER_MINUTE,
+	MILLISECONDS_PER_SECOND,
 	TELEMETRY_STALE_AFTER_MS,
 } from "../../src/constants.ts";
 
@@ -42,12 +47,24 @@ interface FooterContext {
 	};
 }
 
-/** A provider usage value suitable for the footer. Null fraction means no known denominator. */
-export interface ProviderBudget {
+/** A bounded quota is explicitly remaining; unbounded values never receive a fabricated bar. */
+export type ProviderBudget = {
+	kind: "bounded";
 	label: string;
-	fraction: number | null;
+	remainingFraction: number;
+	observedAt?: number;
+	resetsAt?: number;
+	resetText?: string;
+} | {
+	kind: "unbounded";
+	label: string;
 	valueText: string;
 	observedAt?: number;
+};
+
+export interface CompactionProgress {
+	startedAt: number;
+	initialFraction: number;
 }
 
 interface UsageTotals {
@@ -116,24 +133,72 @@ function fillColor(fraction: number | null): FooterColor {
 	return "dim";
 }
 
-function contextSegment(context: FooterContext, theme: FooterTheme, width: number, compact: boolean): string {
+function compactionFraction(progress: CompactionProgress, width: number, now: number): number {
+	const initialFilled = Math.round(Math.min(1, Math.max(0, progress.initialFraction)) * width);
+	const drained = Math.floor(Math.max(0, now - progress.startedAt) / FOOTER_COMPACTION_DRAIN_STEP_MS);
+	return Math.max(0, initialFilled - drained) / width;
+}
+
+function contextSegment(
+	context: FooterContext,
+	theme: FooterTheme,
+	width: number,
+	compact: boolean,
+	now: number,
+	compaction?: CompactionProgress,
+): string {
+	const w = barWidth(width);
+	if (compaction) {
+		const fraction = compactionFraction(compaction, w, now);
+		const elapsedSeconds = Math.floor(Math.max(0, now - compaction.startedAt) / MILLISECONDS_PER_SECOND);
+		return `ctx ${theme.fg("accent", progressBar(fraction, w))} compact ${elapsedSeconds}s`;
+	}
 	const usage = context.getContextUsage();
 	const window = usage?.contextWindow ?? context.model?.contextWindow ?? 0;
 	const fraction = usage?.percent === null || usage?.percent === undefined ? null : usage.percent / 100;
-	const bar = theme.fg(fillColor(fraction), progressBar(fraction, barWidth(width)));
+	const bar = theme.fg(fillColor(fraction), progressBar(fraction, w));
 	if (usage?.tokens === null || usage?.tokens === undefined) return `ctx ${bar} ?/${formatTokens(window)}`;
 	const value = compact ? `${Math.round((fraction ?? 0) * 100)}%` : `${formatTokens(usage.tokens)}/${formatTokens(window)}`;
 	return `ctx ${bar} ${value}`;
 }
 
+function minimalContextSegment(
+	context: FooterContext,
+	theme: FooterTheme,
+	width: number,
+	now: number,
+	compaction?: CompactionProgress,
+): string {
+	const w = barWidth(width);
+	if (compaction) {
+		const fraction = compactionFraction(compaction, w, now);
+		return `ctx ${theme.fg("accent", progressBar(fraction, w))}`;
+	}
+	const percent = context.getContextUsage()?.percent;
+	const fraction = percent === null || percent === undefined ? null : percent / 100;
+	return `ctx ${theme.fg(fillColor(fraction), progressBar(fraction, w))}`;
+}
+
+function resetLabel(resetsAt: number | undefined, now: number): string | undefined {
+	if (resetsAt === undefined) return undefined;
+	const remaining = resetsAt - now;
+	if (remaining <= 0) return "reset due";
+	if (remaining >= MILLISECONDS_PER_DAY) return `resets in ${Math.floor(remaining / MILLISECONDS_PER_DAY)}d`;
+	if (remaining >= MILLISECONDS_PER_HOUR) return `resets in ${Math.floor(remaining / MILLISECONDS_PER_HOUR)}h`;
+	return `resets in ${Math.max(1, Math.ceil(remaining / MILLISECONDS_PER_MINUTE))}m`;
+}
+
 function budgetSegment(budget: ProviderBudget | null, theme: FooterTheme, width: number, compact: boolean, now: number): string {
 	const w = barWidth(width);
 	if (!budget) return `budget ${theme.fg("dim", progressBar(null, w))} ?`;
-	if (budget.fraction === null) return `${budget.label} ${budget.valueText}`;
-	const bar = theme.fg(fillColor(budget.fraction), progressBar(budget.fraction, w));
-	const value = compact ? `${Math.round(budget.fraction * 100)}%` : budget.valueText;
 	const stale = budget.observedAt !== undefined && now - budget.observedAt > TELEMETRY_STALE_AFTER_MS;
-	return `${budget.label} ${bar} ${value}${stale ? ` ${theme.fg("warning", "stale")}` : ""}`;
+	const staleText = stale ? ` ${theme.fg("warning", "stale")}` : "";
+	if (budget.kind === "unbounded") return `${budget.label} ${budget.valueText}${staleText}`;
+	const remaining = Math.min(1, Math.max(0, budget.remainingFraction));
+	const bar = theme.fg(fillColor(1 - remaining), progressBar(remaining, w));
+	const value = `${(compact ? Math.round(remaining * 100) : (remaining * 100).toFixed(1))}% left`;
+	const reset = compact ? undefined : resetLabel(budget.resetsAt, now) ?? budget.resetText;
+	return `${budget.label} ${bar} ${value}${reset ? ` · ${reset}` : ""}${staleText}`;
 }
 
 function usageSegment(context: FooterContext): string {
@@ -187,14 +252,16 @@ export function renderFooterLines(
 	thinkingLevel: string,
 	width: number,
 	now = Date.now(),
+	compaction?: CompactionProgress,
 ): string[] {
 	const safeWidth = Math.max(1, width);
 	const repository = repositorySegment(context, footerData, theme);
 	const model = modelSegments(context, footerData, theme, thinkingLevel);
 	const usage = usageSegment(context);
 	const compactUsage = compactUsageSegment(context);
-	const fullContext = contextSegment(context, theme, safeWidth, false);
-	const compactContext = contextSegment(context, theme, safeWidth, true);
+	const fullContext = contextSegment(context, theme, safeWidth, false, now, compaction);
+	const compactContext = contextSegment(context, theme, safeWidth, true, now, compaction);
+	const minimalContext = minimalContextSegment(context, theme, safeWidth, now, compaction);
 	const fullBudget = budgetSegment(providerBudget, theme, safeWidth, false, now);
 	const compactBudget = budgetSegment(providerBudget, theme, safeWidth, true, now);
 	const statuses = [...footerData.getExtensionStatuses().entries()]
@@ -211,6 +278,7 @@ export function renderFooterLines(
 		joinSegments([model.full, compactUsage, compactContext, compactBudget]),
 		joinSegments([model.compact, compactUsage, compactContext, compactBudget]),
 		joinSegments([model.compact, compactContext, compactBudget]),
+		joinSegments([model.compact, minimalContext, compactBudget]),
 	];
 	const line = candidates.find((candidate) => visibleWidth(candidate) <= safeWidth) ?? candidates.at(-1) ?? "";
 	return [truncateToWidth(line, safeWidth, "")];
@@ -218,6 +286,7 @@ export function renderFooterLines(
 
 export interface IntegratedFooterState {
 	providerBudget: ProviderBudget | null;
+	compaction?: CompactionProgress;
 	requestRender?: () => void;
 }
 
@@ -229,7 +298,7 @@ export function installIntegratedFooter(ctx: ExtensionContext, state: Integrated
 		return {
 			invalidate() {},
 			render(width: number): string[] {
-				return renderFooterLines(ctx as unknown as FooterContext, footerData, theme, state.providerBudget, getThinkingLevel(), width);
+				return renderFooterLines(ctx as unknown as FooterContext, footerData, theme, state.providerBudget, getThinkingLevel(), width, Date.now(), state.compaction);
 			},
 			dispose() {
 				unsubscribe?.();

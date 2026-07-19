@@ -35,14 +35,24 @@ describe("usage histogram projection", () => {
 });
 
 describe("usage histogram TUI", () => {
-	it("registers the native /usage command", () => {
+	it("exposes usage only through the single /jittor command", async () => {
 		const commands = new Map<string, unknown>();
+		const calls: string[] = [];
 		const pi = {
 			registerCommand(name: string, command: unknown) { commands.set(name, command); },
 			on() {},
 		} as unknown as ExtensionAPI;
-		registerJittorExtension(pi, { call: async () => ({}) });
-		expect(commands.has("usage")).toBe(true);
+		registerJittorExtension(pi, { async call(operation: string) { calls.push(operation); return observations; } });
+		expect([...commands.keys()]).toEqual(["jittor"]);
+
+		const notifications: string[] = [];
+		const command = commands.get("jittor") as { handler(args: string, ctx: ExtensionCommandContext): Promise<void> };
+		await command.handler("usage", {
+			mode: "print",
+			ui: { notify(message: string) { notifications.push(message); } },
+		} as unknown as ExtensionCommandContext);
+		expect(calls).toEqual(["metrics.query"]);
+		expect(notifications.join("\n")).toContain("Tokens over time");
 	});
 
 	it("renders a width-bounded colored block histogram with X/Y axes and a legend", () => {
