@@ -1,4 +1,4 @@
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 export const SQLITE_SCHEMA_VERSION = 1;
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 export const DEFAULT_QUERY_LIMIT = 1_000;

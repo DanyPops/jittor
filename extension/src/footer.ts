@@ -150,39 +150,33 @@ function usageSegment(context: FooterContext): string {
 	return parts.join(" ");
 }
 
-function identityLines(context: FooterContext, footerData: FooterData, theme: FooterTheme, thinkingLevel: string, width: number): string[] {
+function repositorySegment(context: FooterContext, footerData: FooterData, theme: FooterTheme): string {
 	let cwd = footerCwd(context.sessionManager.getCwd(), process.env.HOME ?? process.env.USERPROFILE);
 	const branch = footerData.getGitBranch();
 	if (branch) cwd += ` (${branch})`;
 	const sessionName = context.sessionManager.getSessionName();
 	if (sessionName) cwd += ` · ${sessionName}`;
-	const repo = `${theme.bold("Repo")} ${theme.fg("dim", cwd)}`;
-
-	const model = context.model;
-	const provider = model && footerData.getAvailableProviderCount() > 1 ? `(${model.provider}) ` : "";
-	const thinking = model?.reasoning ? ` · ${thinkingLevel === "off" ? "thinking off" : thinkingLevel}` : "";
-	const ai = `${theme.bold("AI")} ${provider}${model?.id ?? "no-model"}${thinking}`;
-	const gap = width - visibleWidth(repo) - visibleWidth(ai);
-	if (gap >= 2) return [`${repo}${" ".repeat(gap)}${ai}`];
-	return [truncateToWidth(repo, width, "…"), truncateToWidth(ai, width, "…")];
+	return theme.fg("dim", cwd);
 }
 
-function statusLines(context: FooterContext, budget: ProviderBudget | null, theme: FooterTheme, width: number, now: number): string[] {
-	const usage = usageSegment(context);
-	const fullContext = contextSegment(context, theme, width, false);
-	const fullBudget = budgetSegment(budget, theme, width, false, now);
-	const fullParts = [usage, fullContext, fullBudget].filter(Boolean);
-	const full = `${theme.bold("LLM")} ${fullParts.join(" · ")}`;
-	if (visibleWidth(full) <= width) return [full];
+function modelSegments(context: FooterContext, footerData: FooterData, theme: FooterTheme, thinkingLevel: string): { full: string; compact: string } {
+	const model = context.model;
+	const modelName = theme.bold(model?.id ?? "no-model");
+	const provider = model && footerData.getAvailableProviderCount() > 1 ? `(${model.provider}) ` : "";
+	const thinking = model?.reasoning ? ` · ${thinkingLevel === "off" ? "thinking off" : thinkingLevel}` : "";
+	return { full: `${provider}${modelName}${thinking}`, compact: modelName };
+}
 
-	const compactContext = contextSegment(context, theme, width, true);
-	const compactBudget = budgetSegment(budget, theme, width, true, now);
-	const compact = `${theme.bold("LLM")} ${compactContext} · ${compactBudget}`;
-	if (visibleWidth(compact) <= width) return [compact];
-	return [
-		truncateToWidth(`${theme.bold("LLM")} ${compactContext}`, width, ""),
-		truncateToWidth(`${theme.bold("LLM")} ${compactBudget}`, width, ""),
-	];
+function compactUsageSegment(context: FooterContext): string {
+	const totals = usageTotals(context);
+	const parts: string[] = [];
+	if (totals.input) parts.push(`↑${formatTokens(totals.input)}`);
+	if (totals.output) parts.push(`↓${formatTokens(totals.output)}`);
+	return parts.join(" ");
+}
+
+function joinSegments(segments: Array<string | undefined>): string {
+	return segments.filter((segment): segment is string => Boolean(segment)).join(" · ");
 }
 
 export function renderFooterLines(
@@ -195,16 +189,31 @@ export function renderFooterLines(
 	now = Date.now(),
 ): string[] {
 	const safeWidth = Math.max(1, width);
-	const lines = [
-		...identityLines(context, footerData, theme, thinkingLevel, safeWidth),
-		...statusLines(context, providerBudget, theme, safeWidth, now),
-	];
+	const repository = repositorySegment(context, footerData, theme);
+	const model = modelSegments(context, footerData, theme, thinkingLevel);
+	const usage = usageSegment(context);
+	const compactUsage = compactUsageSegment(context);
+	const fullContext = contextSegment(context, theme, safeWidth, false);
+	const compactContext = contextSegment(context, theme, safeWidth, true);
+	const fullBudget = budgetSegment(providerBudget, theme, safeWidth, false, now);
+	const compactBudget = budgetSegment(providerBudget, theme, safeWidth, true, now);
 	const statuses = [...footerData.getExtensionStatuses().entries()]
 		.filter(([key]) => key !== "jittor")
 		.sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-		.map(([, text]) => sanitize(text));
-	if (statuses.length > 0) lines.push(truncateToWidth(statuses.join(" "), safeWidth, theme.fg("dim", "…")));
-	return lines.map((line) => truncateToWidth(line, safeWidth, ""));
+		.map(([, text]) => sanitize(text))
+		.join(" ");
+
+	const candidates = [
+		joinSegments([repository, model.full, usage, fullContext, fullBudget, statuses]),
+		joinSegments([repository, model.full, usage, fullContext, fullBudget]),
+		joinSegments([model.full, usage, compactContext, compactBudget, statuses]),
+		joinSegments([model.full, usage, compactContext, compactBudget]),
+		joinSegments([model.full, compactUsage, compactContext, compactBudget]),
+		joinSegments([model.compact, compactUsage, compactContext, compactBudget]),
+		joinSegments([model.compact, compactContext, compactBudget]),
+	];
+	const line = candidates.find((candidate) => visibleWidth(candidate) <= safeWidth) ?? candidates.at(-1) ?? "";
+	return [truncateToWidth(line, safeWidth, "")];
 }
 
 export interface IntegratedFooterState {
