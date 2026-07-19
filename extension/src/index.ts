@@ -5,6 +5,7 @@ import type { RouterStatus } from "../../src/ports/router-controller.ts";
 import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
 import { callJittor } from "./service-client.ts";
 import { formatFooterStatus, showJittorPanel } from "./tui.ts";
+import { showUsagePanel } from "./usage.ts";
 
 export { formatFooterStatus } from "./tui.ts";
 
@@ -110,6 +111,10 @@ export function registerJittorExtension(pi: ExtensionAPI, client: JittorExtensio
 	pi.registerCommand("jittor", {
 		description: "Inspect provider budgets and control Jittor routing",
 		handler: async (_args, ctx) => { await showJittorPanel(ctx, client); },
+	});
+	pi.registerCommand("usage", {
+		description: "Show Jittor token usage over time",
+		handler: async (_args, ctx) => { await showUsagePanel(ctx, client); },
 	});
 
 	pi.on("session_start", async (_event, ctx) => {

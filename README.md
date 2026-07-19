@@ -37,7 +37,9 @@ Provider adapters currently include official OpenRouter key/usage/model telemetr
 
 The native Pi extension preflights input and every provider turn, applies model/thinking decisions, records response headers and finalized usage through the daemon, and blocks requests when required telemetry is unsafe. Its footer status shows the longest Codex window percentage, raw OpenRouter spend, and current policy action. Run `/jittor` for detailed burn pressure, freshness, route state, and confirmed pause/resume/override controls.
 
-See [`docs/CALIBRATION.md`](docs/CALIBRATION.md) for thresholds, live dogfood results, scenario coverage, and safe rollback ordering.
+Run `/usage` for a colored Unicode token histogram with X/Y axes, provider/model series, input/output/cache totals, refresh, and `24h`, `7d`, `30d`, or `90d` ranges. Left/Right changes range and `r` refreshes. Usage is persisted by the daemon from finalized Pi assistant messages.
+
+See [`docs/CALIBRATION.md`](docs/CALIBRATION.md) for thresholds and rollback, and [`docs/USAGE_PRIOR_ART.md`](docs/USAGE_PRIOR_ART.md) for the chart design research.
 
 ```bash
 bun test
