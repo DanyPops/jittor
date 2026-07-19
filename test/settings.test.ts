@@ -11,8 +11,14 @@ describe("Jittor extension enforcement settings", () => {
 			const env = { HOME: root, XDG_CONFIG_HOME: join(root, "config") };
 			const first = persistentEnforcementControl(env);
 			expect(first.isEnabled()).toBe(true);
+			expect(first.isFooterEnabled()).toBe(true);
 			first.setEnabled(false);
+			expect(first.isFooterEnabled()).toBe(true);
+			first.setFooterEnabled(false);
 			const second = persistentEnforcementControl(env);
+			expect(second.isEnabled()).toBe(false);
+			expect(second.isFooterEnabled()).toBe(false);
+			second.setFooterEnabled(true);
 			expect(second.isEnabled()).toBe(false);
 			expect(statSync(join(root, "config", "jittor", "extension.json")).mode & 0o777).toBe(0o600);
 		} finally {

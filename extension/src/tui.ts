@@ -3,6 +3,7 @@ import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { StoredMetricObservation } from "../../src/domain/metric.ts";
 import type { PolicyAction, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
+import type { ProviderBudget } from "./footer.ts";
 
 export interface JittorPanelClient {
 	call(operation: string, input: unknown): Promise<any>;
@@ -32,19 +33,30 @@ function windowName(seconds: number): string {
 	return `${Math.round(seconds / 60)}m`;
 }
 
-export function formatFooterStatus(status: RouterStatus, metrics: StoredMetricObservation[]): string {
-	if (!status.ready || !status.currentRoute) return "";
+export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObservation[]): ProviderBudget | null {
+	if (!status.ready || !status.currentRoute) return null;
 	if (status.currentRoute.provider === "openai-codex") {
 		const codex = longestCodexWindow(metrics);
-		return codex && typeof codex.value === "number"
-			? `${compactWindowName(Number(codex.attributes["windowSeconds"] ?? 0))} ${(codex.value * 100).toFixed(1)}%`
-			: "";
+		if (!codex || typeof codex.value !== "number") return null;
+		return {
+			label: compactWindowName(Number(codex.attributes["windowSeconds"] ?? 0)),
+			fraction: codex.value,
+			valueText: `${(codex.value * 100).toFixed(1)}% used`,
+			observedAt: codex.observedAt,
+		};
 	}
 	if (status.currentRoute.provider === "openrouter") {
 		const openRouter = latest(metrics, (row) => row.source === "openrouter" && row.metric === "usage" && typeof row.value === "number");
-		return openRouter && typeof openRouter.value === "number" ? `$${openRouter.value.toFixed(3)}` : "";
+		if (!openRouter || typeof openRouter.value !== "number") return null;
+		return { label: "spend", fraction: null, valueText: `$${openRouter.value.toFixed(3)}`, observedAt: openRouter.observedAt };
 	}
-	return "";
+	return null;
+}
+
+export function formatFooterStatus(status: RouterStatus, metrics: StoredMetricObservation[]): string {
+	const budget = buildFooterBudget(status, metrics);
+	if (!budget) return "";
+	return budget.fraction === null ? budget.valueText : `${budget.label} ${(budget.fraction * 100).toFixed(1)}%`;
 }
 
 function nextAction(action: PolicyAction | undefined): string {
