@@ -12,3 +12,6 @@ export const DATABASE_FILENAME = "jittor.db";
 export const TOKEN_FILENAME = "auth-token";
 export const HANDLE_FILENAME = "daemon.json";
 export const SYSTEMD_UNIT_NAME = "jittor.service";
+export const USAGE_CHART_HEIGHT = 8;
+export const USAGE_Y_AXIS_WIDTH = 7;
+export const USAGE_TOKEN_QUERY_LIMIT = 10_000;
