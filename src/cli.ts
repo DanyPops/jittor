@@ -47,7 +47,8 @@ function installService(): void {
 		...(existsSync(codexAuthFile) ? { codexAuthFile } : {}),
 	}));
 	systemctl("daemon-reload");
-	systemctl("enable", "--now", SYSTEMD_UNIT_NAME);
+	systemctl("enable", SYSTEMD_UNIT_NAME);
+	systemctl("restart", SYSTEMD_UNIT_NAME);
 }
 
 function usage(): never {
