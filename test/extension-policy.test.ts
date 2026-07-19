@@ -19,6 +19,14 @@ class FakeClient implements JittorExtensionClient {
 	async call(operation: string, input: unknown): Promise<any> {
 		this.calls.push({ operation, input });
 		if (operation === "router.decide") return this.decisionQueue.shift() ?? this.decision;
+		if (operation === "router.current_route") {
+			this.status = { ...this.status, currentRoute: input as RouterStatus["currentRoute"] };
+			return this.status;
+		}
+		if (operation === "router.available_routes") {
+			this.status = { ...this.status, availableRoutes: (input as { routes: RouterStatus["availableRoutes"] }).routes };
+			return this.status;
+		}
 		if (operation === "router.status") return this.status;
 		if (operation === "metrics.query") return this.metrics;
 		if (operation === "metrics.record") return { id: this.calls.length, ...(input as object) };
@@ -141,6 +149,24 @@ describe("Jittor Pi actuator", () => {
 		await app.commands.get("jittor").handler("footer on", app.ctx);
 		expect(app.footers.at(-1)).toBeTypeOf("function");
 		expect(enabled).toBe(false);
+	});
+
+	it("resynchronizes the route and footer after a daemon restart while monitor-only", async () => {
+		const client = new FakeClient();
+		const enforcement: EnforcementControl = {
+			isEnabled: () => false,
+			setEnabled() {},
+			isFooterEnabled: () => true,
+			setFooterEnabled() {},
+		};
+		const app = harness(client, enforcement);
+
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+
+		expect(client.calls.some((call) => call.operation === "router.current_route")).toBe(true);
+		expect(client.calls.some((call) => call.operation === "router.available_routes")).toBe(true);
+		expect(client.calls.some((call) => call.operation === "router.status")).toBe(true);
+		expect(client.calls.some((call) => call.operation === "metrics.query")).toBe(true);
 	});
 
 	it("applies model and thinking decisions before a turn", async () => {
