@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { renderFooterLines, type ProviderBudget } from "../extension/src/footer.ts";
 
@@ -14,7 +16,7 @@ function context(percent: number | null = 12.5, tokens: number | null = 25_000) 
 		modelRegistry: { isUsingOAuth: () => true },
 		getContextUsage: () => ({ tokens, percent, contextWindow: 200_000 }),
 		sessionManager: {
-			getCwd: () => "/home/dpopsuev/Projects/jittor",
+			getCwd: () => join(homedir(), "Projects", "jittor"),
 			getSessionName: () => undefined,
 			getEntries: () => [{ type: "message", message: { role: "assistant", usage: {
 				input: 10_000, output: 2_000, cacheRead: 8_000, cacheWrite: 0, cost: { total: 0 },
