@@ -31,18 +31,18 @@ const footerData = {
 	getExtensionStatuses: () => new Map([["tasks", "Tasks · 1 active"]]),
 };
 
-const weekly: ProviderBudget = { label: "weekly", fraction: 0.42, valueText: "42.0% used", observedAt: 1_000 };
+const weekly: ProviderBudget = { label: "W", fraction: 0.42, valueText: "42.0% used", observedAt: 1_000 };
 
 describe("Jittor Alef-style integrated footer", () => {
-	it("groups repository, model, context, bounded budget, and built-in usage information", () => {
-		const lines = renderFooterLines(context(), footerData, theme, weekly, "high", 120, 2_000);
-		expect(lines[0]).toContain("Repo ~/Projects/jittor (main)");
-		expect(lines[0]).toContain("AI (openai-codex) gpt-5.6-sol · high");
-		expect(lines[1]).toContain("LLM ↑10k ↓2.0k R8.0k");
-		expect(lines[1]).toMatch(/ctx [█░]+ 25k\/200k/);
-		expect(lines[1]).toMatch(/weekly [█░]+ 42.0% used/);
-		expect(lines.join("\n")).not.toContain("Jittor");
-		expect(lines[2]).toBe("Tasks · 1 active");
+	it("renders repository, model, token usage, context, budget, and statuses on one unlabeled line", () => {
+		const lines = renderFooterLines(context(), footerData, theme, weekly, "high", 180, 2_000);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("~/Projects/jittor (main)");
+		expect(lines[0]).toMatch(/\(openai-codex\) gpt-5\.6-sol · high · ↑10k ↓2\.0k R8\.0k/);
+		expect(lines[0]).toMatch(/ctx [█░]+ 25k\/200k/);
+		expect(lines[0]).toMatch(/W [█░]+ 42.0% used/);
+		expect(lines[0]).toContain("Tasks · 1 active");
+		expect(lines[0]).not.toMatch(/\b(?:Repo|AI|LLM|Jittor)\b/);
 	});
 
 	it("uses warning and error colors at semantic fill thresholds", () => {
@@ -53,24 +53,26 @@ describe("Jittor Alef-style integrated footer", () => {
 	});
 
 	it("renders explicit unknown context and budget states", () => {
-		const lines = renderFooterLines(context(null, null), footerData, theme, null, "high", 100, 2_000);
-		expect(lines[1]).toMatch(/ctx [░]+ \?\/200k/);
-		expect(lines[1]).toMatch(/budget [░]+ \?/);
+		const lines = renderFooterLines(context(null, null), footerData, theme, null, "high", 140, 2_000);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatch(/ctx [░]+ \?\/200k/);
+		expect(lines[0]).toMatch(/budget [░]+ \?/);
 	});
 
 	it("marks stale provider telemetry and does not invent a bar for unbounded spend", () => {
-		const stale = renderFooterLines(context(), footerData, theme, weekly, "high", 120, 200_000);
-		expect(stale[1]).toContain("stale");
-		const spend = renderFooterLines(context(), footerData, theme, { label: "spend", fraction: null, valueText: "$12.346", observedAt: 1_000 }, "high", 120, 2_000);
-		expect(spend[1]).toContain("spend $12.346");
-		expect(spend[1]).not.toMatch(/spend [█░]+/);
+		const stale = renderFooterLines(context(), footerData, theme, weekly, "high", 140, 200_000);
+		expect(stale[0]).toContain("stale");
+		const spend = renderFooterLines(context(), footerData, theme, { label: "spend", fraction: null, valueText: "$12.346", observedAt: 1_000 }, "high", 140, 2_000);
+		expect(spend[0]).toContain("spend $12.346");
+		expect(spend[0]).not.toMatch(/spend [█░]+/);
 	});
 
 	it("keeps every responsive line within narrow terminal width", () => {
 		const lines = renderFooterLines(context(), footerData, theme, weekly, "high", 42, 2_000);
-		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(42);
-		expect(lines.join("\n")).toContain("gpt-5.6-sol");
-		expect(lines.join("\n")).toContain("ctx");
-		expect(lines.join("\n")).toContain("weekly");
+		expect(lines).toHaveLength(1);
+		expect(visibleWidth(lines[0]!)).toBeLessThanOrEqual(42);
+		expect(lines[0]).toContain("gpt-5.6-sol");
+		expect(lines[0]).toContain("ctx");
+		expect(lines[0]).toContain("W");
 	});
 });
