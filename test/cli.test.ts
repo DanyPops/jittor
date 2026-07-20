@@ -9,6 +9,10 @@ const summary: ContextAssessment = {
 };
 
 describe("Jittor CLI context telemetry parity", () => {
+	it("publishes the jittor executable", async () => {
+		const manifest = await Bun.file(new URL("../package.json", import.meta.url)).json() as { bin?: Record<string, string> };
+		expect(manifest.bin?.jittor).toBe("src/cli.ts");
+	});
 	it("exposes stable bounded JSON through the authenticated typed client", async () => {
 		const output: string[] = [];
 		const calls: Array<{ operation: string; input: unknown }> = [];
