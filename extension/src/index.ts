@@ -9,8 +9,11 @@ import {
 	MAX_DYNAMIC_ROUTES,
 	MILLISECONDS_PER_MINUTE,
 	MILLISECONDS_PER_SECOND,
+	PAPYRUS_CONTEXT_INJECTION_CHANNEL,
+	CONTEXT_EVENT_DEDUP_LIMIT,
 } from "../../src/constants.ts";
 import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureKind, type CodexFailureMetadata } from "../../src/domain/codex-recovery.ts";
+import { CompactionTelemetry, papyrusContextMetric, validatePapyrusContextInjection } from "../../src/domain/context-telemetry.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
 import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
@@ -227,6 +230,21 @@ export function registerJittorExtension(
 ): void {
 	const footerState: IntegratedFooterState = { providerBudget: null };
 	const usageBudgets = usageBudgetControl(enforcement);
+	let compactionTelemetry = new CompactionTelemetry();
+	const contextObservations = new Set<string>();
+	const stopPapyrusContext = pi.events?.on?.(PAPYRUS_CONTEXT_INJECTION_CHANNEL, (payload) => {
+		try {
+			const observation = validatePapyrusContextInjection(payload);
+			const observationKey = `${observation.producerId}:${observation.sequence}`;
+			if (contextObservations.has(observationKey)) return;
+			contextObservations.add(observationKey);
+			if (contextObservations.size > CONTEXT_EVENT_DEDUP_LIMIT) contextObservations.delete(contextObservations.values().next().value!);
+			compactionTelemetry.observeInjection(observation.injected.characters, observation.estimatedTokens);
+			void recordMetrics(client, [papyrusContextMetric(observation)]).catch(() => undefined);
+		} catch {
+			// Reject malformed or stale cross-extension observations without retaining payloads.
+		}
+	});
 	const recoveryPolicy = new CodexRecoveryPolicy({
 		baseDelayMs: CODEX_RECOVERY_BASE_DELAY_MS,
 		maxDelayMs: CODEX_RECOVERY_MAX_DELAY_MS,
@@ -287,22 +305,22 @@ export function registerJittorExtension(
 		}, plan.delayMs);
 	};
 	let compactionTimer: ReturnType<typeof setInterval> | undefined;
-	const finishCompaction = (): void => {
+	const finishCompactionUi = (): void => {
 		if (compactionTimer) clearInterval(compactionTimer);
 		compactionTimer = undefined;
 		footerState.compaction = undefined;
 		footerState.requestRender?.();
 	};
-	const beginCompaction = (ctx: ExtensionContext, signal: AbortSignal): void => {
-		finishCompaction();
+	const beginCompactionUi = (ctx: ExtensionContext, signal: AbortSignal): void => {
+		finishCompactionUi();
 		const usage = ctx.getContextUsage();
 		footerState.compaction = {
 			startedAt: Date.now(),
 			initialFraction: usage?.percent === null || usage?.percent === undefined ? 1 : usage.percent / 100,
 		};
 		compactionTimer = setInterval(() => footerState.requestRender?.(), FOOTER_COMPACTION_RENDER_INTERVAL_MS);
-		signal.addEventListener("abort", finishCompaction, { once: true });
-		if (signal.aborted) finishCompaction();
+		signal.addEventListener("abort", finishCompactionUi, { once: true });
+		if (signal.aborted) finishCompactionUi();
 		else footerState.requestRender?.();
 	};
 	const showFooter = (ctx: ExtensionContext): void => {
@@ -373,6 +391,18 @@ export function registerJittorExtension(
 				ctx.ui.notify("Jittor informational footer enabled; routing enforcement is unchanged.", "info");
 				return;
 			}
+			if (action === "context") {
+				const summary = await client.call("context.assess", {}) as import("../../src/domain/context-telemetry.ts").ContextAssessment;
+				const average = summary.injection.averageCharacters === null ? "unknown" : Math.round(summary.injection.averageCharacters).toLocaleString();
+				const p95 = summary.injection.p95Characters === null ? "unknown" : Math.round(summary.injection.p95Characters).toLocaleString();
+				ctx.ui.notify([
+					`Papyrus injection: ${summary.injection.runs} runs · avg ${average} chars · p95 ${p95} chars · unchanged ${summary.injection.unchangedRate === null ? "unknown" : `${(summary.injection.unchangedRate * 100).toFixed(1)}%`}`,
+					`Mix: rules ${summary.injection.ruleCharacters.toLocaleString()} chars · tasks ${summary.injection.taskCharacters.toLocaleString()} chars · estimated ${summary.injection.estimatedTokens.toLocaleString()} tokens`,
+					`Compactions: ${summary.compaction.completed} completed · ${summary.compaction.aborted} aborted · ${summary.compaction.perRun === null ? "unknown" : summary.compaction.perRun.toFixed(3)} per agent run · ${summary.compaction.perTurn === null ? "unknown" : summary.compaction.perTurn.toFixed(3)} per turn`,
+					`Completeness: ${summary.completeness}`,
+				].join("\n"), "info");
+				return;
+			}
 			if (action === "settings") {
 				await showSettingsPanel(ctx, enforcement, codexRecovery, usageBudgets, {
 					setEnforcement: async (enabled) => enabled ? enable(ctx) : disable(ctx),
@@ -427,7 +457,8 @@ export function registerJittorExtension(
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		finishCompaction();
+		finishCompactionUi();
+		compactionTelemetry = new CompactionTelemetry();
 		cancelRecovery(true);
 		lastCodexResponse = {};
 		ctx.ui.setStatus("jittor", undefined);
@@ -443,16 +474,28 @@ export function registerJittorExtension(
 		}
 	});
 
-	pi.on("session_before_compact", (event, ctx) => {
-		beginCompaction(ctx, event.signal);
+	pi.on("session_before_compact", async (event, ctx) => {
+		beginCompactionUi(ctx, event.signal);
+		const usage = ctx.getContextUsage();
+		const metric = compactionTelemetry.begin({
+			reason: event.reason,
+			willRetry: event.willRetry,
+			...(usage?.percent === null || usage?.percent === undefined ? {} : { contextPercent: usage.percent }),
+			...(usage?.tokens === null || usage?.tokens === undefined ? {} : { contextTokens: usage.tokens }),
+		});
+		await recordMetrics(client, [metric]).catch(() => undefined);
 	});
 
-	pi.on("session_compact", () => {
-		finishCompaction();
+	pi.on("session_compact", async (event) => {
+		finishCompactionUi();
+		await recordMetrics(client, [compactionTelemetry.complete({ reason: event.reason, willRetry: event.willRetry })]).catch(() => undefined);
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
-		if (footerState.compaction) finishCompaction();
+		if (footerState.compaction) {
+			finishCompactionUi();
+			if (compactionTelemetry.hasOpenCompaction()) await recordMetrics(client, [compactionTelemetry.abort(Date.now(), "agent-settled-without-completion")]).catch(() => undefined);
+		}
 		scheduleCodexRecovery(ctx);
 		if (!enforcement.isFooterEnabled()) return;
 		try {
@@ -491,6 +534,7 @@ export function registerJittorExtension(
 	});
 
 	pi.on("turn_start", async (_event, ctx) => {
+		compactionTelemetry.observeTurn();
 		lastCodexResponse = {};
 		if (!enforcement.isEnabled()) return;
 		try {
@@ -529,12 +573,18 @@ export function registerJittorExtension(
 			lastCodexResponse = {};
 		}
 		const metrics = assistantUsageMetrics(event.message, Date.now());
-		if (metrics.length > 0) await recordMetrics(client, metrics).catch(() => undefined);
+		if (metrics.length > 0) {
+			const amount = (name: string): number => metrics.filter((metric) => metric.metric === name && typeof metric.value === "number").reduce((sum, metric) => sum + (metric.value ?? 0), 0);
+			compactionTelemetry.observeProviderUsage({ input: amount("input-tokens"), output: amount("output-tokens"), cacheRead: amount("cache-read-tokens"), cacheWrite: amount("cache-write-tokens") });
+			await recordMetrics(client, metrics).catch(() => undefined);
+		}
 		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
-		finishCompaction();
+		finishCompactionUi();
+		if (compactionTelemetry.hasOpenCompaction()) await recordMetrics(client, [compactionTelemetry.abort(Date.now(), "session-shutdown")]).catch(() => undefined);
+		stopPapyrusContext?.();
 		cancelRecovery(true);
 		lastCodexResponse = {};
 		ctx.ui.setStatus("jittor", undefined);

@@ -1,6 +1,7 @@
-import { SERVICE_MAX_BODY_BYTES } from "./constants.ts";
+import { CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES } from "./constants.ts";
 import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
+import { assessContextTelemetry, type ContextAssessment } from "./domain/context-telemetry.ts";
 import type { MetricStore } from "./ports/metric-store.ts";
 import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
 import type { PolicyDecision, Route } from "./policy.ts";
@@ -9,6 +10,7 @@ export const EXPECTED_OPERATION_NAMES = [
 	"metrics.record",
 	"metrics.query",
 	"metrics.prune",
+	"context.assess",
 	"service.checkpoint",
 	"telemetry.poll",
 	"router.status",
@@ -26,6 +28,7 @@ export interface OperationInputs {
 	"metrics.record": MetricObservation;
 	"metrics.query": MetricQuery;
 	"metrics.prune": { before: number };
+	"context.assess": { since?: number; until?: number };
 	"service.checkpoint": Record<string, never>;
 	"telemetry.poll": Record<string, never>;
 	"router.status": Record<string, never>;
@@ -41,6 +44,7 @@ export interface OperationOutputs {
 	"metrics.record": StoredMetricObservation;
 	"metrics.query": StoredMetricObservation[];
 	"metrics.prune": { deleted: number };
+	"context.assess": ContextAssessment;
 	"service.checkpoint": { ok: true };
 	"telemetry.poll": TelemetryPollResult;
 	"router.status": RouterStatus;
@@ -88,6 +92,19 @@ export class JittorService {
 				const before = input["before"];
 				if (typeof before !== "number") throw new Error("before is required");
 				return { deleted: this.metrics.pruneBefore(before) };
+			}
+			case "context.assess": {
+				const until = input["until"] === undefined ? Date.now() : input["until"];
+				const since = input["since"] === undefined && typeof until === "number" ? Math.max(0, until - CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS) : input["since"];
+				if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || (since as number) < 0 || (until as number) < (since as number)) throw new Error("context assessment requires non-negative ordered integer bounds");
+				const query = { since: since as number, until: until as number, order: "asc" as const, limit: CONTEXT_ASSESSMENT_QUERY_LIMIT };
+				const injections = this.metrics.query({ ...query, source: "papyrus-context", metric: "injected-characters" });
+				const compactions = this.metrics.query({ ...query, source: "pi-context" });
+				return assessContextTelemetry(injections, compactions, {
+					since: since as number,
+					until: until as number,
+					truncated: injections.length >= CONTEXT_ASSESSMENT_QUERY_LIMIT || compactions.length >= CONTEXT_ASSESSMENT_QUERY_LIMIT,
+				});
 			}
 			case "service.checkpoint": this.metrics.checkpoint(); return { ok: true };
 			case "telemetry.poll": return this.router.poll();

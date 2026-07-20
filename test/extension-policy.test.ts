@@ -71,6 +71,7 @@ function harness(
 		setFooterEnabled(value: boolean) { footerEnabled = value; },
 	};
 	const handlers = new Map<string, Function[]>();
+	const sharedEvents = new Map<string, Set<(payload: unknown) => void>>();
 	const commands = new Map<string, any>();
 	const modelChanges: unknown[] = [];
 	const thinkingChanges: string[] = [];
@@ -80,6 +81,15 @@ function harness(
 		async setModel(model: unknown) { modelChanges.push(model); return true; },
 		setThinkingLevel(level: string) { thinkingChanges.push(level); },
 		getThinkingLevel() { return "high"; },
+		events: {
+			on(channel: string, handler: (payload: unknown) => void) {
+				const listeners = sharedEvents.get(channel) ?? new Set();
+				listeners.add(handler);
+				sharedEvents.set(channel, listeners);
+				return () => listeners.delete(handler);
+			},
+			emit(channel: string, payload: unknown) { for (const handler of sharedEvents.get(channel) ?? []) handler(payload); },
+		},
 	} as unknown as ExtensionAPI;
 	const sentMessages: Array<{ message: unknown; options: unknown }> = [];
 	let recoveryEnabled = recovery.enabled;
@@ -109,6 +119,7 @@ function harness(
 		abort() { aborted = true; },
 		isIdle() { return idle; },
 		hasPendingMessages() { return pendingMessages; },
+		getContextUsage() { return { tokens: 190_000, contextWindow: 200_000, percent: 95 }; },
 		ui: {
 			setStatus(_key: string, value: string | undefined) { statuses.push(value); },
 			setFooter(footer: unknown) { footers.push(footer); },
@@ -117,6 +128,7 @@ function harness(
 	} as unknown as ExtensionContext;
 	return {
 		handlers, commands, modelChanges, thinkingChanges, statuses, footers, notifications, sentMessages, ctx,
+		emit(channel: string, payload: unknown) { for (const handler of sharedEvents.get(channel) ?? []) handler(payload); },
 		aborted: () => aborted,
 		setIdle(value: boolean) { idle = value; },
 		setPendingMessages(value: boolean) { pendingMessages = value; },
@@ -131,6 +143,25 @@ describe("Jittor Pi actuator", () => {
 		expect(app.handlers.get("session_compact")).toHaveLength(1);
 		expect(app.handlers.get("agent_settled")).toHaveLength(1);
 		expect(app.handlers.get("session_shutdown")).toHaveLength(1);
+	});
+
+	it("ingests Papyrus context push events and records completed Pi compactions end to end", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		const now = Date.now();
+		app.emit("papyrus.context-injection.v1", {
+			schema: "papyrus.context-injection/v1", observedAt: now, sequence: 1, producerId: "123e4567-e89b-42d3-a456-426614174000",
+			before: { characters: 1_000, bytes: 1_000 }, rules: { characters: 100, bytes: 100, count: 1 },
+			tasks: { characters: 200, bytes: 200 }, injected: { characters: 300, bytes: 300 }, after: { characters: 1_300, bytes: 1_300 },
+			estimatedTokens: 75, share: 300 / 1_300, fingerprint: "a".repeat(64), unchanged: false,
+		});
+		await Promise.resolve();
+		const signal = new AbortController().signal;
+		await app.handlers.get("session_before_compact")![0]!({ reason: "threshold", willRetry: false, signal }, app.ctx);
+		await app.handlers.get("session_compact")![0]!({ reason: "threshold", willRetry: false }, app.ctx);
+		const recorded = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as { source: string; metric: string; attributes?: Record<string, unknown> });
+		expect(recorded.some((metric) => metric.source === "papyrus-context" && metric.metric === "injected-characters")).toBe(true);
+		expect(recorded.some((metric) => metric.source === "pi-context" && metric.metric === "compaction-duration" && metric.attributes?.reason === "threshold")).toBe(true);
 	});
 
 	it("derives routes from Pi's current provider and authenticated model catalog without model IDs", () => {
