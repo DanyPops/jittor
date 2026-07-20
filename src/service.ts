@@ -2,6 +2,10 @@ import { CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, S
 import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
 import { assessContextTelemetry, type ContextAssessment } from "./domain/context-telemetry.ts";
+import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
+import type { ModelRanker, ModelRecommendationInput } from "./domain/model-ranking-service.ts";
+import type { ModelRankingResult } from "./domain/model-ranking.ts";
+import type { BenchmarkController } from "./ports/benchmark-controller.ts";
 import type { MetricStore } from "./ports/metric-store.ts";
 import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
 import type { PolicyDecision, Route } from "./policy.ts";
@@ -10,6 +14,10 @@ export const EXPECTED_OPERATION_NAMES = [
 	"metrics.record",
 	"metrics.query",
 	"metrics.prune",
+	"benchmark.refresh",
+	"benchmark.status",
+	"benchmark.query",
+	"models.rank",
 	"context.assess",
 	"service.checkpoint",
 	"telemetry.poll",
@@ -28,6 +36,10 @@ export interface OperationInputs {
 	"metrics.record": MetricObservation;
 	"metrics.query": MetricQuery;
 	"metrics.prune": { before: number };
+	"benchmark.refresh": { force?: boolean };
+	"benchmark.status": Record<string, never>;
+	"benchmark.query": BenchmarkQuery;
+	"models.rank": ModelRecommendationInput;
 	"context.assess": { since?: number; until?: number };
 	"service.checkpoint": Record<string, never>;
 	"telemetry.poll": Record<string, never>;
@@ -44,6 +56,10 @@ export interface OperationOutputs {
 	"metrics.record": StoredMetricObservation;
 	"metrics.query": StoredMetricObservation[];
 	"metrics.prune": { deleted: number };
+	"benchmark.refresh": BenchmarkRefreshResult;
+	"benchmark.status": BenchmarkRefreshResult;
+	"benchmark.query": BenchmarkQueryResult;
+	"models.rank": ModelRankingResult;
 	"context.assess": ContextAssessment;
 	"service.checkpoint": { ok: true };
 	"telemetry.poll": TelemetryPollResult;
@@ -58,6 +74,16 @@ export interface OperationOutputs {
 }
 
 export class UnknownOperationError extends Error {}
+
+class UnavailableModelRanker implements ModelRanker {
+	rank(): ModelRankingResult { throw new Error("model ranking is not configured"); }
+}
+
+class UnavailableBenchmarkController implements BenchmarkController {
+	async refresh(): Promise<BenchmarkRefreshResult> { return this.status(); }
+	status(): BenchmarkRefreshResult { return { observedAt: Date.now(), sources: [] }; }
+	query(): BenchmarkQueryResult { throw new Error("benchmark evidence is not configured"); }
+}
 
 class UnavailableRouter implements RouterController {
 	private readonly unavailable: RouterStatus = { ready: false, paused: false, sources: [], lastDecision: null, override: null, currentRoute: null, availableRoutes: [] };
@@ -76,6 +102,8 @@ export class JittorService {
 	constructor(
 		private readonly metrics: MetricStore,
 		private readonly router: RouterController = new UnavailableRouter(),
+		private readonly benchmarks: BenchmarkController = new UnavailableBenchmarkController(),
+		private readonly modelRanker: ModelRanker = new UnavailableModelRanker(),
 	) {}
 
 	operationNames(): OperationName[] {
@@ -92,6 +120,14 @@ export class JittorService {
 				const before = input["before"];
 				if (typeof before !== "number") throw new Error("before is required");
 				return { deleted: this.metrics.pruneBefore(before) };
+			}
+			case "benchmark.refresh": return this.benchmarks.refresh(input["force"] === true);
+			case "benchmark.status": return this.benchmarks.status();
+			case "benchmark.query": return this.benchmarks.query(input as unknown as BenchmarkQuery);
+			case "models.rank": {
+				const result = this.modelRanker.rank(input as unknown as ModelRecommendationInput);
+				if (result.automaticSelection && this.router.applyModelRanking) this.router.applyModelRanking(result.ranked.map((item) => item.candidate));
+				return result;
 			}
 			case "context.assess": {
 				const until = input["until"] === undefined ? Date.now() : input["until"];

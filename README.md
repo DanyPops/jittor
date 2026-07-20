@@ -31,7 +31,7 @@ The initial service scaffold is split into domain, ports, and adapters:
 
 SQLite runs in WAL mode with versioned migrations, JSON validation, bounded queries, chronological indexes, pruning, and checkpoints. The database follows `XDG_DATA_HOME`; private authentication state follows `XDG_STATE_HOME`; the daemon handle follows `XDG_RUNTIME_DIR`.
 
-Operations currently include `metrics.record`, `metrics.query`, `metrics.prune`, `context.assess`, and `service.checkpoint`.
+Operations currently include bounded metric recording/query/pruning, benchmark refresh/status/query, context assessment, routing control, telemetry polling, and service checkpointing. Every operation is exposed through the authenticated typed client; benchmark operations also have CLI parity.
 
 Provider adapters currently include official OpenRouter key/usage/model telemetry and an explicitly experimental Codex subscription adapter. The Codex adapter follows the pinned open-source CLI `/wham/usage` payload and `x-codex-*` response-header contracts, accepts additional metered limits, and fails closed on malformed windows or impossible percentages. File credentials must be explicitly configured and private (`0600`); Jittor reads only the access token and account ID, never refreshes credentials, and never logs or persists OAuth secrets.
 
@@ -65,6 +65,24 @@ Run `/jittor settings` for one keyboard-navigable TUI covering routing enforceme
 Run `/jittor usage` for a colored Unicode cumulative token graph with X/Y axes, provider/model series, input/output/cache totals, refresh, and explicit **Hourly**, **Daily**, **Weekly**, and **Monthly** periods. Left/Right changes period and `r` refreshes. Usage is persisted by the daemon from finalized Pi assistant messages.
 
 Token-budget thresholds are optional and must be configured by the user; Jittor never infers a token allowance from Codex or another provider's subscription percentage. Configure or clear one period with `/jittor usage budget <hourly|daily|weekly|monthly> <positive-tokens|off>`, and inspect all four with `/jittor usage budget`. A configured budget appears as a horizontal threshold on the cumulative graph with explicit remaining or **OVER BUDGET** state. These private settings persist in `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`).
+
+### Benchmark evidence
+
+Jittor can ingest bounded OpenRouter model metadata, p50 latency/throughput ordering, and versioned Artificial Analysis benchmark indices as provenance-bearing evidence without treating OpenRouter as model-scope authority. Enable online ingestion explicitly with `JITTOR_OPENROUTER_BENCHMARKS=1`; it is off by default. OpenRouter model metadata and operational ordering are public; benchmark-index ingestion additionally uses `OPENROUTER_API_KEY` from the supervised service environment without retaining it. Snapshots preserve the upstream publisher, normalized model identities, immutable retrieval revisions, source URLs, confidence, license terms, and explicit freshness deadlines. A malformed or oversized refresh leaves the last complete snapshot visible and records only a payload-safe failure state.
+
+Use the authenticated CLI channels independently:
+
+```text
+jittor benchmarks status [--json]
+jittor benchmarks refresh [--force] [--json]
+jittor benchmarks list --source openrouter-models [--model provider/model] [--dimension name] [--limit 1..500] [--json]
+```
+
+Only complete snapshots are queryable. Query output reports both completeness and freshness. See [`docs/BENCHMARK_SOURCES.md`](docs/BENCHMARK_SOURCES.md) for source authority, provenance, conflict, and redistribution rules.
+
+Jittor separately records content-free local model observations from Pi's public lifecycle: TTFT, wall latency, output throughput, token/cache/cost efficiency, provider retries, tool-loop counts, failures, and task class derived only from bounded tool names. Prompts, responses, tool arguments/results, credentials, and project paths are never retained. `/jittor outcome accepted` or `/jittor outcome rejected` attaches explicit outcome evidence to the latest completed local run; runtime completion alone is not treated as quality success. Robust aggregates report sample size, median, p90, median absolute deviation, recency, and confidence without merging local observations into external benchmark facts.
+
+The ranking operation accepts an explicit bounded candidate set and never adds identities found only in evidence. It scores task quality, cost, latency, context, and local reliability with bounded user weights, budget-pressure adjustment, component confidence, freshness, provenance, and deterministic tie-breaking. Missing evidence remains unknown and lowers confidence. Run `/jittor benchmarks [coding|research|planning|general]` for the responsive recommendation panel. Because the released Pi extension API does not expose the exact `/scoped-models` set, the current adapter labels candidates `available-models`; the panel says **ADVISORY** and offers no selection action. Automatic route ordering is allowed only for `exact-session` authority and then narrows/reorders routes already present in the supplied candidate set.
 
 ### Context pressure
 

@@ -1,9 +1,15 @@
 import { LOOPBACK_HOST, MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
 import { DEFAULT_POLICY, UNCONFIGURED_ROUTE } from "./config.ts";
 import { SQLiteMetricStore } from "./adapters/sqlite-metric-store.ts";
+import { MetricBenchmarkStore } from "./adapters/metric-benchmark-store.ts";
+import { OpenRouterBenchmarkIndexSource } from "./adapters/openrouter-benchmark-index-source.ts";
+import { OpenRouterBenchmarkSource } from "./adapters/openrouter-benchmark-source.ts";
 import { openJittorDb } from "./db.ts";
+import { BenchmarkCatalog } from "./domain/benchmark.ts";
+import { EvidenceModelRanker } from "./domain/model-ranking-service.ts";
 import { createApp, JittorService } from "./service.ts";
 import { JittorRouter } from "./router.ts";
+import type { BenchmarkSource } from "./ports/benchmark-source.ts";
 import type { TelemetrySource } from "./ports/telemetry-source.ts";
 import { CodexTelemetrySource, OpenRouterTelemetrySource } from "./providers/telemetry-sources.ts";
 import {
@@ -18,6 +24,13 @@ export interface RunningDaemon {
 	host: typeof LOOPBACK_HOST;
 	port: number;
 	stop(): Promise<void>;
+}
+
+export function benchmarkSourcesFromEnvironment(env: Record<string, string | undefined> = process.env): BenchmarkSource[] {
+	if (env["JITTOR_OPENROUTER_BENCHMARKS"] !== "1") return [];
+	const sources: BenchmarkSource[] = [new OpenRouterBenchmarkSource()];
+	if (env["OPENROUTER_API_KEY"]) sources.push(new OpenRouterBenchmarkIndexSource(env["OPENROUTER_API_KEY"]));
+	return sources;
 }
 
 export function telemetrySourcesFromEnvironment(env: Record<string, string | undefined> = process.env): TelemetrySource[] {
@@ -36,6 +49,10 @@ export function startDaemon(
 	const token = ensureAuthToken(paths);
 	const metrics = new SQLiteMetricStore(openJittorDb(paths.database));
 	const sources = telemetrySourcesFromEnvironment(env);
+	const benchmarkSources = benchmarkSourcesFromEnvironment(env);
+	const benchmarkStore = new MetricBenchmarkStore(metrics);
+	const benchmarks = new BenchmarkCatalog(benchmarkStore, benchmarkSources);
+	const modelRanker = new EvidenceModelRanker(benchmarkStore, metrics);
 	const router = new JittorRouter({
 		metrics,
 		sources,
@@ -43,7 +60,7 @@ export function startDaemon(
 		routes: [],
 		currentRoute: UNCONFIGURED_ROUTE,
 	});
-	const service = new JittorService(metrics, router);
+	const service = new JittorService(metrics, router, benchmarks, modelRanker);
 	const app = createApp({ service, token });
 	const server = Bun.serve({
 		hostname: LOOPBACK_HOST,
@@ -57,9 +74,13 @@ export function startDaemon(
 		throw new Error("Jittor daemon failed to bind a loopback port");
 	}
 	writeDaemonHandle(paths, { host: LOOPBACK_HOST, port, pid: process.pid });
-	const maintenance = setInterval(() => { void service.execute("service.checkpoint", {}); }, MAINTENANCE_INTERVAL_MS);
+	const maintenance = setInterval(() => {
+		void service.execute("service.checkpoint", {});
+		void benchmarks.refresh();
+	}, MAINTENANCE_INTERVAL_MS);
 	const poll = setInterval(() => { void router.poll(); }, TELEMETRY_POLL_INTERVAL_MS);
 	if (sources.length > 0) void router.poll();
+	if (benchmarkSources.length > 0) void benchmarks.refresh();
 	let stopped = false;
 	return {
 		host: LOOPBACK_HOST,
