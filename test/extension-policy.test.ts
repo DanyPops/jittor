@@ -155,6 +155,19 @@ describe("Jittor Pi actuator", () => {
 		expect(app.notifications.join("\n")).toContain("/jittor off");
 	});
 
+	it("opens the consolidated settings TUI through /jittor settings", async () => {
+		const app = harness(new FakeClient());
+		let opened = false;
+		(app.ctx.ui as any).custom = async (factory: Function) => {
+			opened = true;
+			const component = factory({ requestRender() {} }, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
+			expect(component.render(50).join("\n")).toContain("Jittor Settings");
+			return { kind: "close" };
+		};
+		await app.commands.get("jittor").handler("settings", app.ctx);
+		expect(opened).toBe(true);
+	});
+
 	it("supports a local emergency off switch without calling the daemon", async () => {
 		let enabled = true;
 		let footerEnabled = true;
