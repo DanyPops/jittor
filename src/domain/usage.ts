@@ -1,7 +1,17 @@
+import { MAX_USAGE_BUCKETS, MILLISECONDS_PER_DAY, MILLISECONDS_PER_HOUR } from "../constants.ts";
 import type { StoredMetricObservation } from "./metric.ts";
 
-export const USAGE_RANGES = ["24h", "7d", "30d", "90d"] as const;
-export type UsageRange = typeof USAGE_RANGES[number];
+export const USAGE_PERIODS = [
+	{ id: "hourly", label: "Hourly", windowMs: MILLISECONDS_PER_HOUR, bucketCount: 12 },
+	{ id: "daily", label: "Daily", windowMs: MILLISECONDS_PER_DAY, bucketCount: 24 },
+	{ id: "weekly", label: "Weekly", windowMs: 7 * MILLISECONDS_PER_DAY, bucketCount: 28 },
+	{ id: "monthly", label: "Monthly", windowMs: 30 * MILLISECONDS_PER_DAY, bucketCount: 30 },
+] as const;
+export type UsagePeriod = typeof USAGE_PERIODS[number]["id"];
+
+export function usagePeriod(period: UsagePeriod): typeof USAGE_PERIODS[number] {
+	return USAGE_PERIODS.find((candidate) => candidate.id === period)!;
+}
 
 export interface UsageSeries {
 	key: string;
@@ -24,30 +34,23 @@ export interface UsageBreakdown {
 	cacheWrite: number;
 }
 
-export interface UsageHistogram {
-	range: UsageRange;
+export interface UsageGraph {
+	period: UsagePeriod;
 	start: number;
 	end: number;
 	buckets: UsageBucket[];
 	series: UsageSeries[];
 	totalTokens: number;
 	breakdown: UsageBreakdown;
+	truncated: boolean;
 }
 
-export interface UsageHistogramOptions {
-	range: UsageRange;
+export interface UsageGraphOptions {
+	period: UsagePeriod;
 	now: number;
 	bucketCount?: number;
+	truncated?: boolean;
 }
-
-const RANGE_MILLISECONDS: Record<UsageRange, number> = {
-	"24h": 24 * 60 * 60 * 1_000,
-	"7d": 7 * 24 * 60 * 60 * 1_000,
-	"30d": 30 * 24 * 60 * 60 * 1_000,
-	"90d": 90 * 24 * 60 * 60 * 1_000,
-};
-
-const DEFAULT_BUCKETS: Record<UsageRange, number> = { "24h": 24, "7d": 28, "30d": 30, "90d": 30 };
 
 const BREAKDOWN_KEYS = {
 	"input-tokens": "input",
@@ -56,8 +59,8 @@ const BREAKDOWN_KEYS = {
 	"cache-write-tokens": "cacheWrite",
 } as const satisfies Record<string, keyof UsageBreakdown>;
 
-export function usageRangeStart(range: UsageRange, now: number): number {
-	return Math.max(0, now - RANGE_MILLISECONDS[range]);
+export function usagePeriodStart(period: UsagePeriod, now: number): number {
+	return Math.max(0, now - usagePeriod(period).windowMs);
 }
 
 function identity(row: StoredMetricObservation): { key: string; provider: string; model: string } {
@@ -69,11 +72,11 @@ function identity(row: StoredMetricObservation): { key: string; provider: string
 	return { key: `${provider}/${model}`, provider, model };
 }
 
-export function buildUsageHistogram(rows: StoredMetricObservation[], options: UsageHistogramOptions): UsageHistogram {
+export function buildUsageGraph(rows: StoredMetricObservation[], options: UsageGraphOptions): UsageGraph {
 	const end = options.now;
-	const start = usageRangeStart(options.range, end);
-	const requestedBuckets = options.bucketCount ?? DEFAULT_BUCKETS[options.range];
-	const bucketCount = Math.max(1, Math.min(120, Math.floor(requestedBuckets)));
+	const start = usagePeriodStart(options.period, end);
+	const requestedBuckets = options.bucketCount ?? usagePeriod(options.period).bucketCount;
+	const bucketCount = Math.max(1, Math.min(MAX_USAGE_BUCKETS, Math.floor(requestedBuckets)));
 	const bucketSize = Math.max(1, (end - start) / bucketCount);
 	const buckets: UsageBucket[] = Array.from({ length: bucketCount }, (_, index) => ({
 		start: start + index * bucketSize,
@@ -101,12 +104,13 @@ export function buildUsageHistogram(rows: StoredMetricObservation[], options: Us
 
 	const series = [...identities.values()].sort((left, right) => right.total - left.total || left.key.localeCompare(right.key));
 	return {
-		range: options.range,
+		period: options.period,
 		start,
 		end,
 		buckets,
 		series,
 		totalTokens: buckets.reduce((sum, bucket) => sum + bucket.total, 0),
 		breakdown,
+		truncated: options.truncated === true,
 	};
 }

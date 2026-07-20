@@ -13,6 +13,9 @@ describe("Jittor extension enforcement settings", () => {
 			expect(first.isEnabled()).toBe(true);
 			expect(first.isFooterEnabled()).toBe(true);
 			expect(first.isCodexRecoveryEnabled()).toBe(false);
+			expect(first.getUsageTokenBudget("hourly")).toBeUndefined();
+			first.setUsageTokenBudget("hourly", 25_000);
+			first.setUsageTokenBudget("daily", 250_000);
 			first.setCodexRecoveryEnabled(true);
 			first.setEnabled(false);
 			expect(first.isFooterEnabled()).toBe(true);
@@ -21,6 +24,11 @@ describe("Jittor extension enforcement settings", () => {
 			expect(second.isEnabled()).toBe(false);
 			expect(second.isFooterEnabled()).toBe(false);
 			expect(second.isCodexRecoveryEnabled()).toBe(true);
+			expect(second.getUsageTokenBudget("hourly")).toBe(25_000);
+			expect(second.getUsageTokenBudget("daily")).toBe(250_000);
+			expect(() => second.setUsageTokenBudget("weekly", -1)).toThrow("positive finite");
+			second.setUsageTokenBudget("hourly", undefined);
+			expect(second.getUsageTokenBudget("hourly")).toBeUndefined();
 			second.setFooterEnabled(true);
 			expect(second.isEnabled()).toBe(false);
 			expect(statSync(join(root, "config", "jittor", "extension.json")).mode & 0o777).toBe(0o600);
