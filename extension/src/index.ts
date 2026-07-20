@@ -19,6 +19,7 @@ import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
 import { installIntegratedFooter, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
 import { persistentEnforcementControl, type CodexRecoveryControl, type EnforcementControl, type UsageBudgetControl } from "./settings.ts";
+import { showSettingsPanel } from "./settings-tui.ts";
 import { buildFooterBudget, formatFooterStatus, showJittorPanel } from "./tui.ts";
 import { showUsagePanel } from "./usage.ts";
 
@@ -370,6 +371,21 @@ export function registerJittorExtension(
 				showFooter(ctx);
 				await refreshFooter(client, footerState).catch(() => undefined);
 				ctx.ui.notify("Jittor informational footer enabled; routing enforcement is unchanged.", "info");
+				return;
+			}
+			if (action === "settings") {
+				await showSettingsPanel(ctx, enforcement, codexRecovery, usageBudgets, {
+					setEnforcement: async (enabled) => enabled ? enable(ctx) : disable(ctx),
+					setFooter: async (enabled) => {
+						enforcement.setFooterEnabled(enabled);
+						showFooter(ctx);
+						if (enabled) await refreshFooter(client, footerState).catch(() => undefined);
+					},
+					setRecovery: (enabled) => {
+						if (!enabled) cancelRecovery(true);
+						codexRecovery.setCodexRecoveryEnabled(enabled);
+					},
+				});
 				return;
 			}
 			if (action === "usage budget" || action.startsWith("usage budget ")) {
