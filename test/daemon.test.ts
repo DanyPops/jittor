@@ -6,6 +6,7 @@ import { renderSystemdUnit } from "../src/cli.ts";
 import { connectJittorClient } from "../src/client.ts";
 import { startDaemon, telemetrySourcesFromEnvironment } from "../src/daemon.ts";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, writeDaemonHandle } from "../src/state.ts";
+import { VERSION } from "../src/version.ts";
 
 describe("Jittor daemon state", () => {
 	it("resolves database, runtime handle, and config through XDG paths", () => {
@@ -47,7 +48,7 @@ describe("Jittor daemon state", () => {
 		const daemon = startDaemon(paths);
 		try {
 			const client = connectJittorClient(paths);
-			expect(await client.health()).toEqual({ ok: true, version: "0.1.2" });
+			expect(await client.health()).toEqual({ ok: true, version: VERSION });
 			await client.call("metrics.record", {
 				source: "jittor", scope: "daemon", metric: "requests", value: 1, unit: "count", observedAt: 1000,
 			});

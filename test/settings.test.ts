@@ -12,12 +12,15 @@ describe("Jittor extension enforcement settings", () => {
 			const first = persistentEnforcementControl(env);
 			expect(first.isEnabled()).toBe(true);
 			expect(first.isFooterEnabled()).toBe(true);
+			expect(first.isCodexRecoveryEnabled()).toBe(false);
+			first.setCodexRecoveryEnabled(true);
 			first.setEnabled(false);
 			expect(first.isFooterEnabled()).toBe(true);
 			first.setFooterEnabled(false);
 			const second = persistentEnforcementControl(env);
 			expect(second.isEnabled()).toBe(false);
 			expect(second.isFooterEnabled()).toBe(false);
+			expect(second.isCodexRecoveryEnabled()).toBe(true);
 			second.setFooterEnabled(true);
 			expect(second.isEnabled()).toBe(false);
 			expect(statSync(join(root, "config", "jittor", "extension.json")).mode & 0o777).toBe(0o600);

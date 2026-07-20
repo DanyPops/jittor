@@ -1,4 +1,5 @@
-import { SERVICE_MAX_BODY_BYTES, VERSION } from "./constants.ts";
+import { SERVICE_MAX_BODY_BYTES } from "./constants.ts";
+import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
 import type { MetricStore } from "./ports/metric-store.ts";
 import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";

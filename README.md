@@ -39,6 +39,18 @@ The native Pi extension preflights input and every provider turn, applies model/
 
 Blocking always has a daemon-independent escape hatch. `/jittor off` immediately enters persisted monitor-only mode and never blocks provider requests. The informational footer is independently controlled with `/jittor footer on` and `/jittor footer off`, so showing status never enables enforcement. `/jittor on` only enables enforcement after telemetry polling and available-route synchronization succeed. Every fail-closed error includes these recovery commands plus the daemon restart command.
 
+### Opt-in Codex settled-turn recovery
+
+Transient Codex recovery is securely off by default. Opt in explicitly through `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`):
+
+```json
+{
+  "codexRecoveryEnabled": true
+}
+```
+
+Jittor observes finalized Codex assistant errors through Pi's public message lifecycle, classifies only bounded error metadata, and waits for `agent_settled` before acting. That boundary guarantees Pi's built-in retry, compaction retry, and queued follow-up work has finished. A transient concurrency, rate-limit, overload, or transport failure then schedules one hidden follow-up with Retry-After-aware capped jitter. Recovery is limited to three attempts per ten-minute window, never overlaps pending Pi messages, resets after success, and is canceled by human input or session shutdown. Quota, authentication, invalid-request, unknown, and aborted failures remain terminal. Raw provider payloads are never retained or injected.
+
 Run `/jittor usage` for a colored Unicode token histogram with X/Y axes, provider/model series, input/output/cache totals, refresh, and `24h`, `7d`, `30d`, or `90d` ranges. Left/Right changes range and `r` refreshes. Usage is persisted by the daemon from finalized Pi assistant messages.
 
 See [`docs/CALIBRATION.md`](docs/CALIBRATION.md) for thresholds and rollback, and [`docs/USAGE_PRIOR_ART.md`](docs/USAGE_PRIOR_ART.md) for the chart design research.

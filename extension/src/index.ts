@@ -1,12 +1,21 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { FOOTER_COMPACTION_RENDER_INTERVAL_MS, MAX_DYNAMIC_ROUTES } from "../../src/constants.ts";
+import {
+	CODEX_RECOVERY_ATTEMPT_WINDOW_MS,
+	CODEX_RECOVERY_BASE_DELAY_MS,
+	CODEX_RECOVERY_JITTER_RATIO,
+	CODEX_RECOVERY_MAX_ATTEMPTS,
+	CODEX_RECOVERY_MAX_DELAY_MS,
+	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
+	MAX_DYNAMIC_ROUTES,
+} from "../../src/constants.ts";
+import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureMetadata } from "../../src/domain/codex-recovery.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
 import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
 import { installIntegratedFooter, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
-import { persistentEnforcementControl, type EnforcementControl } from "./settings.ts";
+import { persistentEnforcementControl, type CodexRecoveryControl, type EnforcementControl } from "./settings.ts";
 import { buildFooterBudget, formatFooterStatus, showJittorPanel } from "./tui.ts";
 import { showUsagePanel } from "./usage.ts";
 
@@ -22,6 +31,32 @@ export interface JittorExtensionClient {
 const daemonClient: JittorExtensionClient = {
 	call: (operation, input) => callJittor(operation as Parameters<typeof callJittor>[0], input as never),
 };
+
+export interface CodexRecoveryRuntime {
+	now(): number;
+	random(): number;
+	setTimeout(callback: () => void | Promise<void>, delayMs: number): unknown;
+	clearTimeout(handle: unknown): void;
+}
+
+const SYSTEM_RECOVERY_RUNTIME: CodexRecoveryRuntime = {
+	now: Date.now,
+	random: Math.random,
+	setTimeout(callback, delayMs) { return setTimeout(() => { void callback(); }, delayMs); },
+	clearTimeout(handle) { clearTimeout(handle as ReturnType<typeof setTimeout>); },
+};
+
+function recoveryControl(enforcement: EnforcementControl): CodexRecoveryControl {
+	const candidate = enforcement as EnforcementControl & Partial<CodexRecoveryControl>;
+	return typeof candidate.isCodexRecoveryEnabled === "function"
+		? { isCodexRecoveryEnabled: () => candidate.isCodexRecoveryEnabled!() }
+		: { isCodexRecoveryEnabled: () => false };
+}
+
+function header(headers: Record<string, string>, name: string): string | undefined {
+	const expected = name.toLowerCase();
+	return Object.entries(headers).find(([key]) => key.toLowerCase() === expected)?.[1];
+}
 
 async function recordMetrics(client: JittorExtensionClient, metrics: MetricObservation[]): Promise<void> {
 	for (const metric of metrics) await client.call("metrics.record", metric);
@@ -169,8 +204,46 @@ export function registerJittorExtension(
 	pi: ExtensionAPI,
 	client: JittorExtensionClient = daemonClient,
 	enforcement: EnforcementControl = persistentEnforcementControl(),
+	codexRecovery: CodexRecoveryControl = recoveryControl(enforcement),
+	recoveryRuntime: CodexRecoveryRuntime = SYSTEM_RECOVERY_RUNTIME,
 ): void {
 	const footerState: IntegratedFooterState = { providerBudget: null };
+	const recoveryPolicy = new CodexRecoveryPolicy({
+		baseDelayMs: CODEX_RECOVERY_BASE_DELAY_MS,
+		maxDelayMs: CODEX_RECOVERY_MAX_DELAY_MS,
+		maxAttempts: CODEX_RECOVERY_MAX_ATTEMPTS,
+		attemptWindowMs: CODEX_RECOVERY_ATTEMPT_WINDOW_MS,
+		jitterRatio: CODEX_RECOVERY_JITTER_RATIO,
+	}, recoveryRuntime.random);
+	let recoveryTimer: unknown;
+	let lastCodexResponse: CodexFailureMetadata = {};
+	const cancelRecovery = (resetPolicy: boolean): void => {
+		if (recoveryTimer !== undefined) recoveryRuntime.clearTimeout(recoveryTimer);
+		recoveryTimer = undefined;
+		if (resetPolicy) recoveryPolicy.cancel();
+	};
+	const scheduleCodexRecovery = (ctx: ExtensionContext): void => {
+		if (!codexRecovery.isCodexRecoveryEnabled() || recoveryTimer !== undefined || !ctx.isIdle() || ctx.hasPendingMessages()) return;
+		const plan = recoveryPolicy.plan(recoveryRuntime.now());
+		if (plan.action === "exhausted") {
+			recoveryPolicy.abandonFailure();
+			if (ctx.hasUI) ctx.ui.notify(`Jittor Codex recovery stopped: ${plan.reason}.`, "warning");
+			return;
+		}
+		if (plan.action !== "schedule") return;
+		recoveryTimer = recoveryRuntime.setTimeout(async () => {
+			recoveryTimer = undefined;
+			if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
+			const attempt = recoveryPolicy.recordAttempt(recoveryRuntime.now());
+			if (!attempt) return;
+			pi.sendMessage({
+				customType: "jittor-codex-recovery",
+				content: `Retry the previous Codex request after a transient ${attempt.failureKind} failure. Automatic recovery attempt ${attempt.attempt} of ${CODEX_RECOVERY_MAX_ATTEMPTS}.`,
+				display: false,
+				details: { attempt: attempt.attempt, failureKind: attempt.failureKind },
+			}, { triggerTurn: true, deliverAs: "followUp" });
+		}, plan.delayMs);
+	};
 	let compactionTimer: ReturnType<typeof setInterval> | undefined;
 	const finishCompaction = (): void => {
 		if (compactionTimer) clearInterval(compactionTimer);
@@ -252,6 +325,8 @@ export function registerJittorExtension(
 
 	pi.on("session_start", async (_event, ctx) => {
 		finishCompaction();
+		cancelRecovery(true);
+		lastCodexResponse = {};
 		ctx.ui.setStatus("jittor", undefined);
 		showFooter(ctx);
 		try {
@@ -275,6 +350,7 @@ export function registerJittorExtension(
 
 	pi.on("agent_settled", async (_event, ctx) => {
 		if (footerState.compaction) finishCompaction();
+		scheduleCodexRecovery(ctx);
 		if (!enforcement.isFooterEnabled()) return;
 		try {
 			await syncCurrentRoute(pi, client, ctx);
@@ -287,6 +363,7 @@ export function registerJittorExtension(
 	});
 
 	pi.on("input", async (event, ctx) => {
+		if (event.source !== "extension") cancelRecovery(true);
 		if (event.source === "extension" || !enforcement.isEnabled()) return { action: "continue" as const };
 		try {
 			const next = await client.call("router.decide", {}) as PolicyDecision;
@@ -311,6 +388,7 @@ export function registerJittorExtension(
 	});
 
 	pi.on("turn_start", async (_event, ctx) => {
+		lastCodexResponse = {};
 		if (!enforcement.isEnabled()) return;
 		try {
 			await syncCurrentRoute(pi, client, ctx);
@@ -323,6 +401,9 @@ export function registerJittorExtension(
 	});
 
 	pi.on("after_provider_response", async (event, ctx) => {
+		if (ctx.model?.provider === "openai-codex") {
+			lastCodexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
+		}
 		if (!Object.keys(event.headers).some((name) => name.toLowerCase().startsWith("x-codex-"))) return;
 		try {
 			const updates = parseCodexRateLimitHeaders(new Headers(event.headers), Date.now());
@@ -334,6 +415,16 @@ export function registerJittorExtension(
 	});
 
 	pi.on("message_end", async (event, _ctx) => {
+		if (event.message.role === "assistant" && event.message.provider === "openai-codex") {
+			if (event.message.stopReason === "error") {
+				const failure = classifyCodexFailure(event.message.errorMessage, lastCodexResponse);
+				if (codexRecovery.isCodexRecoveryEnabled() && failure.transient) recoveryPolicy.observeFailure(failure, recoveryRuntime.now());
+				else cancelRecovery(true);
+			} else if (event.message.stopReason !== "aborted") {
+				cancelRecovery(true);
+			}
+			lastCodexResponse = {};
+		}
 		const metrics = assistantUsageMetrics(event.message, Date.now());
 		if (metrics.length > 0) await recordMetrics(client, metrics).catch(() => undefined);
 		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
@@ -341,6 +432,8 @@ export function registerJittorExtension(
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		finishCompaction();
+		cancelRecovery(true);
+		lastCodexResponse = {};
 		ctx.ui.setStatus("jittor", undefined);
 		ctx.ui.setFooter(undefined);
 	});

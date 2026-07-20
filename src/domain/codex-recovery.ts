@@ -28,6 +28,102 @@ export interface CodexFailureMetadata {
 	retryAfter?: string;
 }
 
+export interface CodexRecoveryOptions {
+	baseDelayMs: number;
+	maxDelayMs: number;
+	maxAttempts: number;
+	attemptWindowMs: number;
+	jitterRatio: number;
+}
+
+export type CodexRecoveryPlan =
+	| { action: "schedule"; attempt: number; delayMs: number; failureKind: CodexFailureKind }
+	| { action: "wait"; reason: string }
+	| { action: "exhausted"; reason: string };
+
+export interface CodexRecoveryAttempt {
+	attempt: number;
+	failureKind: CodexFailureKind;
+}
+
+export class CodexRecoveryPolicy {
+	private pendingFailure: CodexFailure | undefined;
+	private attempts = 0;
+	private windowStartedAt: number | undefined;
+
+	constructor(
+		private readonly options: CodexRecoveryOptions,
+		private readonly random: () => number = Math.random,
+	) {
+		if (!Number.isFinite(options.baseDelayMs) || options.baseDelayMs < 0) throw new Error("baseDelayMs must be non-negative");
+		if (!Number.isFinite(options.maxDelayMs) || options.maxDelayMs < options.baseDelayMs) throw new Error("maxDelayMs must be at least baseDelayMs");
+		if (!Number.isInteger(options.maxAttempts) || options.maxAttempts < 1) throw new Error("maxAttempts must be a positive integer");
+		if (!Number.isFinite(options.attemptWindowMs) || options.attemptWindowMs <= 0) throw new Error("attemptWindowMs must be positive");
+		if (!Number.isFinite(options.jitterRatio) || options.jitterRatio < 0 || options.jitterRatio > 1) throw new Error("jitterRatio must be between 0 and 1");
+	}
+
+	observeFailure(failure: CodexFailure, now: number): void {
+		this.normalizeWindow(now);
+		this.pendingFailure = failure.transient ? failure : undefined;
+	}
+
+	observeSuccess(): void {
+		this.cancel();
+	}
+
+	cancel(): void {
+		this.pendingFailure = undefined;
+		this.attempts = 0;
+		this.windowStartedAt = undefined;
+	}
+
+	abandonFailure(): void {
+		this.pendingFailure = undefined;
+	}
+
+	plan(now: number): CodexRecoveryPlan {
+		this.normalizeWindow(now);
+		if (!this.pendingFailure) return { action: "wait", reason: "no transient Codex failure is pending" };
+		if (this.attempts >= this.options.maxAttempts) {
+			return { action: "exhausted", reason: `${this.options.maxAttempts} recovery attempts reached within ${this.options.attemptWindowMs}ms` };
+		}
+		const base = this.pendingFailure.retryAfterMs
+			?? this.options.baseDelayMs * (2 ** this.attempts);
+		const sample = this.random();
+		const unit = Number.isFinite(sample) ? Math.min(1, Math.max(0, sample)) : 0;
+		const multiplier = 1 + ((unit * 2) - 1) * this.options.jitterRatio;
+		const jittered = Math.max(0, Math.round(base * multiplier));
+		const delayMs = this.pendingFailure.retryAfterMs === undefined ? jittered : Math.max(base, jittered);
+		return {
+			action: "schedule",
+			attempt: this.attempts + 1,
+			delayMs: Math.min(this.options.maxDelayMs, delayMs),
+			failureKind: this.pendingFailure.kind,
+		};
+	}
+
+	recordAttempt(now: number): CodexRecoveryAttempt | undefined {
+		this.normalizeWindow(now);
+		if (!this.pendingFailure || this.attempts >= this.options.maxAttempts) return undefined;
+		if (this.windowStartedAt === undefined) this.windowStartedAt = now;
+		this.attempts += 1;
+		const attempt = { attempt: this.attempts, failureKind: this.pendingFailure.kind };
+		this.pendingFailure = undefined;
+		return attempt;
+	}
+
+	state(): { attempts: number; pending: boolean } {
+		return { attempts: this.attempts, pending: this.pendingFailure !== undefined };
+	}
+
+	private normalizeWindow(now: number): void {
+		if (this.windowStartedAt !== undefined && now - this.windowStartedAt >= this.options.attemptWindowMs) {
+			this.attempts = 0;
+			this.windowStartedAt = undefined;
+		}
+	}
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? value as Record<string, unknown>

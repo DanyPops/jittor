@@ -9,9 +9,18 @@ export interface EnforcementControl {
 	setFooterEnabled(enabled: boolean): void;
 }
 
+export interface CodexRecoveryControl {
+	isCodexRecoveryEnabled(): boolean;
+}
+
+export interface PersistentExtensionControl extends EnforcementControl, CodexRecoveryControl {
+	setCodexRecoveryEnabled(enabled: boolean): void;
+}
+
 interface ExtensionSettings {
 	enforcementEnabled: boolean;
 	footerEnabled: boolean;
+	codexRecoveryEnabled: boolean;
 }
 
 function settingsPath(env: Record<string, string | undefined> = process.env): string {
@@ -22,14 +31,15 @@ function settingsPath(env: Record<string, string | undefined> = process.env): st
 function loadSettings(path: string): ExtensionSettings {
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
-		if (typeof value !== "object" || value === null || Array.isArray(value)) return { enforcementEnabled: true, footerEnabled: true };
+		if (typeof value !== "object" || value === null || Array.isArray(value)) return { enforcementEnabled: true, footerEnabled: true, codexRecoveryEnabled: false };
 		const record = value as Record<string, unknown>;
 		return {
 			enforcementEnabled: record["enforcementEnabled"] !== false,
 			footerEnabled: record["footerEnabled"] !== false,
+			codexRecoveryEnabled: record["codexRecoveryEnabled"] === true,
 		};
 	} catch {
-		return { enforcementEnabled: true, footerEnabled: true };
+		return { enforcementEnabled: true, footerEnabled: true, codexRecoveryEnabled: false };
 	}
 }
 
@@ -41,7 +51,7 @@ function persistSettings(path: string, settings: ExtensionSettings): void {
 	renameSync(temporary, path);
 }
 
-export function persistentEnforcementControl(env: Record<string, string | undefined> = process.env): EnforcementControl {
+export function persistentEnforcementControl(env: Record<string, string | undefined> = process.env): PersistentExtensionControl {
 	const path = settingsPath(env);
 	const settings = loadSettings(path);
 	return {
@@ -53,6 +63,11 @@ export function persistentEnforcementControl(env: Record<string, string | undefi
 		isFooterEnabled: () => settings.footerEnabled,
 		setFooterEnabled(value: boolean): void {
 			settings.footerEnabled = value;
+			persistSettings(path, settings);
+		},
+		isCodexRecoveryEnabled: () => settings.codexRecoveryEnabled,
+		setCodexRecoveryEnabled(value: boolean): void {
+			settings.codexRecoveryEnabled = value;
 			persistSettings(path, settings);
 		},
 	};
