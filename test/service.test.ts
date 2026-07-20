@@ -43,6 +43,8 @@ describe("Jittor operation service", () => {
 		}) as StoredMetricObservation;
 		expect(recorded.id).toBe(1);
 		expect(await service.execute("metrics.query", { source: "openrouter" })).toHaveLength(1);
+		const assessment = await service.execute("context.assess", { since: 0, until: 2_000 });
+		expect(assessment).toMatchObject({ completeness: "complete", injection: { runs: 0 }, compaction: { completed: 0 } });
 		await expect(service.execute("metrics.record", {
 			source: "openrouter", scope: "key:default", metric: "cost", value: 1,
 			unit: "credits" as never, observedAt: 1000,
@@ -70,6 +72,7 @@ describe("Jittor operation service", () => {
 			unit: "usd", observedAt: 2000,
 		});
 		expect(await client.call("metrics.query", { source: "openrouter" })).toHaveLength(1);
+		expect(await client.call("context.assess", { since: 0, until: 3_000 })).toMatchObject({ injection: { runs: 0 } });
 		expect(await client.operations()).toEqual([...EXPECTED_OPERATION_NAMES]);
 	});
 });

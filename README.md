@@ -31,7 +31,7 @@ The initial service scaffold is split into domain, ports, and adapters:
 
 SQLite runs in WAL mode with versioned migrations, JSON validation, bounded queries, chronological indexes, pruning, and checkpoints. The database follows `XDG_DATA_HOME`; private authentication state follows `XDG_STATE_HOME`; the daemon handle follows `XDG_RUNTIME_DIR`.
 
-Operations currently include `metrics.record`, `metrics.query`, `metrics.prune`, and `service.checkpoint`.
+Operations currently include `metrics.record`, `metrics.query`, `metrics.prune`, `context.assess`, and `service.checkpoint`.
 
 Provider adapters currently include official OpenRouter key/usage/model telemetry and an explicitly experimental Codex subscription adapter. The Codex adapter follows the pinned open-source CLI `/wham/usage` payload and `x-codex-*` response-header contracts, accepts additional metered limits, and fails closed on malformed windows or impossible percentages. File credentials must be explicitly configured and private (`0600`); Jittor reads only the access token and account ID, never refreshes credentials, and never logs or persists OAuth secrets.
 
@@ -63,6 +63,12 @@ Run `/jittor settings` for one keyboard-navigable TUI covering routing enforceme
 Run `/jittor usage` for a colored Unicode cumulative token graph with X/Y axes, provider/model series, input/output/cache totals, refresh, and explicit **Hourly**, **Daily**, **Weekly**, and **Monthly** periods. Left/Right changes period and `r` refreshes. Usage is persisted by the daemon from finalized Pi assistant messages.
 
 Token-budget thresholds are optional and must be configured by the user; Jittor never infers a token allowance from Codex or another provider's subscription percentage. Configure or clear one period with `/jittor usage budget <hourly|daily|weekly|monthly> <positive-tokens|off>`, and inspect all four with `/jittor usage budget`. A configured budget appears as a horizontal threshold on the cumulative graph with explicit remaining or **OVER BUDGET** state. These private settings persist in `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`).
+
+### Context pressure
+
+Papyrus emits content-free prompt-injection observations through Pi's shared extension event bus. Jittor validates and records their exact Rule/Task character sizes, prompt share, fingerprint repetition, and explicitly estimated token size. Jittor also records completed, aborted, and unmatched Pi compactions with duration, reason, retry state, pre-compaction context usage, and bounded turns/injection/provider/cache usage since the previous compaction.
+
+Run `/jittor context` for the in-session summary, or `jittor context [--since <epoch-ms>] [--until <epoch-ms>] [--json]` through the authenticated daemon client. The assessment reports bounded average/p95/max injection, Rule/Task mix, unchanged rate, compaction frequency/duration/reasons, and between-compaction provider/cache facts. Repeated prompt content is not labeled billed waste: provider-reported input/cache usage and an injection-disabled control are required before making cost or compaction-causality claims.
 
 See [`docs/CALIBRATION.md`](docs/CALIBRATION.md) for thresholds and rollback, and [`docs/USAGE_PRIOR_ART.md`](docs/USAGE_PRIOR_ART.md) for the chart design research.
 
