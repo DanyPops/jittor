@@ -1,4 +1,4 @@
-import { CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES } from "./constants.ts";
+import { CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "./constants.ts";
 import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
 import { assessContextTelemetry, type ContextAssessment } from "./domain/context-telemetry.ts";
@@ -140,7 +140,18 @@ function authorized(request: Request, token: string): boolean {
 }
 
 function json(value: unknown, status = 200): Response {
-	return Response.json(value, { status });
+	const body = JSON.stringify(value);
+	if (new TextEncoder().encode(body).byteLength > SERVICE_MAX_RESPONSE_BYTES) {
+		const error = JSON.stringify({ error: "response too large" });
+		return new Response(error, {
+			status: 413,
+			headers: { "content-type": "application/json", "content-length": String(new TextEncoder().encode(error).byteLength) },
+		});
+	}
+	return new Response(body, {
+		status,
+		headers: { "content-type": "application/json", "content-length": String(new TextEncoder().encode(body).byteLength) },
+	});
 }
 
 export function createApp(options: JittorAppOptions): { fetch(request: Request): Promise<Response> } {

@@ -1,5 +1,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { HUMAN_STATUS_MAX_SOURCES, HUMAN_TEXT_FIELD_MAX_CHARACTERS } from "../../src/constants.ts";
 import type { StoredMetricObservation } from "../../src/domain/metric.ts";
 import type { PolicyAction, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
@@ -16,7 +17,11 @@ function latest(rows: StoredMetricObservation[], predicate: (row: StoredMetricOb
 }
 
 function sanitizedText(value: string): string {
-	return value.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim();
+	return value.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim().slice(0, HUMAN_TEXT_FIELD_MAX_CHARACTERS);
+}
+
+function routeText(route: Route): string {
+	return `${sanitizedText(route.provider)}/${sanitizedText(route.model)} · ${sanitizedText(route.thinking)}`;
 }
 
 function normalizedIdentity(value: unknown): string {
@@ -135,15 +140,17 @@ export function buildStatusView(status: RouterStatus, metrics: StoredMetricObser
 		? latest(metrics, (row) => row.source === "openrouter" && row.metric === "usage" && typeof row.value === "number")
 		: undefined;
 	if (openRouter && typeof openRouter.value === "number") lines.push(`OpenRouter spend: $${openRouter.value.toFixed(3)}`);
-	if (status.currentRoute) lines.push(`Route: ${status.currentRoute.provider}/${status.currentRoute.model} · ${status.currentRoute.thinking}`);
+	if (status.currentRoute) lines.push(`Route: ${routeText(status.currentRoute)}`);
 	if (status.lastDecision) lines.push(`Pressure: ${Number.isFinite(status.lastDecision.pressure) ? status.lastDecision.pressure.toFixed(3) : "∞"} · ${status.lastDecision.action}`);
 	lines.push(`Next: ${nextAction(status.lastDecision?.action)}`);
 	lines.push("Telemetry:");
-	for (const source of status.sources.filter((source) => source.provider === status.currentRoute?.provider)) {
+	const providerSources = status.sources.filter((source) => source.provider === status.currentRoute?.provider);
+	for (const source of providerSources.slice(0, HUMAN_STATUS_MAX_SOURCES)) {
 		const freshness = !source.ok ? "failed" : source.observedAt !== undefined && now - source.observedAt > 120_000 ? "stale" : "fresh";
-		lines.push(`  ${source.id}: ${freshness} · ${source.metrics} metrics`);
+		lines.push(`  ${sanitizedText(source.id)}: ${freshness} · ${source.metrics} metrics`);
 	}
-	if (status.override) lines.push(`Override: ${status.override.route.provider}/${status.override.route.model} · ${status.override.route.thinking}`);
+	if (providerSources.length > HUMAN_STATUS_MAX_SOURCES) lines.push(`  … ${providerSources.length - HUMAN_STATUS_MAX_SOURCES} more telemetry sources omitted`);
+	if (status.override) lines.push(`Override: ${routeText(status.override.route)}`);
 	if (status.paused) lines.push("Emergency halt is active");
 	return lines;
 }
@@ -160,7 +167,7 @@ async function snapshot(client: JittorPanelClient): Promise<{ status: RouterStat
 
 async function chooseOverride(ctx: ExtensionCommandContext, routes: Route[]): Promise<Route | undefined> {
 	if (routes.length === 0) { ctx.ui.notify("Pi reports no authenticated routes for the current provider.", "warning"); return undefined; }
-	const labels = routes.map((route) => `${route.provider}/${route.model} · ${route.thinking}`);
+	const labels = routes.map(routeText);
 	const selected = await ctx.ui.select("Override route", labels);
 	const index = selected ? labels.indexOf(selected) : -1;
 	return index >= 0 ? routes[index] : undefined;
@@ -211,7 +218,7 @@ export async function showJittorPanel(ctx: ExtensionCommandContext, client: Jitt
 			continue;
 		}
 		const route = await chooseOverride(ctx, current.status.availableRoutes);
-		if (route && await ctx.ui.confirm("Apply route override?", `${route.provider}/${route.model} · ${route.thinking} for one hour`)) {
+		if (route && await ctx.ui.confirm("Apply route override?", `${routeText(route)} for one hour`)) {
 			await client.call("router.override", { route, expiresAt: Date.now() + 60 * 60 * 1_000 });
 		}
 	}

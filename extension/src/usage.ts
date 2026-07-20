@@ -1,6 +1,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { USAGE_CHART_HEIGHT, USAGE_TOKEN_QUERY_LIMIT, USAGE_Y_AXIS_WIDTH } from "../../src/constants.ts";
+import { HUMAN_TEXT_FIELD_MAX_CHARACTERS, USAGE_CHART_HEIGHT, USAGE_RENDER_MAX_SERIES, USAGE_TOKEN_QUERY_LIMIT, USAGE_Y_AXIS_WIDTH } from "../../src/constants.ts";
 import type { StoredMetricObservation } from "../../src/domain/metric.ts";
 import {
 	buildUsageGraph,
@@ -80,6 +80,10 @@ function axisLabels(start: number, end: number, period: UsagePeriod, width: numb
 	return characters.join("");
 }
 
+function displayIdentity(value: string): string {
+	return value.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim().slice(0, HUMAN_TEXT_FIELD_MAX_CHARACTERS);
+}
+
 function plainTheme(): UsageTheme {
 	return { fg: (_color, text) => text, bold: (text) => text };
 }
@@ -147,11 +151,13 @@ export function renderUsageGraph(chart: UsageGraph, width: number, theme: UsageT
 	lines.push(`${"0".padStart(USAGE_Y_AXIS_WIDTH - 2)} ${theme.fg("borderMuted", `└${"─".repeat(plotWidth)}`)}`);
 	lines.push(`${" ".repeat(USAGE_Y_AXIS_WIDTH)}${axisLabels(chart.start, chart.end, chart.period, plotWidth)}`);
 	lines.push("");
-	for (let index = 0; index < chart.series.length; index += 1) {
-		const series = chart.series[index]!;
+	const displayedSeries = chart.series.slice(0, USAGE_RENDER_MAX_SERIES);
+	for (let index = 0; index < displayedSeries.length; index += 1) {
+		const series = displayedSeries[index]!;
 		const bullet = theme.fg(SERIES_COLORS[index % SERIES_COLORS.length]!, "■");
-		lines.push(truncateToWidth(`${bullet} ${series.provider}/${series.model}  ${compact(series.total)}`, safeWidth, "…"));
+		lines.push(truncateToWidth(`${bullet} ${displayIdentity(series.provider)}/${displayIdentity(series.model)}  ${compact(series.total)}`, safeWidth, "…"));
 	}
+	if (chart.series.length > displayedSeries.length) lines.push(truncateToWidth(theme.fg("muted", `… ${chart.series.length - displayedSeries.length} more series omitted`), safeWidth, "…"));
 	return lines.map((line) => visibleWidth(line) <= safeWidth ? line : truncateToWidth(line, safeWidth, "…"));
 }
 
