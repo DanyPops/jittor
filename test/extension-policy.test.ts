@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { formatFooterStatus, registerJittorExtension, routesFromPi, type JittorExtensionClient } from "../extension/src/index.ts";
+import { formatFooterStatus, registerJittorExtension, routesFromPi, type CodexRecoveryRuntime, type JittorExtensionClient } from "../extension/src/index.ts";
 import { buildFooterBudget } from "../extension/src/tui.ts";
 import type { EnforcementControl } from "../extension/src/settings.ts";
 import type { PolicyDecision } from "../src/policy.ts";
@@ -34,7 +34,34 @@ class FakeClient implements JittorExtensionClient {
 	}
 }
 
-function harness(client: FakeClient, enforcement?: EnforcementControl) {
+class FakeRecoveryRuntime implements CodexRecoveryRuntime {
+	nowValue = 1_000;
+	readonly delays: number[] = [];
+	private sequence = 0;
+	private readonly timers = new Map<number, () => void | Promise<void>>();
+	now = () => this.nowValue;
+	random = () => 0.5;
+	setTimeout = (callback: () => void | Promise<void>, delayMs: number): number => {
+		const id = ++this.sequence;
+		this.delays.push(delayMs);
+		this.timers.set(id, callback);
+		return id;
+	};
+	clearTimeout = (handle: unknown): void => { this.timers.delete(handle as number); };
+	pendingCount(): number { return this.timers.size; }
+	async runNext(): Promise<void> {
+		const entry = this.timers.entries().next().value as [number, () => void | Promise<void>] | undefined;
+		if (!entry) throw new Error("no recovery timer");
+		this.timers.delete(entry[0]);
+		await entry[1]();
+	}
+}
+
+function harness(
+	client: FakeClient,
+	enforcement?: EnforcementControl,
+	recovery: { enabled: boolean; runtime: CodexRecoveryRuntime } = { enabled: false, runtime: new FakeRecoveryRuntime() },
+) {
 	let defaultEnabled = true;
 	let footerEnabled = true;
 	const control = enforcement ?? {
@@ -54,11 +81,15 @@ function harness(client: FakeClient, enforcement?: EnforcementControl) {
 		setThinkingLevel(level: string) { thinkingChanges.push(level); },
 		getThinkingLevel() { return "high"; },
 	} as unknown as ExtensionAPI;
-	registerJittorExtension(pi, client, control);
+	const sentMessages: Array<{ message: unknown; options: unknown }> = [];
+	(pi as unknown as { sendMessage(message: unknown, options: unknown): void }).sendMessage = (message, options) => { sentMessages.push({ message, options }); };
+	registerJittorExtension(pi, client, control, { isCodexRecoveryEnabled: () => recovery.enabled }, recovery.runtime);
 	const statuses: Array<string | undefined> = [];
 	const footers: unknown[] = [];
 	const notifications: string[] = [];
 	let aborted = false;
+	let idle = true;
+	let pendingMessages = false;
 	const model = { provider: "openai-codex", id: "gpt-5.3-codex" };
 	const ctx = {
 		mode: "tui", hasUI: true, model,
@@ -72,13 +103,20 @@ function harness(client: FakeClient, enforcement?: EnforcementControl) {
 			],
 		},
 		abort() { aborted = true; },
+		isIdle() { return idle; },
+		hasPendingMessages() { return pendingMessages; },
 		ui: {
 			setStatus(_key: string, value: string | undefined) { statuses.push(value); },
 			setFooter(footer: unknown) { footers.push(footer); },
 			notify(message: string) { notifications.push(message); },
 		},
 	} as unknown as ExtensionContext;
-	return { handlers, commands, modelChanges, thinkingChanges, statuses, footers, notifications, ctx, aborted: () => aborted };
+	return {
+		handlers, commands, modelChanges, thinkingChanges, statuses, footers, notifications, sentMessages, ctx,
+		aborted: () => aborted,
+		setIdle(value: boolean) { idle = value; },
+		setPendingMessages(value: boolean) { pendingMessages = value; },
+	};
 }
 
 describe("Jittor Pi actuator", () => {
@@ -209,6 +247,73 @@ describe("Jittor Pi actuator", () => {
 		const records = client.calls.filter((call) => call.operation === "metrics.record");
 		expect(records.some((call) => (call.input as any).source === "codex-subscription")).toBe(true);
 		expect(records.some((call) => (call.input as any).metric === "cost" && (call.input as any).value === 0.004)).toBe(true);
+	});
+});
+
+describe("Jittor Codex settled-turn recovery", () => {
+	async function failCodex(app: ReturnType<typeof harness>): Promise<void> {
+		await app.handlers.get("after_provider_response")![0]!({ status: 429, headers: { "retry-after": "12" } }, app.ctx);
+		await app.handlers.get("message_end")![0]!({ message: {
+			role: "assistant",
+			provider: "openai-codex",
+			stopReason: "error",
+			errorMessage: "Too many concurrent requests",
+		} }, app.ctx);
+	}
+
+	it("waits for agent_settled before scheduling one opted-in hidden retry", async () => {
+		const runtime = new FakeRecoveryRuntime();
+		const app = harness(new FakeClient(), undefined, { enabled: true, runtime });
+		await failCodex(app);
+		expect(runtime.pendingCount()).toBe(0);
+
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		expect(runtime.pendingCount()).toBe(1);
+		expect(runtime.delays).toEqual([12_000]);
+		await runtime.runNext();
+
+		expect(app.sentMessages).toHaveLength(1);
+		expect(app.sentMessages[0]?.options).toEqual({ triggerTurn: true, deliverAs: "followUp" });
+		expect(app.sentMessages[0]?.message).toMatchObject({ customType: "jittor-codex-recovery", display: false });
+		expect(JSON.stringify(app.sentMessages[0])).not.toContain("Too many concurrent requests");
+	});
+
+	it("stays off by default and never overlaps pending Pi messages", async () => {
+		const disabledRuntime = new FakeRecoveryRuntime();
+		const disabled = harness(new FakeClient(), undefined, { enabled: false, runtime: disabledRuntime });
+		await failCodex(disabled);
+		await disabled.handlers.get("agent_settled")![0]!({}, disabled.ctx);
+		expect(disabledRuntime.pendingCount()).toBe(0);
+
+		const runtime = new FakeRecoveryRuntime();
+		const app = harness(new FakeClient(), undefined, { enabled: true, runtime });
+		await failCodex(app);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		app.setPendingMessages(true);
+		await runtime.runNext();
+		expect(app.sentMessages).toHaveLength(0);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		expect(runtime.pendingCount()).toBe(0);
+		app.setPendingMessages(false);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		expect(runtime.pendingCount()).toBe(1);
+	});
+
+	it("cancels a scheduled retry on human input and session shutdown", async () => {
+		const runtime = new FakeRecoveryRuntime();
+		const app = harness(new FakeClient(), undefined, { enabled: true, runtime });
+		await failCodex(app);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		expect(runtime.pendingCount()).toBe(1);
+		await app.handlers.get("input")![0]!({ source: "interactive", text: "do something else" }, app.ctx);
+		expect(runtime.pendingCount()).toBe(0);
+
+		await failCodex(app);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		expect(runtime.pendingCount()).toBe(1);
+		await app.handlers.get("session_shutdown")![0]!({}, app.ctx);
+		expect(runtime.pendingCount()).toBe(0);
 	});
 });
 
