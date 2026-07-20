@@ -81,6 +81,7 @@ describe("Codex settled-turn recovery policy", () => {
 		policy.observeFailure({ kind: "transport", transient: true }, 5_000);
 		expect(policy.plan(5_000)).toMatchObject({ action: "schedule", attempt: 1 });
 		policy.recordAttempt(5_000);
+		expect(policy.state()).toEqual({ attempts: 1, pending: false, lastFailureKind: "transport", windowStartedAt: 5_000 });
 		policy.observeFailure({ kind: "transport", transient: true }, 605_001);
 		expect(policy.plan(605_001)).toMatchObject({ action: "schedule", attempt: 1 });
 	});

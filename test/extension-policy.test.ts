@@ -82,8 +82,12 @@ function harness(
 		getThinkingLevel() { return "high"; },
 	} as unknown as ExtensionAPI;
 	const sentMessages: Array<{ message: unknown; options: unknown }> = [];
+	let recoveryEnabled = recovery.enabled;
 	(pi as unknown as { sendMessage(message: unknown, options: unknown): void }).sendMessage = (message, options) => { sentMessages.push({ message, options }); };
-	registerJittorExtension(pi, client, control, { isCodexRecoveryEnabled: () => recovery.enabled }, recovery.runtime);
+	registerJittorExtension(pi, client, control, {
+		isCodexRecoveryEnabled: () => recoveryEnabled,
+		setCodexRecoveryEnabled(value: boolean) { recoveryEnabled = value; },
+	}, recovery.runtime);
 	const statuses: Array<string | undefined> = [];
 	const footers: unknown[] = [];
 	const notifications: string[] = [];
@@ -116,6 +120,7 @@ function harness(
 		aborted: () => aborted,
 		setIdle(value: boolean) { idle = value; },
 		setPendingMessages(value: boolean) { pendingMessages = value; },
+		recoveryEnabled: () => recoveryEnabled,
 	};
 }
 
@@ -298,6 +303,27 @@ describe("Jittor Codex settled-turn recovery", () => {
 		app.setPendingMessages(false);
 		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
 		expect(runtime.pendingCount()).toBe(1);
+	});
+
+	it("exposes payload-safe status plus persistent on, off, and cancel controls", async () => {
+		const runtime = new FakeRecoveryRuntime();
+		const app = harness(new FakeClient(), undefined, { enabled: false, runtime });
+		await app.commands.get("jittor").handler("recovery status", app.ctx);
+		expect(app.notifications.at(-1)).toBe("Codex recovery: off · idle · attempt 0/3 · window 10m");
+
+		await app.commands.get("jittor").handler("recovery on", app.ctx);
+		expect(app.recoveryEnabled()).toBe(true);
+		await failCodex(app);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		await app.commands.get("jittor").handler("recovery", app.ctx);
+		expect(app.notifications.at(-1)).toBe("Codex recovery: on · cooldown 12s · attempt 1/3 · window 10m · concurrency");
+		expect(app.notifications.join("\n")).not.toContain("Too many concurrent requests");
+
+		await app.commands.get("jittor").handler("recovery cancel", app.ctx);
+		expect(runtime.pendingCount()).toBe(0);
+		expect(app.recoveryEnabled()).toBe(true);
+		await app.commands.get("jittor").handler("recovery off", app.ctx);
+		expect(app.recoveryEnabled()).toBe(false);
 	});
 
 	it("cancels a scheduled retry on human input and session shutdown", async () => {

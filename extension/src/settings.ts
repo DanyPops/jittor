@@ -11,6 +11,7 @@ export interface EnforcementControl {
 
 export interface CodexRecoveryControl {
 	isCodexRecoveryEnabled(): boolean;
+	setCodexRecoveryEnabled(enabled: boolean): void;
 }
 
 export interface PersistentExtensionControl extends EnforcementControl, CodexRecoveryControl {
