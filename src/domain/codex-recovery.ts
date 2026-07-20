@@ -50,6 +50,7 @@ export class CodexRecoveryPolicy {
 	private pendingFailure: CodexFailure | undefined;
 	private attempts = 0;
 	private windowStartedAt: number | undefined;
+	private lastFailureKind: CodexFailureKind | undefined;
 
 	constructor(
 		private readonly options: CodexRecoveryOptions,
@@ -65,6 +66,7 @@ export class CodexRecoveryPolicy {
 	observeFailure(failure: CodexFailure, now: number): void {
 		this.normalizeWindow(now);
 		this.pendingFailure = failure.transient ? failure : undefined;
+		this.lastFailureKind = failure.transient ? failure.kind : undefined;
 	}
 
 	observeSuccess(): void {
@@ -75,6 +77,7 @@ export class CodexRecoveryPolicy {
 		this.pendingFailure = undefined;
 		this.attempts = 0;
 		this.windowStartedAt = undefined;
+		this.lastFailureKind = undefined;
 	}
 
 	abandonFailure(): void {
@@ -112,14 +115,21 @@ export class CodexRecoveryPolicy {
 		return attempt;
 	}
 
-	state(): { attempts: number; pending: boolean } {
-		return { attempts: this.attempts, pending: this.pendingFailure !== undefined };
+	state(now?: number): { attempts: number; pending: boolean; lastFailureKind?: CodexFailureKind; windowStartedAt?: number } {
+		if (now !== undefined) this.normalizeWindow(now);
+		return {
+			attempts: this.attempts,
+			pending: this.pendingFailure !== undefined,
+			...(this.lastFailureKind ? { lastFailureKind: this.lastFailureKind } : {}),
+			...(this.windowStartedAt !== undefined ? { windowStartedAt: this.windowStartedAt } : {}),
+		};
 	}
 
 	private normalizeWindow(now: number): void {
 		if (this.windowStartedAt !== undefined && now - this.windowStartedAt >= this.options.attemptWindowMs) {
 			this.attempts = 0;
 			this.windowStartedAt = undefined;
+			if (!this.pendingFailure) this.lastFailureKind = undefined;
 		}
 	}
 }

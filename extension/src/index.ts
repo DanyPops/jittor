@@ -7,8 +7,10 @@ import {
 	CODEX_RECOVERY_MAX_DELAY_MS,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
 	MAX_DYNAMIC_ROUTES,
+	MILLISECONDS_PER_MINUTE,
+	MILLISECONDS_PER_SECOND,
 } from "../../src/constants.ts";
-import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureMetadata } from "../../src/domain/codex-recovery.ts";
+import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureKind, type CodexFailureMetadata } from "../../src/domain/codex-recovery.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
@@ -48,9 +50,13 @@ const SYSTEM_RECOVERY_RUNTIME: CodexRecoveryRuntime = {
 
 function recoveryControl(enforcement: EnforcementControl): CodexRecoveryControl {
 	const candidate = enforcement as EnforcementControl & Partial<CodexRecoveryControl>;
-	return typeof candidate.isCodexRecoveryEnabled === "function"
-		? { isCodexRecoveryEnabled: () => candidate.isCodexRecoveryEnabled!() }
-		: { isCodexRecoveryEnabled: () => false };
+	const set = (candidate as Partial<CodexRecoveryControl>).setCodexRecoveryEnabled;
+	return typeof candidate.isCodexRecoveryEnabled === "function" && typeof set === "function"
+		? {
+			isCodexRecoveryEnabled: () => candidate.isCodexRecoveryEnabled!(),
+			setCodexRecoveryEnabled: (enabled) => set.call(candidate, enabled),
+		}
+		: { isCodexRecoveryEnabled: () => false, setCodexRecoveryEnabled() {} };
 }
 
 function header(headers: Record<string, string>, name: string): string | undefined {
@@ -216,11 +222,32 @@ export function registerJittorExtension(
 		jitterRatio: CODEX_RECOVERY_JITTER_RATIO,
 	}, recoveryRuntime.random);
 	let recoveryTimer: unknown;
+	let recoveryCooldown: { until: number; attempt: number; failureKind: CodexFailureKind } | undefined;
 	let lastCodexResponse: CodexFailureMetadata = {};
 	const cancelRecovery = (resetPolicy: boolean): void => {
 		if (recoveryTimer !== undefined) recoveryRuntime.clearTimeout(recoveryTimer);
 		recoveryTimer = undefined;
+		recoveryCooldown = undefined;
 		if (resetPolicy) recoveryPolicy.cancel();
+	};
+	const recoveryStatusText = (): string => {
+		const now = recoveryRuntime.now();
+		const state = recoveryPolicy.state(now);
+		const enabled = codexRecovery.isCodexRecoveryEnabled();
+		const attempt = recoveryCooldown?.attempt ?? (state.pending ? state.attempts + 1 : state.attempts);
+		const phase = recoveryCooldown
+			? `cooldown ${Math.ceil(Math.max(0, recoveryCooldown.until - now) / MILLISECONDS_PER_SECOND)}s`
+			: state.pending ? "pending"
+				: state.attempts >= CODEX_RECOVERY_MAX_ATTEMPTS ? "exhausted"
+					: state.attempts > 0 ? "waiting" : "idle";
+		const failureKind = recoveryCooldown?.failureKind ?? state.lastFailureKind;
+		return [
+			`Codex recovery: ${enabled ? "on" : "off"}`,
+			phase,
+			`attempt ${attempt}/${CODEX_RECOVERY_MAX_ATTEMPTS}`,
+			`window ${CODEX_RECOVERY_ATTEMPT_WINDOW_MS / MILLISECONDS_PER_MINUTE}m`,
+			...(failureKind ? [failureKind] : []),
+		].join(" · ");
 	};
 	const scheduleCodexRecovery = (ctx: ExtensionContext): void => {
 		if (!codexRecovery.isCodexRecoveryEnabled() || recoveryTimer !== undefined || !ctx.isIdle() || ctx.hasPendingMessages()) return;
@@ -231,8 +258,10 @@ export function registerJittorExtension(
 			return;
 		}
 		if (plan.action !== "schedule") return;
+		recoveryCooldown = { until: recoveryRuntime.now() + plan.delayMs, attempt: plan.attempt, failureKind: plan.failureKind };
 		recoveryTimer = recoveryRuntime.setTimeout(async () => {
 			recoveryTimer = undefined;
+			recoveryCooldown = undefined;
 			if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
 			const attempt = recoveryPolicy.recordAttempt(recoveryRuntime.now());
 			if (!attempt) return;
@@ -296,6 +325,26 @@ export function registerJittorExtension(
 		description: "Inspect or control Jittor routing, budgets, and usage",
 		handler: async (args, ctx) => {
 			const action = args.trim().toLowerCase();
+			if (action === "recovery" || action === "recovery status") {
+				ctx.ui.notify(recoveryStatusText(), "info");
+				return;
+			}
+			if (action === "recovery on" || action === "recovery enable") {
+				codexRecovery.setCodexRecoveryEnabled(true);
+				ctx.ui.notify("Jittor Codex recovery enabled; bounded retries begin only after transient failures fully settle.", "info");
+				return;
+			}
+			if (action === "recovery off" || action === "recovery disable") {
+				cancelRecovery(true);
+				codexRecovery.setCodexRecoveryEnabled(false);
+				ctx.ui.notify("Jittor Codex recovery disabled and pending recovery cleared.", "info");
+				return;
+			}
+			if (action === "recovery cancel") {
+				cancelRecovery(true);
+				ctx.ui.notify(`Jittor Codex recovery cooldown and attempt window cleared; recovery remains ${codexRecovery.isCodexRecoveryEnabled() ? "on" : "off"}.`, "info");
+				return;
+			}
 			if (action === "off" || action === "disable") { disable(ctx); return; }
 			if (action === "on" || action === "enable") { await enable(ctx); return; }
 			if (action === "footer off" || action === "footer disable") {

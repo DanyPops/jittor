@@ -41,13 +41,16 @@ Blocking always has a daemon-independent escape hatch. `/jittor off` immediately
 
 ### Opt-in Codex settled-turn recovery
 
-Transient Codex recovery is securely off by default. Opt in explicitly through `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`):
+Transient Codex recovery is securely off by default and controlled through the existing Jittor command surface:
 
-```json
-{
-  "codexRecoveryEnabled": true
-}
+```text
+/jittor recovery status
+/jittor recovery on
+/jittor recovery off
+/jittor recovery cancel
 ```
+
+The on/off choice persists privately in `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`). Status reports only enabled state, cooldown, bounded attempt/window counters, and the normalized failure class. `cancel` clears the current cooldown and attempt window without changing the persisted on/off choice.
 
 Jittor observes finalized Codex assistant errors through Pi's public message lifecycle, classifies only bounded error metadata, and waits for `agent_settled` before acting. That boundary guarantees Pi's built-in retry, compaction retry, and queued follow-up work has finished. A transient concurrency, rate-limit, overload, or transport failure then schedules one hidden follow-up with Retry-After-aware capped jitter. Recovery is limited to three attempts per ten-minute window, never overlaps pending Pi messages, resets after success, and is canceled by human input or session shutdown. Quota, authentication, invalid-request, unknown, and aborted failures remain terminal. Raw provider payloads are never retained or injected.
 
