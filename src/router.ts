@@ -120,6 +120,18 @@ export class JittorRouter implements RouterController {
 		return this.status();
 	}
 
+	applyModelRanking(candidates: Route[]): RouterStatus {
+		if (!Array.isArray(candidates) || candidates.length === 0) throw new Error("model ranking must contain candidates");
+		const ranked = candidates
+			.filter((candidate, index) => candidates.findIndex((other) => sameRoute(other, candidate)) === index)
+			.map((candidate) => this.availableRoutes.find((route) => sameRoute(route, candidate)))
+			.filter((route): route is Route => route !== undefined);
+		const current = ranked.find((route) => sameRoute(route, this.currentRoute));
+		if (!current) throw new Error("model ranking does not contain the current available route");
+		this.availableRoutes = [structuredClone(current), ...ranked.filter((route) => !sameRoute(route, current)).map((route) => structuredClone(route))];
+		return this.status();
+	}
+
 	private async runPoll(): Promise<TelemetryPollResult> {
 		const statuses = await Promise.all(this.options.sources.map(async (source): Promise<TelemetrySourceStatus> => {
 			try {

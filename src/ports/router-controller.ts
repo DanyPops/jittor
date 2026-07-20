@@ -39,4 +39,5 @@ export interface RouterController {
 	clearOverride(): RouterStatus;
 	setCurrentRoute(route: Route): RouterStatus;
 	setAvailableRoutes(routes: Route[]): RouterStatus;
+	applyModelRanking?(candidates: Route[]): RouterStatus;
 }

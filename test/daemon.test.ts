@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderSystemdUnit } from "../src/cli.ts";
 import { connectJittorClient } from "../src/client.ts";
-import { startDaemon, telemetrySourcesFromEnvironment } from "../src/daemon.ts";
+import { benchmarkSourcesFromEnvironment, startDaemon, telemetrySourcesFromEnvironment } from "../src/daemon.ts";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, writeDaemonHandle } from "../src/state.ts";
 import { VERSION } from "../src/version.ts";
 
@@ -37,6 +37,9 @@ describe("Jittor daemon state", () => {
 		expect(telemetrySourcesFromEnvironment({})).toEqual([]);
 		expect(telemetrySourcesFromEnvironment({ JITTOR_CODEX_AUTH_FILE: "/private/auth.json" }).map((source) => source.id)).toEqual(["codex-subscription"]);
 		expect(telemetrySourcesFromEnvironment({ OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter"]);
+		expect(benchmarkSourcesFromEnvironment({})).toEqual([]);
+		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1" }).map((source) => source.id)).toEqual(["openrouter-models"]);
+		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "openrouter-artificial-analysis"]);
 	});
 
 	it("composes SQLite, authenticated HTTP, and the typed client", async () => {
@@ -69,5 +72,8 @@ describe("Jittor systemd unit", () => {
 		expect(renderSystemdUnit({
 			bunBin: "/usr/bin/bun", cliPath: "/opt/jittor/src/cli.ts", codexAuthFile: "/home/test/.codex/auth.json",
 		})).toContain('Environment="JITTOR_CODEX_AUTH_FILE=/home/test/.codex/auth.json"');
+		expect(renderSystemdUnit({
+			bunBin: "/usr/bin/bun", cliPath: "/opt/jittor/src/cli.ts", openRouterBenchmarks: true,
+		})).toContain("Environment=JITTOR_OPENROUTER_BENCHMARKS=1");
 	});
 });

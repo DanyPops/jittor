@@ -30,6 +30,7 @@ class FakeClient implements JittorExtensionClient {
 		if (operation === "router.status") return this.status;
 		if (operation === "metrics.query") return this.metrics;
 		if (operation === "metrics.record") return { id: this.calls.length, ...(input as object) };
+		if (operation === "models.rank") return { scopeAuthority: "available-models", scopeWarning: "exact session scope unavailable", taskClass: "coding", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
 		return {};
 	}
 }
@@ -199,6 +200,23 @@ describe("Jittor Pi actuator", () => {
 		expect(opened).toBe(true);
 	});
 
+	it("sends only public Pi candidates to the advisory benchmark ranking panel", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		let rendered = "";
+		(app.ctx.ui as any).custom = async (factory: Function) => {
+			const component = factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
+			rendered = component.render(80).join("\n");
+			return "close";
+		};
+		await app.commands.get("jittor").handler("benchmarks coding", app.ctx);
+		const call = client.calls.find((candidate) => candidate.operation === "models.rank")!;
+		expect(call.input).toMatchObject({ scopeAuthority: "available-models", taskClass: "coding" });
+		expect((call.input as any).candidates).toHaveLength(4);
+		expect((call.input as any).candidates.map((candidate: any) => `${candidate.provider}/${candidate.model}`)).toContain("openrouter/openai/gpt-4.1-mini");
+		expect(rendered).toContain("ADVISORY");
+	});
+
 	it("supports a local emergency off switch without calling the daemon", async () => {
 		let enabled = true;
 		let footerEnabled = true;
@@ -281,6 +299,27 @@ describe("Jittor Pi actuator", () => {
 		expect(app.modelChanges).toEqual([]);
 		expect(app.thinkingChanges).toEqual(["medium"]);
 		expect(app.aborted()).toBe(false);
+	});
+
+	it("records content-free local timing reliability tool-loop and explicit outcome evidence", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		const startedAt = Date.now() - 1_000;
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: startedAt }, app.ctx);
+		await app.handlers.get("message_update")![0]!({ assistantMessageEvent: { type: "text_delta", delta: "private response must not persist" } }, app.ctx);
+		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {} }, app.ctx);
+		await app.handlers.get("tool_execution_end")![0]!({ toolCallId: "tool-1", toolName: "edit", args: { secret: "private" }, result: { private: true }, isError: false }, app.ctx);
+		await app.handlers.get("turn_end")![0]!({ message: {
+			role: "assistant", provider: "openai-codex", model: "gpt-5.4", stopReason: "stop",
+			usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 0, cost: { total: 0.004 } },
+		}, toolResults: [{ content: "private tool output" }] }, app.ctx);
+		await app.commands.get("jittor").handler("outcome accepted", app.ctx);
+		const local = client.calls.filter((call) => call.operation === "metrics.record" && (call.input as any).source === "local-model").map((call) => call.input as any);
+		expect(local.map((metric) => metric.metric)).toContain("ttft");
+		expect(local.map((metric) => metric.metric)).toContain("tool-calls");
+		expect(local.some((metric) => metric.metric === "outcome-accepted" && metric.value === 1)).toBe(true);
+		expect(local.every((metric) => metric.attributes.taskClass === "coding")).toBe(true);
+		expect(JSON.stringify(local)).not.toContain("private");
 	});
 
 	it("records Codex response headers and finalized assistant usage through the daemon", async () => {

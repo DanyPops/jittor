@@ -17,7 +17,7 @@ describe("Jittor CLI context telemetry parity", () => {
 		const output: string[] = [];
 		const calls: Array<{ operation: string; input: unknown }> = [];
 		const code = await runCli(["context", "--json", "--since", "1000", "--until", "2000"], {
-			client: { async call(operation: "context.assess", input: { since?: number; until?: number }) { calls.push({ operation, input }); return summary; } },
+			client: { async call(operation: "context.assess", input: { since?: number; until?: number }) { calls.push({ operation, input }); return summary; } } as never,
 			stdout: (line: string) => output.push(line), stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: () => {},
 		});
 		expect(code).toBe(0);
@@ -25,10 +25,46 @@ describe("Jittor CLI context telemetry parity", () => {
 		expect(JSON.parse(output.join("\n"))).toEqual(summary);
 	});
 
+	it("exposes benchmark refresh and query through independent JSON and human presenters", async () => {
+		const output: string[] = [];
+		const calls: Array<{ operation: string; input: unknown }> = [];
+		const result = {
+			sourceId: "openrouter-models", snapshotId: "snapshot-1", retrievedAt: 1_000, publishedAt: 1_000, completeness: "complete" as const, freshness: "fresh" as const, freshUntil: 100_000,
+			observations: [{
+				model: { provider: "openai", model: "gpt-5.4", version: null, canonical: "openai/gpt-5.4", aliases: [] }, dimension: "price-input", value: 0.000002, unit: "usd",
+				provenance: { sourceId: "openrouter-models", sourceType: "marketplace", publisher: "OpenRouter", url: "https://openrouter.ai/api/v1/models", revision: "r1", publishedAt: null, retrievedAt: 1_000, freshUntil: 100_000, license: "OpenRouter API terms", confidence: 0.9 }, methodology: { basis: "price per input token" },
+			}],
+		};
+		const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return result; } };
+		expect(await runCli(["benchmarks", "list", "--source", "openrouter-models", "--json"], {
+			client: client as never, stdout: (line) => output.push(line), stderr: (line) => output.push(line), systemctl: () => {}, installService: () => {}, serve: () => {},
+		})).toBe(0);
+		expect(calls).toEqual([{ operation: "benchmark.query", input: { sourceId: "openrouter-models" } }]);
+		expect(JSON.parse(output[0]!)).toEqual(result);
+		output.length = 0;
+		expect(await runCli(["benchmarks", "list", "--source", "openrouter-models"], {
+			client: client as never, stdout: (line) => output.push(line), stderr: (line) => output.push(line), systemctl: () => {}, installService: () => {}, serve: () => {},
+		})).toBe(0);
+		expect(output.join("\n")).toContain("openai/gpt-5.4");
+		expect(output.join("\n")).toContain("OpenRouter");
+	});
+
+	it("exposes model ranking with explicit candidates and scope authority", async () => {
+		const output: string[] = [];
+		const calls: Array<{ operation: string; input: any }> = [];
+		const ranking = { scopeAuthority: "available-models", scopeWarning: "Pi available models are not the exact session scope", taskClass: "coding", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
+		const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return ranking; } };
+		expect(await runCli(["benchmarks", "rank", "--candidate", "openai/gpt-5.4@high", "--source", "openrouter-models", "--task", "coding", "--budget", "0.5", "--json"], {
+			client: client as never, stdout: (line) => output.push(line), stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: () => {},
+		})).toBe(0);
+		expect(calls[0]).toMatchObject({ operation: "models.rank", input: { candidates: [{ provider: "openai", model: "gpt-5.4", thinking: "high" }], scopeAuthority: "available-models", taskClass: "coding", budgetPressure: 0.5, sourceIds: ["openrouter-models"] } });
+		expect(JSON.parse(output[0]!)).toEqual(ranking);
+	});
+
 	it("renders actionable human output and rejects invalid bounds", async () => {
 		const output: string[] = [];
 		const deps = {
-			client: { async call(_operation: "context.assess", _input: { since?: number; until?: number }) { return summary; } }, stdout: (line: string) => output.push(line), stderr: (line: string) => output.push(line),
+			client: { async call(_operation: "context.assess", _input: { since?: number; until?: number }) { return summary; } } as never, stdout: (line: string) => output.push(line), stderr: (line: string) => output.push(line),
 			systemctl: () => {}, installService: () => {}, serve: () => {},
 		};
 		expect(await runCli(["context"], deps)).toBe(0);

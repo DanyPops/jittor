@@ -15,10 +15,13 @@ import {
 import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureKind, type CodexFailureMetadata } from "../../src/domain/codex-recovery.ts";
 import { CompactionTelemetry, papyrusContextMetric, validatePapyrusContextInjection } from "../../src/domain/context-telemetry.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
+import { classifyTaskFromTools, modelRunMetrics, TASK_CLASSES, type ModelRunObservation, type ModelTaskClass } from "../../src/domain/model-observation.ts";
+import type { ModelCandidate } from "../../src/domain/model-ranking.ts";
 import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
 import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
+import { showBenchmarkPanel } from "./benchmark-tui.ts";
 import { installIntegratedFooter, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
 import { persistentEnforcementControl, type CodexRecoveryControl, type EnforcementControl, type UsageBudgetControl } from "./settings.ts";
@@ -83,6 +86,16 @@ async function recordMetrics(client: JittorExtensionClient, metrics: MetricObser
 	for (const metric of metrics) await client.call("metrics.record", metric);
 }
 
+interface ActiveLocalModelRun {
+	runId: string;
+	startedAt: number;
+	firstTokenAt: number | null;
+	providerResponses: number;
+	toolNames: string[];
+	toolCalls: number;
+	toolFailures: number;
+}
+
 async function refreshFooter(client: JittorExtensionClient, state: IntegratedFooterState): Promise<void> {
 	const status = await client.call("router.status", {}) as RouterStatus;
 	const provider = status.currentRoute?.provider;
@@ -137,6 +150,17 @@ function supportsThinking(model: PiRouteModel, level: string): boolean {
 
 function modelCost(model: PiRouteModel): number {
 	return (model.cost?.input ?? 0) + (model.cost?.output ?? 0);
+}
+
+export function benchmarkCandidatesFromPi(models: PiRouteModel[], thinking: string): ModelCandidate[] {
+	const candidates: ModelCandidate[] = [];
+	for (const model of models) {
+		if (!model.provider || !model.id || candidates.some((candidate) => candidate.provider === model.provider && candidate.model === model.id)) continue;
+		const level = supportsThinking(model, thinking) ? thinking : "off";
+		candidates.push({ provider: model.provider, model: model.id, thinking: level });
+		if (candidates.length >= MAX_DYNAMIC_ROUTES) break;
+	}
+	return candidates;
 }
 
 export function routesFromPi(models: PiRouteModel[], current: PiRouteModel, thinking: string): Route[] {
@@ -231,6 +255,9 @@ export function registerJittorExtension(
 	const footerState: IntegratedFooterState = { providerBudget: null };
 	const usageBudgets = usageBudgetControl(enforcement);
 	let compactionTelemetry = new CompactionTelemetry();
+	let localRunSequence = 0;
+	let activeLocalRun: ActiveLocalModelRun | undefined;
+	let lastCompletedLocalRun: ModelRunObservation | undefined;
 	const contextObservations = new Set<string>();
 	const stopPapyrusContext = pi.events?.on?.(PAPYRUS_CONTEXT_INJECTION_CHANNEL, (payload) => {
 		try {
@@ -353,9 +380,35 @@ export function registerJittorExtension(
 	};
 
 	pi.registerCommand("jittor", {
-		description: "Inspect or control Jittor routing, budgets, and usage",
+		description: "Inspect or control Jittor routing, benchmarks, budgets, and usage",
 		handler: async (args, ctx) => {
 			const action = args.trim().toLowerCase();
+			if (action === "benchmarks" || action.startsWith("benchmarks ")) {
+				if (!ctx.model) {
+					ctx.ui.notify("No active Pi model is available for benchmark recommendations.", "warning");
+					return;
+				}
+				const requestedTask = action.split(/\s+/)[1] ?? "general";
+				if (!TASK_CLASSES.includes(requestedTask as ModelTaskClass)) {
+					ctx.ui.notify("Usage: /jittor benchmarks [coding|research|planning|general]", "warning");
+					return;
+				}
+				const candidates = benchmarkCandidatesFromPi(ctx.modelRegistry.getAvailable() as PiRouteModel[], pi.getThinkingLevel());
+				await showBenchmarkPanel(ctx, client, candidates, `${ctx.model.provider}/${ctx.model.id}`, requestedTask as ModelTaskClass);
+				return;
+			}
+			if (action === "outcome accepted" || action === "outcome rejected") {
+				if (!lastCompletedLocalRun) {
+					ctx.ui.notify("No completed local model run is available for an explicit outcome.", "warning");
+					return;
+				}
+				const explicitOutcome = action.endsWith("accepted") ? "accepted" as const : "rejected" as const;
+				const outcomeMetric = modelRunMetrics({ ...lastCompletedLocalRun, explicitOutcome }).find((metric) => metric.metric === "outcome-accepted")!;
+				outcomeMetric.observedAt = Date.now();
+				await recordMetrics(client, [outcomeMetric]);
+				ctx.ui.notify(`Recorded explicit ${explicitOutcome} outcome for the latest local model run.`, "info");
+				return;
+			}
 			if (action === "recovery" || action === "recovery status") {
 				ctx.ui.notify(recoveryStatusText(), "info");
 				return;
@@ -459,6 +512,8 @@ export function registerJittorExtension(
 	pi.on("session_start", async (_event, ctx) => {
 		finishCompactionUi();
 		compactionTelemetry = new CompactionTelemetry();
+		activeLocalRun = undefined;
+		lastCompletedLocalRun = undefined;
 		cancelRecovery(true);
 		lastCodexResponse = {};
 		ctx.ui.setStatus("jittor", undefined);
@@ -533,9 +588,18 @@ export function registerJittorExtension(
 		await syncCurrentRoute(pi, client, ctx, ctx.model, event.level).catch(() => undefined);
 	});
 
-	pi.on("turn_start", async (_event, ctx) => {
+	pi.on("turn_start", async (event, ctx) => {
 		compactionTelemetry.observeTurn();
 		lastCodexResponse = {};
+		activeLocalRun = {
+			runId: `local-${event.timestamp}-${++localRunSequence}`,
+			startedAt: event.timestamp,
+			firstTokenAt: null,
+			providerResponses: 0,
+			toolNames: [],
+			toolCalls: 0,
+			toolFailures: 0,
+		};
 		if (!enforcement.isEnabled()) return;
 		try {
 			await syncCurrentRoute(pi, client, ctx);
@@ -547,7 +611,20 @@ export function registerJittorExtension(
 		}
 	});
 
+	pi.on("message_update", async (event) => {
+		if (!activeLocalRun || activeLocalRun.firstTokenAt !== null) return;
+		if (["text_delta", "thinking_delta", "toolcall_delta"].includes(event.assistantMessageEvent.type)) activeLocalRun.firstTokenAt = Date.now();
+	});
+
+	pi.on("tool_execution_end", async (event) => {
+		if (!activeLocalRun) return;
+		activeLocalRun.toolCalls += 1;
+		if (event.isError) activeLocalRun.toolFailures += 1;
+		if (activeLocalRun.toolNames.length < 100) activeLocalRun.toolNames.push(event.toolName);
+	});
+
 	pi.on("after_provider_response", async (event, ctx) => {
+		if (activeLocalRun) activeLocalRun.providerResponses += 1;
 		if (ctx.model?.provider === "openai-codex") {
 			lastCodexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
 		}
@@ -559,6 +636,43 @@ export function registerJittorExtension(
 			if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Codex telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
 		}
 		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
+	});
+
+	pi.on("turn_end", async (event) => {
+		const active = activeLocalRun;
+		activeLocalRun = undefined;
+		const message = event.message as unknown;
+		if (!active || typeof message !== "object" || message === null || Array.isArray(message)) return;
+		const value = message as Record<string, unknown>;
+		if (value["role"] !== "assistant" || typeof value["provider"] !== "string" || typeof value["model"] !== "string") return;
+		const usage = typeof value["usage"] === "object" && value["usage"] !== null ? value["usage"] as Record<string, unknown> : {};
+		const amount = (name: string): number => typeof usage[name] === "number" && Number.isFinite(usage[name]) ? usage[name] as number : 0;
+		const cost = typeof usage["cost"] === "object" && usage["cost"] !== null && typeof (usage["cost"] as Record<string, unknown>)["total"] === "number"
+			? (usage["cost"] as Record<string, number>)["total"] ?? 0 : 0;
+		const stopReason = ["stop", "length", "toolUse", "error", "aborted"].includes(String(value["stopReason"]))
+			? value["stopReason"] as ModelRunObservation["stopReason"] : "unknown";
+		const completedAt = Math.max(Date.now(), active.firstTokenAt ?? active.startedAt, active.startedAt);
+		lastCompletedLocalRun = {
+			runId: active.runId,
+			provider: value["provider"],
+			model: value["model"],
+			thinking: pi.getThinkingLevel(),
+			taskClass: classifyTaskFromTools(active.toolNames),
+			startedAt: active.startedAt,
+			firstTokenAt: active.firstTokenAt,
+			completedAt,
+			inputTokens: amount("input"),
+			outputTokens: amount("output"),
+			cacheReadTokens: amount("cacheRead"),
+			cacheWriteTokens: amount("cacheWrite"),
+			costUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0,
+			providerResponses: Math.max(1, active.providerResponses),
+			toolCalls: active.toolCalls,
+			toolFailures: active.toolFailures,
+			stopReason,
+			explicitOutcome: "unknown",
+		};
+		await recordMetrics(client, modelRunMetrics(lastCompletedLocalRun)).catch(() => undefined);
 	});
 
 	pi.on("message_end", async (event, _ctx) => {
@@ -587,6 +701,8 @@ export function registerJittorExtension(
 		stopPapyrusContext?.();
 		cancelRecovery(true);
 		lastCodexResponse = {};
+		activeLocalRun = undefined;
+		lastCompletedLocalRun = undefined;
 		ctx.ui.setStatus("jittor", undefined);
 		ctx.ui.setFooter(undefined);
 	});

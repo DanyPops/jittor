@@ -92,7 +92,7 @@ describe("Jittor output-channel conformance", () => {
     const jsonLines: string[] = []
     const humanLines: string[] = []
     const dependencies = {
-      client: { async call() { return assessment } },
+      client: { async call() { return assessment } } as never,
       stderr() {},
       systemctl() {},
       installService() {},

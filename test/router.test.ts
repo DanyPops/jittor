@@ -100,6 +100,14 @@ describe("Jittor router controller", () => {
 		expect(decision.trace.join("\n")).toContain("switch-model route unavailable");
 	});
 
+	it("applies exact-scope model ranking only by reordering and narrowing existing routes", () => {
+		const router = new JittorRouter({ metrics: new MemoryMetrics(), sources: [], policy: config, routes, currentRoute: routes[0]!, clock: () => now });
+		const unknown = { provider: "other", model: "outside", thinking: "high" };
+		const status = router.applyModelRanking([routes[2]!, unknown, routes[0]!]);
+		expect(status.availableRoutes).toEqual([routes[0]!, routes[2]!]);
+		expect(status.availableRoutes).not.toContainEqual(unknown);
+	});
+
 	it("supports explicit pause and expiring route overrides", async () => {
 		let currentTime = now;
 		const router = new JittorRouter({
