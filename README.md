@@ -54,7 +54,9 @@ The on/off choice persists privately in `$XDG_CONFIG_HOME/jittor/extension.json`
 
 Jittor observes finalized Codex assistant errors through Pi's public message lifecycle, classifies only bounded error metadata, and waits for `agent_settled` before acting. That boundary guarantees Pi's built-in retry, compaction retry, and queued follow-up work has finished. A transient concurrency, rate-limit, overload, or transport failure then schedules one hidden follow-up with Retry-After-aware capped jitter. Recovery is limited to three attempts per ten-minute window, never overlaps pending Pi messages, resets after success, and is canceled by human input or session shutdown. Quota, authentication, invalid-request, unknown, and aborted failures remain terminal. Raw provider payloads are never retained or injected.
 
-Run `/jittor usage` for a colored Unicode token histogram with X/Y axes, provider/model series, input/output/cache totals, refresh, and `24h`, `7d`, `30d`, or `90d` ranges. Left/Right changes range and `r` refreshes. Usage is persisted by the daemon from finalized Pi assistant messages.
+Run `/jittor usage` for a colored Unicode cumulative token graph with X/Y axes, provider/model series, input/output/cache totals, refresh, and explicit **Hourly**, **Daily**, **Weekly**, and **Monthly** periods. Left/Right changes period and `r` refreshes. Usage is persisted by the daemon from finalized Pi assistant messages.
+
+Token-budget thresholds are optional and must be configured by the user; Jittor never infers a token allowance from Codex or another provider's subscription percentage. Configure or clear one period with `/jittor usage budget <hourly|daily|weekly|monthly> <positive-tokens|off>`, and inspect all four with `/jittor usage budget`. A configured budget appears as a horizontal threshold on the cumulative graph with explicit remaining or **OVER BUDGET** state. These private settings persist in `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`).
 
 See [`docs/CALIBRATION.md`](docs/CALIBRATION.md) for thresholds and rollback, and [`docs/USAGE_PRIOR_ART.md`](docs/USAGE_PRIOR_ART.md) for the chart design research.
 

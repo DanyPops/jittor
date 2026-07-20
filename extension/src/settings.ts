@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { JITTOR_EXTENSION_SETTINGS_FILENAME, JITTOR_STATE_DIRECTORY } from "../../src/constants.ts";
+import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
 
 export interface EnforcementControl {
 	isEnabled(): boolean;
@@ -14,14 +15,31 @@ export interface CodexRecoveryControl {
 	setCodexRecoveryEnabled(enabled: boolean): void;
 }
 
-export interface PersistentExtensionControl extends EnforcementControl, CodexRecoveryControl {
-	setCodexRecoveryEnabled(enabled: boolean): void;
+export interface UsageBudgetControl {
+	getUsageTokenBudget(period: UsagePeriod): number | undefined;
+	setUsageTokenBudget(period: UsagePeriod, tokens: number | undefined): void;
 }
+
+export interface PersistentExtensionControl extends EnforcementControl, CodexRecoveryControl, UsageBudgetControl {}
 
 interface ExtensionSettings {
 	enforcementEnabled: boolean;
 	footerEnabled: boolean;
 	codexRecoveryEnabled: boolean;
+	usageTokenBudgets: Partial<Record<UsagePeriod, number>>;
+}
+
+function defaultSettings(): ExtensionSettings {
+	return { enforcementEnabled: true, footerEnabled: true, codexRecoveryEnabled: false, usageTokenBudgets: {} };
+}
+
+function parseUsageTokenBudgets(value: unknown): Partial<Record<UsagePeriod, number>> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+	const record = value as Record<string, unknown>;
+	return Object.fromEntries(USAGE_PERIODS.flatMap(({ id }) => {
+		const tokens = record[id];
+		return typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0 ? [[id, tokens]] : [];
+	})) as Partial<Record<UsagePeriod, number>>;
 }
 
 function settingsPath(env: Record<string, string | undefined> = process.env): string {
@@ -32,15 +50,16 @@ function settingsPath(env: Record<string, string | undefined> = process.env): st
 function loadSettings(path: string): ExtensionSettings {
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
-		if (typeof value !== "object" || value === null || Array.isArray(value)) return { enforcementEnabled: true, footerEnabled: true, codexRecoveryEnabled: false };
+		if (typeof value !== "object" || value === null || Array.isArray(value)) return defaultSettings();
 		const record = value as Record<string, unknown>;
 		return {
 			enforcementEnabled: record["enforcementEnabled"] !== false,
 			footerEnabled: record["footerEnabled"] !== false,
 			codexRecoveryEnabled: record["codexRecoveryEnabled"] === true,
+			usageTokenBudgets: parseUsageTokenBudgets(record["usageTokenBudgets"]),
 		};
 	} catch {
-		return { enforcementEnabled: true, footerEnabled: true, codexRecoveryEnabled: false };
+		return defaultSettings();
 	}
 }
 
@@ -69,6 +88,15 @@ export function persistentEnforcementControl(env: Record<string, string | undefi
 		isCodexRecoveryEnabled: () => settings.codexRecoveryEnabled,
 		setCodexRecoveryEnabled(value: boolean): void {
 			settings.codexRecoveryEnabled = value;
+			persistSettings(path, settings);
+		},
+		getUsageTokenBudget(period): number | undefined {
+			return settings.usageTokenBudgets[period];
+		},
+		setUsageTokenBudget(period, tokens): void {
+			if (tokens !== undefined && (!Number.isFinite(tokens) || tokens <= 0)) throw new Error("usage token budget must be a positive finite number");
+			if (tokens === undefined) delete settings.usageTokenBudgets[period];
+			else settings.usageTokenBudgets[period] = tokens;
 			persistSettings(path, settings);
 		},
 	};

@@ -12,12 +12,13 @@ import {
 } from "../../src/constants.ts";
 import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureKind, type CodexFailureMetadata } from "../../src/domain/codex-recovery.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
+import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
 import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
 import { installIntegratedFooter, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
-import { persistentEnforcementControl, type CodexRecoveryControl, type EnforcementControl } from "./settings.ts";
+import { persistentEnforcementControl, type CodexRecoveryControl, type EnforcementControl, type UsageBudgetControl } from "./settings.ts";
 import { buildFooterBudget, formatFooterStatus, showJittorPanel } from "./tui.ts";
 import { showUsagePanel } from "./usage.ts";
 
@@ -47,6 +48,16 @@ const SYSTEM_RECOVERY_RUNTIME: CodexRecoveryRuntime = {
 	setTimeout(callback, delayMs) { return setTimeout(() => { void callback(); }, delayMs); },
 	clearTimeout(handle) { clearTimeout(handle as ReturnType<typeof setTimeout>); },
 };
+
+function usageBudgetControl(enforcement: EnforcementControl): UsageBudgetControl {
+	const candidate = enforcement as EnforcementControl & Partial<UsageBudgetControl>;
+	return typeof candidate.getUsageTokenBudget === "function" && typeof candidate.setUsageTokenBudget === "function"
+		? {
+			getUsageTokenBudget: (period) => candidate.getUsageTokenBudget!(period),
+			setUsageTokenBudget: (period, tokens) => candidate.setUsageTokenBudget!(period, tokens),
+		}
+		: { getUsageTokenBudget: () => undefined, setUsageTokenBudget() {} };
+}
 
 function recoveryControl(enforcement: EnforcementControl): CodexRecoveryControl {
 	const candidate = enforcement as EnforcementControl & Partial<CodexRecoveryControl>;
@@ -214,6 +225,7 @@ export function registerJittorExtension(
 	recoveryRuntime: CodexRecoveryRuntime = SYSTEM_RECOVERY_RUNTIME,
 ): void {
 	const footerState: IntegratedFooterState = { providerBudget: null };
+	const usageBudgets = usageBudgetControl(enforcement);
 	const recoveryPolicy = new CodexRecoveryPolicy({
 		baseDelayMs: CODEX_RECOVERY_BASE_DELAY_MS,
 		maxDelayMs: CODEX_RECOVERY_MAX_DELAY_MS,
@@ -360,8 +372,34 @@ export function registerJittorExtension(
 				ctx.ui.notify("Jittor informational footer enabled; routing enforcement is unchanged.", "info");
 				return;
 			}
+			if (action === "usage budget" || action.startsWith("usage budget ")) {
+				const [, , periodText, valueText] = action.split(/\s+/);
+				const period = USAGE_PERIODS.some((candidate) => candidate.id === periodText) ? periodText as UsagePeriod : undefined;
+				if (!period) {
+					const values = USAGE_PERIODS.map(({ id, label }) => `${label}: ${usageBudgets.getUsageTokenBudget(id)?.toLocaleString() ?? "not configured"}`).join(" · ");
+					ctx.ui.notify(`Token budgets · ${values}`, "info");
+					return;
+				}
+				if (valueText === undefined) {
+					ctx.ui.notify(`${USAGE_PERIODS.find((candidate) => candidate.id === period)!.label} token budget: ${usageBudgets.getUsageTokenBudget(period)?.toLocaleString() ?? "not configured"}`, "info");
+					return;
+				}
+				if (valueText === "off" || valueText === "clear") {
+					usageBudgets.setUsageTokenBudget(period, undefined);
+					ctx.ui.notify(`${USAGE_PERIODS.find((candidate) => candidate.id === period)!.label} token budget cleared.`, "info");
+					return;
+				}
+				const tokens = Number(valueText.replaceAll(",", ""));
+				if (!Number.isFinite(tokens) || tokens <= 0) {
+					ctx.ui.notify("Usage: /jittor usage budget <hourly|daily|weekly|monthly> <positive-tokens|off>", "warning");
+					return;
+				}
+				usageBudgets.setUsageTokenBudget(period, tokens);
+				ctx.ui.notify(`${USAGE_PERIODS.find((candidate) => candidate.id === period)!.label} token budget set to ${tokens.toLocaleString()} tokens.`, "info");
+				return;
+			}
 			if (action === "usage") {
-				await showUsagePanel(ctx, client);
+				await showUsagePanel(ctx, client, usageBudgets);
 				return;
 			}
 			if (!enforcement.isEnabled()) {
