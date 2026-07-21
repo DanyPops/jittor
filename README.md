@@ -92,6 +92,25 @@ Papyrus emits content-free prompt-injection observations through Pi's shared ext
 
 Run `/jittor context` for the in-session summary, or `jittor context [--since <epoch-ms>] [--until <epoch-ms>] [--json]` through the authenticated daemon client. The assessment reports bounded average/p95/max injection, Rule/Task mix, unchanged rate, compaction frequency/duration/reasons, and between-compaction provider/cache facts. Repeated prompt content is not labeled billed waste: provider-reported input/cache usage and an injection-disabled control are required before making cost or compaction-causality claims.
 
+### CLI operations
+
+Every daemon operation is reachable from the CLI through the authenticated typed client only — no command reads the SQLite store or a provider adapter directly. Each command supports `--json` for stable machine output; without it, a purpose-built human presenter renders the same result, per [`docs/OUTPUT_CHANNELS.md`](docs/OUTPUT_CHANNELS.md).
+
+```text
+jittor metrics record --source <s> --scope <s> --metric <s> --value <number|null> --unit <unit> [--observed-at <ms>] [--attributes <json>] [--json]
+jittor metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] [--until <ms>] [--limit <n>] [--order asc|desc] [--json]
+jittor metrics prune --before <ms> [--json]
+jittor service checkpoint [--json]
+jittor telemetry poll [--json]
+jittor router status|decide|pause|resume|clear-override [--json]
+jittor router override --route <provider/model@thinking> [--expires-at <ms>] [--json]
+jittor router current-route --route <provider/model@thinking> [--json]
+jittor router available-routes [--route <provider/model@thinking> ...] [--json]
+jittor op <operation> [--input <json>]
+```
+
+`jittor op` is a raw escape hatch restricted to the daemon's own `EXPECTED_OPERATION_NAMES`; it rejects an unrecognized operation name before ever reaching the daemon rather than forwarding it blindly. Human-readable metric listings and router status are bounded (at most 50 metric rows and 20 telemetry sources are printed; `--json` output is bounded independently by the daemon's own query and response-size limits). No command prints the daemon bearer token, a provider API key, or an OAuth credential; a daemon-unavailable error stays actionable ("install or start jittor.service") without ever including the token used to reach it.
+
 See [`docs/CALIBRATION.md`](docs/CALIBRATION.md) for thresholds and rollback, and [`docs/USAGE_PRIOR_ART.md`](docs/USAGE_PRIOR_ART.md) for the chart design research.
 
 ```bash
