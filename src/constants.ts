@@ -38,8 +38,10 @@ export const FOOTER_CONTEXT_ERROR_FRACTION = 0.9;
 export const FOOTER_BAR_MIN_WIDTH = 4;
 export const FOOTER_BAR_MAX_WIDTH = 8;
 export const FOOTER_WIDE_TERMINAL_WIDTH = 100;
-export const FOOTER_COMPACTION_RENDER_INTERVAL_MS = 1_000;
+export const FOOTER_COMPACTION_RENDER_INTERVAL_MS = 500;
 export const FOOTER_COMPACTION_DRAIN_STEP_MS = 3_000;
+/** Half-period of the compacting liveness indicator; equal to the render tick so it visibly alternates every repaint. */
+export const FOOTER_COMPACTION_BLINK_HALF_PERIOD_MS = 500;
 export const MILLISECONDS_PER_SECOND = 1_000;
 export const MILLISECONDS_PER_MINUTE = 60 * MILLISECONDS_PER_SECOND;
 export const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;

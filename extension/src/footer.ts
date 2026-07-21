@@ -6,6 +6,7 @@ import {
 	FOOTER_BAR_MIN_WIDTH,
 	FOOTER_CONTEXT_ACCENT_FRACTION,
 	FOOTER_CONTEXT_ERROR_FRACTION,
+	FOOTER_COMPACTION_BLINK_HALF_PERIOD_MS,
 	FOOTER_COMPACTION_DRAIN_STEP_MS,
 	FOOTER_CONTEXT_WARNING_FRACTION,
 	FOOTER_WIDE_TERMINAL_WIDTH,
@@ -139,6 +140,22 @@ function compactionFraction(progress: CompactionProgress, width: number, now: nu
 	return Math.max(0, initialFilled - drained) / width;
 }
 
+/**
+ * The drain bar above is a fixed-rate heuristic, not a learned duration estimate (that estimate is
+ * tracked separately and is not wired in yet). This blink is therefore the honest "still actively
+ * compacting" liveness signal: it does not claim to know how long compaction will take, only that
+ * it has not stalled. It toggles once per render tick so a single owned interval (installed in
+ * beginCompactionUi) drives both the drain and the blink — no extra timer is created here.
+ */
+export function compactionBlinkOn(startedAt: number, now: number, halfPeriodMs = FOOTER_COMPACTION_BLINK_HALF_PERIOD_MS): boolean {
+	const elapsed = Math.max(0, now - startedAt);
+	return Math.floor(elapsed / halfPeriodMs) % 2 === 0;
+}
+
+function compactionBlinkGlyph(progress: CompactionProgress, now: number): string {
+	return compactionBlinkOn(progress.startedAt, now) ? "●" : "○";
+}
+
 function contextSegment(
 	context: FooterContext,
 	theme: FooterTheme,
@@ -151,7 +168,7 @@ function contextSegment(
 	if (compaction) {
 		const fraction = compactionFraction(compaction, w, now);
 		const elapsedSeconds = Math.floor(Math.max(0, now - compaction.startedAt) / MILLISECONDS_PER_SECOND);
-		return `ctx ${theme.fg("accent", progressBar(fraction, w))} compact ${elapsedSeconds}s`;
+		return `ctx ${theme.fg("accent", progressBar(fraction, w))} ${compactionBlinkGlyph(compaction, now)} compact ${elapsedSeconds}s`;
 	}
 	const usage = context.getContextUsage();
 	const window = usage?.contextWindow ?? context.model?.contextWindow ?? 0;
@@ -172,7 +189,7 @@ function minimalContextSegment(
 	const w = barWidth(width);
 	if (compaction) {
 		const fraction = compactionFraction(compaction, w, now);
-		return `ctx ${theme.fg("accent", progressBar(fraction, w))}`;
+		return `ctx ${theme.fg("accent", progressBar(fraction, w))} ${compactionBlinkGlyph(compaction, now)}`;
 	}
 	const percent = context.getContextUsage()?.percent;
 	const fraction = percent === null || percent === undefined ? null : percent / 100;

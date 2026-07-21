@@ -79,8 +79,27 @@ describe("Jittor integrated footer", () => {
 			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
 			{ startedAt: 2_000, initialFraction: 0.75 },
 		);
-		expect(lines[0]).toMatch(/ctx ████░░░░ compact 6s/);
+		expect(lines[0]).toMatch(/ctx ████░░░░ ● compact 6s/);
 		expect(lines[0]).not.toContain("150k/200k");
+	});
+
+	it("blinks the compacting liveness indicator once per render tick independent of the drain rate", () => {
+		const progress = { startedAt: 2_000, initialFraction: 0.75 };
+		const onPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 2_000, progress)[0]!;
+		const offPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 2_500, progress)[0]!;
+		const backOnPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 3_000, progress)[0]!;
+		expect(onPhase).toContain("●");
+		expect(onPhase).not.toContain("○");
+		expect(offPhase).toContain("○");
+		expect(offPhase).not.toContain("●");
+		expect(backOnPhase).toContain("●");
+		expect(backOnPhase).not.toContain("○");
+	});
+
+	it("shows the same blinking liveness indicator in the minimal compacting context segment", () => {
+		const progress = { startedAt: 2_000, initialFraction: 0.75 };
+		const narrow = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 30, 2_000, progress)[0]!;
+		expect(narrow).toContain("●");
 	});
 
 	it("uses the same drain semantics for an officially bounded OpenRouter key", () => {
