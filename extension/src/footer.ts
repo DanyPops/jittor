@@ -66,6 +66,9 @@ export type ProviderBudget = {
 export interface CompactionProgress {
 	startedAt: number;
 	initialFraction: number;
+	/** Learned median duration from jittor-cli's `compaction.estimate`; absent/null means cold-start. */
+	estimatedMs?: number | null;
+	confidence?: "cold-start" | "learned";
 }
 
 interface UsageTotals {
@@ -134,18 +137,29 @@ function fillColor(fraction: number | null): FooterColor {
 	return "dim";
 }
 
+/**
+ * Once a learned median duration is available (see estimateCompactionDuration / the
+ * `compaction.estimate` daemon operation), the bar drains against that real estimate: fraction
+ * counts down linearly from 1 to 0 over estimatedMs. Until then — cold start, or the estimate
+ * fetch has not resolved yet — it falls back to draining from the context fill at a fixed rate,
+ * which is a liveness heuristic only and never labeled as a time estimate (see
+ * compactionStatusText, which is what actually communicates cold-start vs learned confidence).
+ */
 function compactionFraction(progress: CompactionProgress, width: number, now: number): number {
+	if (progress.confidence === "learned" && typeof progress.estimatedMs === "number" && progress.estimatedMs > 0) {
+		const elapsed = Math.max(0, now - progress.startedAt);
+		return Math.max(0, Math.min(1, 1 - (elapsed / progress.estimatedMs)));
+	}
 	const initialFilled = Math.round(Math.min(1, Math.max(0, progress.initialFraction)) * width);
 	const drained = Math.floor(Math.max(0, now - progress.startedAt) / FOOTER_COMPACTION_DRAIN_STEP_MS);
 	return Math.max(0, initialFilled - drained) / width;
 }
 
 /**
- * The drain bar above is a fixed-rate heuristic, not a learned duration estimate (that estimate is
- * tracked separately and is not wired in yet). This blink is therefore the honest "still actively
- * compacting" liveness signal: it does not claim to know how long compaction will take, only that
- * it has not stalled. It toggles once per render tick so a single owned interval (installed in
- * beginCompactionUi) drives both the drain and the blink — no extra timer is created here.
+ * Liveness blink independent of whether the drain bar reflects a learned estimate or the
+ * fixed-rate cold-start fallback: it does not claim to know how long compaction will take, only
+ * that it has not stalled. It toggles once per render tick so a single owned interval (installed
+ * in beginCompactionUi) drives both the drain and the blink — no extra timer is created here.
  */
 export function compactionBlinkOn(startedAt: number, now: number, halfPeriodMs = FOOTER_COMPACTION_BLINK_HALF_PERIOD_MS): boolean {
 	const elapsed = Math.max(0, now - startedAt);
@@ -154,6 +168,16 @@ export function compactionBlinkOn(startedAt: number, now: number, halfPeriodMs =
 
 function compactionBlinkGlyph(progress: CompactionProgress, now: number): string {
 	return compactionBlinkOn(progress.startedAt, now) ? "●" : "○";
+}
+
+/** Communicates cold-start uncertainty distinctly from a learned approximate completion time. */
+function compactionStatusText(progress: CompactionProgress, now: number): string {
+	const elapsedSeconds = Math.floor(Math.max(0, now - progress.startedAt) / MILLISECONDS_PER_SECOND);
+	if (progress.confidence === "learned" && typeof progress.estimatedMs === "number" && progress.estimatedMs > 0) {
+		const remainingSeconds = Math.max(0, Math.ceil((progress.estimatedMs - (now - progress.startedAt)) / MILLISECONDS_PER_SECOND));
+		return `compact ${elapsedSeconds}s (~${remainingSeconds}s left)`;
+	}
+	return `compact ${elapsedSeconds}s (estimating)`;
 }
 
 function contextSegment(
@@ -167,8 +191,7 @@ function contextSegment(
 	const w = barWidth(width);
 	if (compaction) {
 		const fraction = compactionFraction(compaction, w, now);
-		const elapsedSeconds = Math.floor(Math.max(0, now - compaction.startedAt) / MILLISECONDS_PER_SECOND);
-		return `ctx ${theme.fg("accent", progressBar(fraction, w))} ${compactionBlinkGlyph(compaction, now)} compact ${elapsedSeconds}s`;
+		return `ctx ${theme.fg("accent", progressBar(fraction, w))} ${compactionBlinkGlyph(compaction, now)} ${compactionStatusText(compaction, now)}`;
 	}
 	const usage = context.getContextUsage();
 	const window = usage?.contextWindow ?? context.model?.contextWindow ?? 0;

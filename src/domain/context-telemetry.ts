@@ -1,4 +1,6 @@
 import {
+	COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES,
+	COMPACTION_DURATION_ESTIMATE_MIN_SAMPLES,
 	CONTEXT_OBSERVATION_MAX_AGE_MS,
 	CONTEXT_OBSERVATION_MAX_CHARACTERS,
 	MILLISECONDS_PER_HOUR,
@@ -277,4 +279,33 @@ export function assessContextTelemetry(
 			reasons,
 		},
 	};
+}
+
+export interface CompactionDurationEstimate {
+	ms: number | null;
+	confidence: "cold-start" | "learned";
+	sampleSize: number;
+	observedAt: number;
+}
+
+/**
+ * Learns a bounded duration estimate from the most recent completed Pi compactions so the drain
+ * animation can show an approximate time-to-completion instead of a fixed-rate guess. Reads only
+ * the numeric `compaction-duration` value already recorded content-free by CompactionTelemetry
+ * (never transcript content, credentials, or attributes) and is bounded to the caller-provided
+ * rows — callers must query with `limit: COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES` so retention is
+ * bounded at the query layer, not just here. Below COMPACTION_DURATION_ESTIMATE_MIN_SAMPLES samples
+ * the estimate stays explicit cold-start uncertainty rather than a guess from too little evidence.
+ */
+export function estimateCompactionDuration(compactions: StoredMetricObservation[], now = Date.now()): CompactionDurationEstimate {
+	const durations = compactions
+		.filter((row) => row.source === "pi-context" && row.scope === "compaction" && row.metric === "compaction-duration")
+		.sort((left, right) => right.observedAt - left.observedAt || right.id - left.id)
+		.slice(0, COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES)
+		.flatMap((row) => typeof row.value === "number" && Number.isFinite(row.value) && row.value >= 0 ? [row.value] : []);
+	if (durations.length < COMPACTION_DURATION_ESTIMATE_MIN_SAMPLES) {
+		return { ms: null, confidence: "cold-start", sampleSize: durations.length, observedAt: now };
+	}
+	const median = percentile(durations, 0.5);
+	return { ms: median === null ? null : Math.round(median), confidence: "learned", sampleSize: durations.length, observedAt: now };
 }

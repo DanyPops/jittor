@@ -24,7 +24,7 @@ import { hasAnthropicRateLimitHeaders, parseAnthropicRateLimitHeaders } from "..
 import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
 import { classifyGoogleVertexFailure, googleVertexFailureMetrics, type GoogleVertexFailureMetadata } from "../../src/providers/google-vertex-contracts.ts";
 import { showBenchmarkPanel } from "./benchmark-tui.ts";
-import { installIntegratedFooter, type IntegratedFooterState } from "./footer.ts";
+import { installIntegratedFooter, type CompactionProgress, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
 import { persistentEnforcementControl, type CodexRecoveryControl, type EnforcementControl, type UsageBudgetControl } from "./settings.ts";
 import { showSettingsPanel } from "./settings-tui.ts";
@@ -344,10 +344,21 @@ export function registerJittorExtension(
 	const beginCompactionUi = (ctx: ExtensionContext, signal: AbortSignal): void => {
 		finishCompactionUi();
 		const usage = ctx.getContextUsage();
-		footerState.compaction = {
+		const compaction: CompactionProgress = {
 			startedAt: Date.now(),
 			initialFraction: usage?.percent === null || usage?.percent === undefined ? 1 : usage.percent / 100,
+			estimatedMs: null,
+			confidence: "cold-start",
 		};
+		footerState.compaction = compaction;
+		// Non-blocking: compaction UI starts immediately as cold-start; if a learned estimate resolves
+		// before this compaction finishes (and this is still the active compaction, not a later one),
+		// upgrade the same progress object in place so the drain bar and status text switch to "learned".
+		void client.call("compaction.estimate", {}).then((estimate) => {
+			if (footerState.compaction !== compaction || estimate.confidence !== "learned" || estimate.ms === null) return;
+			footerState.compaction = { ...compaction, estimatedMs: estimate.ms, confidence: "learned" };
+			footerState.requestRender?.();
+		}).catch(() => undefined);
 		compactionTimer = setInterval(() => footerState.requestRender?.(), FOOTER_COMPACTION_RENDER_INTERVAL_MS);
 		signal.addEventListener("abort", finishCompactionUi, { once: true });
 		if (signal.aborted) finishCompactionUi();

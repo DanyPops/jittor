@@ -68,6 +68,10 @@ export const HUMAN_STATUS_MAX_SOURCES = 20;
 export const HUMAN_TEXT_FIELD_MAX_CHARACTERS = 160;
 export const CLI_METRICS_HUMAN_MAX_ROWS = 50;
 export const CLI_AVAILABLE_ROUTES_MAX = 200;
+/** Bounded rolling window for the compaction duration estimator; older samples are never fetched. */
+export const COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES = 20;
+/** Below this many samples the estimate stays explicit cold-start uncertainty rather than a guess. */
+export const COMPACTION_DURATION_ESTIMATE_MIN_SAMPLES = 3;
 export const MAX_USAGE_BUCKETS = 120;
 export const MAX_DYNAMIC_ROUTES = 100;
 export const CODEX_ERROR_MESSAGE_LIMIT = 160;

@@ -51,6 +51,19 @@ describe("Jittor operation service", () => {
 		})).rejects.toThrow("unit is not supported");
 	});
 
+	it("learns a compaction duration estimate from recorded pi-context compaction-duration metrics", async () => {
+		const store = new FakeMetricStore();
+		const service = new JittorService(store);
+		expect(await service.execute("compaction.estimate", {})).toMatchObject({ ms: null, confidence: "cold-start", sampleSize: 0 });
+		for (const [index, durationMs] of [4_000, 4_200, 3_900].entries()) {
+			await service.execute("metrics.record", {
+				source: "pi-context", scope: "compaction", metric: "compaction-duration", value: durationMs,
+				unit: "milliseconds", observedAt: 1_000 + index,
+			});
+		}
+		expect(await service.execute("compaction.estimate", {})).toMatchObject({ ms: 4_000, confidence: "learned", sampleSize: 3 });
+	});
+
 	it("authenticates the loopback operation endpoint", async () => {
 		const service = new JittorService(new FakeMetricStore());
 		const app = createApp({ service, token: "test-token" });
