@@ -53,6 +53,8 @@ export const PAPYRUS_TASK_FOCUS_SCHEMA = "papyrus.task-focus/v1";
 export const TASK_FOCUS_EVENT_MAX_AGE_MS = 5 * MILLISECONDS_PER_MINUTE;
 export const TASK_FOCUS_ID_MAX_LENGTH = 200;
 export const TASK_COST_QUERY_LIMIT = 10_000;
+/** A `metrics prune --before` cutoff newer than this must pass `force: true`. Guards against accidentally wiping recent/live data with a too-recent cutoff (e.g. "now"), while still allowing routine cleanup of genuinely old rows without ceremony. */
+export const PRUNE_MIN_AGE_MS = 24 * MILLISECONDS_PER_HOUR;
 export const CONTEXT_OBSERVATION_MAX_CHARACTERS = 10_000_000;
 export const CONTEXT_OBSERVATION_MAX_AGE_MS = 5 * MILLISECONDS_PER_MINUTE;
 export const CONTEXT_ASSESSMENT_QUERY_LIMIT = 10_000;

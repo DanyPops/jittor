@@ -67,6 +67,16 @@ describe("Jittor operation service", () => {
 		expect(await service.execute("metrics.distinct_scopes", { source: "pi", since: 0, until: 5_000, limit: 999_999 })).toHaveLength(2);
 	});
 
+	it("refuses to prune metrics newer than the safety window unless force is set, but always allows genuinely old cutoffs", async () => {
+		const store = new FakeMetricStore();
+		const service = new JittorService(store);
+		const longAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+		await expect(service.execute("metrics.prune", { before: longAgo })).resolves.toEqual({ deleted: 0 });
+		const tooRecent = Date.now() - 1_000;
+		await expect(service.execute("metrics.prune", { before: tooRecent })).rejects.toThrow("refusing to prune metrics newer than");
+		await expect(service.execute("metrics.prune", { before: tooRecent, force: true })).resolves.toEqual({ deleted: 0 });
+	});
+
 	it("sums cost/token metrics by focused task, keeping unattributed spend visible and never dropped", async () => {
 		const store = new FakeMetricStore();
 		const service = new JittorService(store);

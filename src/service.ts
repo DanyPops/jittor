@@ -1,4 +1,4 @@
-import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES, TASK_COST_QUERY_LIMIT, USAGE_MAX_DISTINCT_SCOPES } from "./constants.ts";
+import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, PRUNE_MIN_AGE_MS, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES, TASK_COST_QUERY_LIMIT, USAGE_MAX_DISTINCT_SCOPES } from "./constants.ts";
 import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
 import { assessContextTelemetry, estimateCompactionDuration, type CompactionDurationEstimate, type ContextAssessment } from "./domain/context-telemetry.ts";
@@ -41,7 +41,7 @@ export interface OperationInputs {
 	"metrics.query": MetricQuery;
 	"metrics.distinct_scopes": { source: string; since: number; until: number; limit?: number };
 	"metrics.cost_by_task": { since: number; until: number };
-	"metrics.prune": { before: number };
+	"metrics.prune": { before: number; force?: boolean };
 	"benchmark.refresh": { force?: boolean };
 	"benchmark.status": Record<string, never>;
 	"benchmark.query": BenchmarkQuery;
@@ -150,6 +150,11 @@ export class JittorService {
 			case "metrics.prune": {
 				const before = input["before"];
 				if (typeof before !== "number") throw new Error("before is required");
+				const force = input["force"] === true;
+				const minCutoff = Date.now() - PRUNE_MIN_AGE_MS;
+				if (!force && before > minCutoff) {
+					throw new Error(`refusing to prune metrics newer than ${new Date(minCutoff).toISOString()} without force: true (this looked like it could delete recent or live data)`);
+				}
 				return { deleted: this.metrics.pruneBefore(before) };
 			}
 			case "benchmark.refresh": return this.benchmarks.refresh(input["force"] === true);

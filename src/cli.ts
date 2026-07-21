@@ -106,7 +106,7 @@ function usage(stderr: (line: string) => void): number {
 		"  benchmarks <status|refresh|list|rank> [options] [--json]",
 		"  metrics record --source <s> --scope <s> --metric <s> --value <number|null> --unit <unit> [--observed-at <ms>] [--attributes <json>] [--json]",
 		"  metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] [--until <ms>] [--limit <n>] [--order asc|desc] [--json]",
-		"  metrics prune --before <ms> [--json]",
+		"  metrics prune --before <ms> [--force] [--json] (force required if before is newer than 24h ago)",
 		`  metrics distinct-scopes --source <s> --since <ms> --until <ms> [--limit 1..${USAGE_MAX_DISTINCT_SCOPES}] [--json]`,
 		"  metrics cost-by-task --since <ms> --until <ms> [--json]",
 		"  telemetry poll [--json]",
@@ -277,14 +277,16 @@ function parseCostByTaskArgs(args: string[]): CostByTaskArgs | null {
 	return { input: { since, until }, json };
 }
 
-interface MetricsPruneArgs { input: { before: number }; json: boolean }
+interface MetricsPruneArgs { input: { before: number; force?: boolean }; json: boolean }
 
 function parseMetricsPruneArgs(args: string[]): MetricsPruneArgs | null {
 	let json = false;
+	let force = false;
 	let before: number | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
 		if (argument === "--json") { json = true; continue; }
+		if (argument === "--force") { force = true; continue; }
 		if (argument !== "--before") return null;
 		const raw = args[++index];
 		const parsed = Number(raw);
@@ -292,7 +294,7 @@ function parseMetricsPruneArgs(args: string[]): MetricsPruneArgs | null {
 		before = parsed;
 	}
 	if (before === undefined) return null;
-	return { input: { before }, json };
+	return { input: { before, ...(force ? { force } : {}) }, json };
 }
 
 interface RouterOverrideArgs { input: RouteOverride; json: boolean }
