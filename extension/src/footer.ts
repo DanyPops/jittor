@@ -166,8 +166,16 @@ export function compactionBlinkOn(startedAt: number, now: number, halfPeriodMs =
 	return Math.floor(elapsed / halfPeriodMs) % 2 === 0;
 }
 
-function compactionBlinkGlyph(progress: CompactionProgress, now: number): string {
-	return compactionBlinkOn(progress.startedAt, now) ? "●" : "○";
+/**
+ * The compaction signal lives in the bar itself: it blinks between its normal draining fill and a
+ * blank track of the same width, rather than a separate indicator glyph next to it. Off-phase
+ * intentionally renders identically to the "no data" empty track (dim, all "░") so the bar reads
+ * as a single blinking element, not a bar plus a decoration.
+ */
+function compactionBarGlyph(progress: CompactionProgress, theme: FooterTheme, width: number, now: number): string {
+	if (!compactionBlinkOn(progress.startedAt, now)) return theme.fg("dim", "░".repeat(width));
+	const fraction = compactionFraction(progress, width, now);
+	return theme.fg("accent", progressBar(fraction, width));
 }
 
 /** Communicates cold-start uncertainty distinctly from a learned approximate completion time. */
@@ -190,8 +198,7 @@ function contextSegment(
 ): string {
 	const w = barWidth(width);
 	if (compaction) {
-		const fraction = compactionFraction(compaction, w, now);
-		return `ctx ${theme.fg("accent", progressBar(fraction, w))} ${compactionBlinkGlyph(compaction, now)} ${compactionStatusText(compaction, now)}`;
+		return `ctx ${compactionBarGlyph(compaction, theme, w, now)} ${compactionStatusText(compaction, now)}`;
 	}
 	const usage = context.getContextUsage();
 	const window = usage?.contextWindow ?? context.model?.contextWindow ?? 0;
@@ -211,8 +218,7 @@ function minimalContextSegment(
 ): string {
 	const w = barWidth(width);
 	if (compaction) {
-		const fraction = compactionFraction(compaction, w, now);
-		return `ctx ${theme.fg("accent", progressBar(fraction, w))} ${compactionBlinkGlyph(compaction, now)}`;
+		return `ctx ${compactionBarGlyph(compaction, theme, w, now)}`;
 	}
 	const percent = context.getContextUsage()?.percent;
 	const fraction = percent === null || percent === undefined ? null : percent / 100;
