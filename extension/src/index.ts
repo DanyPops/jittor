@@ -22,6 +22,7 @@ import type { PolicyDecision, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
 import { hasAnthropicRateLimitHeaders, parseAnthropicRateLimitHeaders } from "../../src/providers/anthropic-contracts.ts";
 import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
+import { classifyGoogleVertexFailure, googleVertexFailureMetrics, type GoogleVertexFailureMetadata } from "../../src/providers/google-vertex-contracts.ts";
 import { showBenchmarkPanel } from "./benchmark-tui.ts";
 import { installIntegratedFooter, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
@@ -283,6 +284,7 @@ export function registerJittorExtension(
 	let recoveryTimer: unknown;
 	let recoveryCooldown: { until: number; attempt: number; failureKind: CodexFailureKind } | undefined;
 	let lastCodexResponse: CodexFailureMetadata = {};
+	let lastGoogleVertexResponse: GoogleVertexFailureMetadata = {};
 	const cancelRecovery = (resetPolicy: boolean): void => {
 		if (recoveryTimer !== undefined) recoveryRuntime.clearTimeout(recoveryTimer);
 		recoveryTimer = undefined;
@@ -517,6 +519,7 @@ export function registerJittorExtension(
 		lastCompletedLocalRun = undefined;
 		cancelRecovery(true);
 		lastCodexResponse = {};
+		lastGoogleVertexResponse = {};
 		ctx.ui.setStatus("jittor", undefined);
 		showFooter(ctx);
 		try {
@@ -592,6 +595,7 @@ export function registerJittorExtension(
 	pi.on("turn_start", async (event, ctx) => {
 		compactionTelemetry.observeTurn();
 		lastCodexResponse = {};
+		lastGoogleVertexResponse = {};
 		activeLocalRun = {
 			runId: `local-${event.timestamp}-${++localRunSequence}`,
 			startedAt: event.timestamp,
@@ -638,6 +642,9 @@ export function registerJittorExtension(
 					if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Anthropic telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
 				}
 			}
+		}
+		if (ctx.model?.provider === "google-vertex") {
+			lastGoogleVertexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
 		}
 		if (Object.keys(event.headers).some((name) => name.toLowerCase().startsWith("x-codex-"))) {
 			try {
@@ -697,6 +704,13 @@ export function registerJittorExtension(
 				cancelRecovery(true);
 			}
 			lastCodexResponse = {};
+		}
+		if (event.message.role === "assistant" && event.message.provider === "google-vertex") {
+			if (event.message.stopReason === "error") {
+				const failure = classifyGoogleVertexFailure(event.message.errorMessage, lastGoogleVertexResponse);
+				await recordMetrics(client, googleVertexFailureMetrics(failure, Date.now())).catch(() => undefined);
+			}
+			lastGoogleVertexResponse = {};
 		}
 		const metrics = assistantUsageMetrics(event.message, Date.now());
 		if (metrics.length > 0) {

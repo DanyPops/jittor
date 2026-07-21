@@ -62,6 +62,7 @@ function harness(
 	client: FakeClient,
 	enforcement?: EnforcementControl,
 	recovery: { enabled: boolean; runtime: CodexRecoveryRuntime } = { enabled: false, runtime: new FakeRecoveryRuntime() },
+	modelOverride?: { provider: string; id: string },
 ) {
 	let defaultEnabled = true;
 	let footerEnabled = true;
@@ -105,7 +106,7 @@ function harness(
 	let aborted = false;
 	let idle = true;
 	let pendingMessages = false;
-	const model = { provider: "openai-codex", id: "gpt-5.3-codex" };
+	const model = modelOverride ?? { provider: "openai-codex", id: "gpt-5.3-codex" };
 	const ctx = {
 		mode: "tui", hasUI: true, model,
 		modelRegistry: {
@@ -335,6 +336,39 @@ describe("Jittor Pi actuator", () => {
 		const records = client.calls.filter((call) => call.operation === "metrics.record");
 		expect(records.some((call) => (call.input as any).source === "codex-subscription")).toBe(true);
 		expect(records.some((call) => (call.input as any).metric === "cost" && (call.input as any).value === 0.004)).toBe(true);
+	});
+
+	it("records official Anthropic rate-limit response headers only for the active Anthropic route", async () => {
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, { provider: "anthropic", id: "claude-sonnet-5" });
+		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {
+			"anthropic-ratelimit-tokens-limit": "2000000",
+			"anthropic-ratelimit-tokens-remaining": "1500000",
+			"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
+		} }, app.ctx);
+		const records = client.calls.filter((call) => call.operation === "metrics.record");
+		expect(records.some((call) => (call.input as any).source === "anthropic" && (call.input as any).scope === "tokens" && (call.input as any).metric === "used-fraction" && (call.input as any).value === 0.25)).toBe(true);
+	});
+
+	it("notifies instead of silently dropping telemetry on Anthropic header schema drift", async () => {
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, { provider: "anthropic", id: "claude-sonnet-5" });
+		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: { "anthropic-ratelimit-requests-limit": "not-a-number" } }, app.ctx);
+		expect(app.notifications.at(-1)).toContain("Anthropic telemetry schema drift");
+		expect(client.calls.some((call) => call.operation === "metrics.record" && (call.input as any).source === "anthropic")).toBe(false);
+	});
+
+	it("classifies a failed Google Vertex response as a bounded failure-count metric, never a fabricated budget", async () => {
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, { provider: "google-vertex", id: "gemini-3-pro" });
+		await app.handlers.get("after_provider_response")![0]!({ status: 429, headers: {} }, app.ctx);
+		await app.handlers.get("message_end")![0]!({ message: {
+			role: "assistant", provider: "google-vertex", stopReason: "error", errorMessage: "429 RESOURCE_EXHAUSTED. Quota exceeded",
+		} }, app.ctx);
+		const records = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as any);
+		expect(records).toContainEqual(expect.objectContaining({ source: "google-vertex", scope: "failure", metric: "quota", value: 1, unit: "count" }));
+		expect(records.some((record) => record.unit === "ratio")).toBe(false);
+		expect(JSON.stringify(records)).not.toContain("Quota exceeded");
 	});
 });
 
