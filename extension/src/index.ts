@@ -394,9 +394,24 @@ export function registerJittorExtension(
 	};
 
 	pi.registerCommand("jittor", {
-		description: "Inspect or control Jittor routing, benchmarks, budgets, and usage",
+		description: "Jittor settings, routing status, benchmarks, and Codex recovery controls",
 		handler: async (args, ctx) => {
 			const action = args.trim().toLowerCase();
+			if (action === "" || action === "settings") {
+				await showSettingsPanel(ctx, enforcement, codexRecovery, usageBudgets, {
+					setEnforcement: async (enabled) => enabled ? enable(ctx) : disable(ctx),
+					setFooter: async (enabled) => {
+						enforcement.setFooterEnabled(enabled);
+						showFooter(ctx);
+						if (enabled) await refreshFooter(client, footerState).catch(() => undefined);
+					},
+					setRecovery: (enabled) => {
+						if (!enabled) cancelRecovery(true);
+						codexRecovery.setCodexRecoveryEnabled(enabled);
+					},
+				});
+				return;
+			}
 			if (action === "benchmarks" || action.startsWith("benchmarks ")) {
 				if (!ctx.model) {
 					ctx.ui.notify("No active Pi model is available for benchmark recommendations.", "warning");
@@ -470,23 +485,22 @@ export function registerJittorExtension(
 				].join("\n"), "info");
 				return;
 			}
-			if (action === "settings") {
-				await showSettingsPanel(ctx, enforcement, codexRecovery, usageBudgets, {
-					setEnforcement: async (enabled) => enabled ? enable(ctx) : disable(ctx),
-					setFooter: async (enabled) => {
-						enforcement.setFooterEnabled(enabled);
-						showFooter(ctx);
-						if (enabled) await refreshFooter(client, footerState).catch(() => undefined);
-					},
-					setRecovery: (enabled) => {
-						if (!enabled) cancelRecovery(true);
-						codexRecovery.setCodexRecoveryEnabled(enabled);
-					},
-				});
+			// Reached only for the explicit "status" keyword or any other unrecognized text; bare "" is
+			// handled above by the settings branch, so this always has a non-empty, non-settings action.
+			if (!enforcement.isEnabled()) {
+				ctx.ui.notify("Jittor is monitor-only. Run /jittor on to re-enable blocking.", "info");
 				return;
 			}
-			if (action === "usage budget" || action.startsWith("usage budget ")) {
-				const [, , periodText, valueText] = action.split(/\s+/);
+			await showJittorPanel(ctx, client);
+		},
+	});
+
+	pi.registerCommand("usage", {
+		description: "Cumulative token/cost usage graph with hourly/daily/weekly/monthly/quarterly views",
+		handler: async (args, ctx) => {
+			const action = args.trim().toLowerCase();
+			if (action === "budget" || action.startsWith("budget ")) {
+				const [, periodText, valueText] = action.split(/\s+/);
 				const period = USAGE_PERIODS.some((candidate) => candidate.id === periodText) ? periodText as UsagePeriod : undefined;
 				if (!period) {
 					const values = USAGE_PERIODS.map(({ id, label }) => `${label}: ${usageBudgets.getUsageTokenBudget(id)?.toLocaleString() ?? "not configured"}`).join(" · ");
@@ -504,22 +518,18 @@ export function registerJittorExtension(
 				}
 				const tokens = Number(valueText.replaceAll(",", ""));
 				if (!Number.isFinite(tokens) || tokens <= 0) {
-					ctx.ui.notify("Usage: /jittor usage budget <hourly|daily|weekly|monthly> <positive-tokens|off>", "warning");
+					ctx.ui.notify("Usage: /usage budget <hourly|daily|weekly|monthly|quarterly> <positive-tokens|off>", "warning");
 					return;
 				}
 				usageBudgets.setUsageTokenBudget(period, tokens);
 				ctx.ui.notify(`${USAGE_PERIODS.find((candidate) => candidate.id === period)!.label} token budget set to ${tokens.toLocaleString()} tokens.`, "info");
 				return;
 			}
-			if (action === "usage") {
-				await showUsagePanel(ctx, client, usageBudgets);
+			if (action !== "" && action !== "cost" && action !== "tokens") {
+				ctx.ui.notify("Usage: /usage [cost] | /usage budget <hourly|daily|weekly|monthly|quarterly> <positive-tokens|off>", "warning");
 				return;
 			}
-			if (!enforcement.isEnabled()) {
-				ctx.ui.notify("Jittor is monitor-only. Run /jittor on to re-enable blocking.", "info");
-				return;
-			}
-			await showJittorPanel(ctx, client);
+			await showUsagePanel(ctx, client, usageBudgets, Date.now(), action === "cost" ? "cost" : "tokens");
 		},
 	});
 

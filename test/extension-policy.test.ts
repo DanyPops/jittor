@@ -224,16 +224,26 @@ describe("Jittor Pi actuator", () => {
 		expect(app.notifications.join("\n")).toContain("/jittor off");
 	});
 
-	it("opens the consolidated settings TUI through /jittor settings", async () => {
+	it("opens the consolidated settings TUI through /jittor settings, and through bare /jittor since settings is now its default", async () => {
 		const app = harness(new FakeClient());
-		let opened = false;
+		let opened = 0;
 		(app.ctx.ui as any).custom = async (factory: Function) => {
-			opened = true;
+			opened += 1;
 			const component = factory({ requestRender() {} }, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
 			expect(component.render(50).join("\n")).toContain("Jittor Settings");
 			return { kind: "close" };
 		};
 		await app.commands.get("jittor").handler("settings", app.ctx);
+		await app.commands.get("jittor").handler("", app.ctx);
+		expect(opened).toBe(2);
+	});
+
+	it("opens the routing status panel through the explicit /jittor status keyword", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		let opened = false;
+		(app.ctx.ui as any).custom = async () => { opened = true; return "close"; };
+		await app.commands.get("jittor").handler("status", app.ctx);
 		expect(opened).toBe(true);
 	});
 

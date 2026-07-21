@@ -68,7 +68,7 @@ describe("cost graph projection", () => {
 });
 
 describe("usage graph TUI", () => {
-	it("exposes usage only through the single /jittor command", async () => {
+	it("exposes usage through its own dedicated /usage command, separate from /jittor", async () => {
 		const commands = new Map<string, unknown>();
 		const calls: string[] = [];
 		const pi = {
@@ -76,16 +76,22 @@ describe("usage graph TUI", () => {
 			on() {},
 		} as unknown as ExtensionAPI;
 		registerJittorExtension(pi, { async call(operation: string) { calls.push(operation); return observations; } });
-		expect([...commands.keys()]).toEqual(["jittor"]);
+		expect([...commands.keys()]).toEqual(["jittor", "usage"]);
 
 		const notifications: string[] = [];
-		const command = commands.get("jittor") as { handler(args: string, ctx: ExtensionCommandContext): Promise<void> };
-		await command.handler("usage", {
+		const command = commands.get("usage") as { handler(args: string, ctx: ExtensionCommandContext): Promise<void> };
+		await command.handler("", {
 			mode: "print",
 			ui: { notify(message: string) { notifications.push(message); } },
 		} as unknown as ExtensionCommandContext);
 		expect(calls).toEqual(["metrics.query"]);
 		expect(notifications.join("\n")).toContain("Hourly token usage");
+		notifications.length = 0;
+		await command.handler("cost", {
+			mode: "print",
+			ui: { notify(message: string) { notifications.push(message); } },
+		} as unknown as ExtensionCommandContext);
+		expect(notifications.join("\n")).toContain("Hourly cost");
 	});
 
 	it("opens directly into the cost view when requested, independent of command dispatch", async () => {
@@ -179,11 +185,11 @@ describe("usage graph TUI", () => {
 		registerJittorExtension({ registerCommand(name: string, command: unknown) { commands.set(name, command); }, on() {} } as unknown as ExtensionAPI, { async call() { return []; } }, control);
 		const notifications: string[] = [];
 		const ctx = { mode: "print", ui: { notify(message: string) { notifications.push(message); } } } as unknown as ExtensionCommandContext;
-		await commands.get("jittor").handler("usage budget daily 250,000", ctx);
+		await commands.get("usage").handler("budget daily 250,000", ctx);
 		expect(budgets.daily).toBe(250_000);
-		await commands.get("jittor").handler("usage budget", ctx);
+		await commands.get("usage").handler("budget", ctx);
 		expect(notifications.at(-1)).toContain("Daily: 250,000");
-		await commands.get("jittor").handler("usage budget daily off", ctx);
+		await commands.get("usage").handler("budget daily off", ctx);
 		expect(budgets.daily).toBeUndefined();
 	});
 
