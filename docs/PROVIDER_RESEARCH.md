@@ -10,6 +10,8 @@ Verified 2026-07-18. Contracts marked **official** are documented provider APIs.
 | OpenAI API key | Standard rate-limit headers and response usage | Exact token rate limits and API billing | Official, separate from subscription |
 | OpenRouter | `/api/v1/key`, response `usage`, `/generation`, `/models` | Exact per-request tokens/cost; key limit when configured; otherwise Jittor budget required | Official |
 | OpenRouter Analytics | `/api/v1/analytics/query` with management key | Historical aggregate spend/tokens | Official beta; not hot path |
+| Anthropic | `anthropic-ratelimit-*`/`anthropic-priority-*` response headers on every Messages API call | Exact requests/tokens/input-tokens/output-tokens remaining-vs-limit per response; no personal polling endpoint (Admin API is unavailable for individual accounts) | Official |
+| Google Vertex AI | No documented per-response rate-limit header or personal polling endpoint; errors carry a `google.rpc.Status` shape (`RESOURCE_EXHAUSTED`, `PERMISSION_DENIED`, `UNAVAILABLE`, ...) | No remaining-budget signal is available; Jittor classifies failure kind/transience only, as a bounded failure-count metric, never a fabricated fraction | No official hot-path budget telemetry exists |
 
 ## Codex subscription
 
@@ -157,6 +159,32 @@ Routing rules:
 
 OpenRouter's beta Analytics API accepts management keys and can aggregate `total_usage`, token metrics, cache hit rate, reasoning tokens, model, API key, and generation dimensions. It is useful for calibration and audits, not pre-request routing. The API is beta: discover metadata dynamically, parse count metrics as number or string, and honor truncation metadata.
 
+## Anthropic
+
+### Official per-response rate-limit headers
+
+Anthropic's Rate Limits API documentation states plainly that "the Admin API is unavailable for individual accounts," so there is no personal polling endpoint equivalent to OpenRouter's `/key` or even Codex's experimental `/wham/usage`. What Anthropic does document, on every Messages API response, is a fixed set of headers:
+
+```text
+retry-after
+anthropic-ratelimit-requests-limit / -remaining / -reset
+anthropic-ratelimit-tokens-limit / -remaining / -reset
+anthropic-ratelimit-input-tokens-limit / -remaining / -reset
+anthropic-ratelimit-output-tokens-limit / -remaining / -reset
+anthropic-priority-input-tokens-limit / -remaining / -reset   (Priority Tier only)
+anthropic-priority-output-tokens-limit / -remaining / -reset  (Priority Tier only)
+```
+
+`-reset` values are RFC 3339 timestamps. Anthropic's docs also state the `tokens` bucket headers always reflect "the most restrictive limit currently in effect," so Jittor treats `tokens` as the primary budget signal and falls back to `requests` only when no token telemetry has been observed. Jittor observes these headers from Pi's own `after_provider_response` event (the same mechanism used for Codex's `x-codex-*` headers) rather than daemon-side polling, because there is no standalone endpoint to poll. Schema drift (non-numeric limits, non-RFC-3339 resets, `remaining > limit`) fails closed with a user-visible notice, matching the Codex header-parsing contract.
+
+## Google Vertex AI
+
+### No official hot-path budget telemetry
+
+Unlike Anthropic and OpenRouter, Vertex does not document a per-response rate-limit or remaining-quota header for `generateContent`/Messages-compatible calls. Quota is configured and reported at the Google Cloud project/region level (Service Usage / Quota APIs, Cloud Console "Quotas & System Limits"), which is an account-configuration surface, not a response header Jittor could read before a request is throttled — the same class of limitation Amazon Bedrock has (see Papyrus doc `jittor-provider-survey-which-additional-apis-to-support-0wma`, Tier 2). Failures instead surface as a `google.rpc.Status` shape, `{error: {code, message, status, details[]}}`, with `status` one of the canonical gRPC codes (`RESOURCE_EXHAUSTED`, `PERMISSION_DENIED`, `UNAUTHENTICATED`, `UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INVALID_ARGUMENT`, ...), sometimes with a `google.rpc.RetryInfo.retryDelay` or `google.rpc.QuotaFailure` detail.
+
+Jittor therefore does not fabricate a remaining-budget bar for Vertex. It classifies the bounded, content-free `errorMessage` string Pi already exposes for every provider (the same source `classifyCodexFailure` reads) into a failure kind and transience, and records only a bounded failure-count metric (`source: "google-vertex", scope: "failure", metric: <kind>, unit: "count"`) — never a `ratio` metric implying a known remaining fraction. This is an honest degradation: Jittor surfaces *that* and *what kind of* capacity/auth/request pressure Pi is seeing, without claiming to know how much budget remains.
+
 ## Normalized Jittor model
 
 ```ts
@@ -230,6 +258,16 @@ Required safeguards: hysteresis, cooldown, maximum delay, minimum telemetry fres
 - https://openrouter.ai/docs/cookbook/administration/usage-accounting
 - https://openrouter.ai/docs/cookbook/administration/analytics-cost-control
 - https://openrouter.ai/docs/guides/overview/models
+
+### Anthropic
+
+- https://platform.claude.com/docs/en/api/rate-limits (fetched 2026-07-21)
+- https://platform.claude.com/docs/en/manage-claude/rate-limits-api ("The Admin API is unavailable for individual accounts")
+
+### Google Vertex AI
+
+- Google Cloud/Gemini API 429 `RESOURCE_EXHAUSTED` error reports and `google.rpc.Status`/`QuotaFailure`/`RetryInfo` detail shapes, cross-checked across multiple live incident reports (fetched 2026-07-21); no official Vertex response header for remaining quota was found
+- Papyrus doc `jittor-provider-survey-which-additional-apis-to-support-0wma`, Tier 2 (Amazon Bedrock entry documents the same account-level-quota-not-header pattern)
 
 ### Pi
 
