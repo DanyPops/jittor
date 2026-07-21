@@ -79,7 +79,7 @@ describe("Jittor integrated footer", () => {
 			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
 			{ startedAt: 2_000, initialFraction: 0.75 },
 		);
-		expect(lines[0]).toMatch(/ctx ████░░░░ ● compact 6s \(estimating\)/);
+		expect(lines[0]).toMatch(/ctx ████░░░░ compact 6s \(estimating\)/);
 		expect(lines[0]).not.toContain("150k/200k");
 	});
 
@@ -88,28 +88,31 @@ describe("Jittor integrated footer", () => {
 			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
 			{ startedAt: 2_000, initialFraction: 0.75, estimatedMs: 12_000, confidence: "learned" },
 		);
-		// elapsed 6s of a 12s estimate => half drained => fraction 0.5 over an 8-wide bar => 4 filled.
-		expect(lines[0]).toMatch(/ctx ████░░░░ [●○] compact 6s \(~6s left\)/);
+		// elapsed 6s of a 12s estimate => half drained => fraction 0.5 over an 8-wide bar => 4 filled, on-phase only.
+		expect(lines[0]).toMatch(/ctx [█░]{8} compact 6s \(~6s left\)/);
 		expect(lines[0]).not.toContain("estimating");
 	});
 
-	it("blinks the compacting liveness indicator once per render tick independent of the drain rate", () => {
+	it("blinks the bar itself between its draining fill and a blank track, once per render tick, independent of the drain rate", () => {
 		const progress = { startedAt: 2_000, initialFraction: 0.75 };
+		// Half period is 500ms: elapsed 0 => on, 500 => off, 1000 => on. Drain step is 3000ms, so the
+		// fill itself (6 of 8, from initialFraction 0.75) does not change across these three ticks --
+		// isolating the blink from the drain, which is the point of this test.
+		const ctxSegment = (line: string) => /ctx (\S+) /.exec(line)?.[1];
 		const onPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 2_000, progress)[0]!;
 		const offPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 2_500, progress)[0]!;
 		const backOnPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 3_000, progress)[0]!;
-		expect(onPhase).toContain("●");
-		expect(onPhase).not.toContain("○");
-		expect(offPhase).toContain("○");
-		expect(offPhase).not.toContain("●");
-		expect(backOnPhase).toContain("●");
-		expect(backOnPhase).not.toContain("○");
+		expect(ctxSegment(onPhase)).toBe("██████░░");
+		expect(ctxSegment(offPhase)).toBe("░░░░░░░░");
+		expect(ctxSegment(backOnPhase)).toBe("██████░░");
 	});
 
-	it("shows the same blinking liveness indicator in the minimal compacting context segment", () => {
+	it("shows the same blinking bar in the minimal compacting context segment", () => {
 		const progress = { startedAt: 2_000, initialFraction: 0.75 };
-		const narrow = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 30, 2_000, progress)[0]!;
-		expect(narrow).toContain("●");
+		const onPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 30, 2_000, progress)[0]!;
+		const offPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 30, 2_500, progress)[0]!;
+		expect(onPhase).toMatch(/ctx █+░*(?: |$)/);
+		expect(offPhase).toMatch(/ctx ░+(?: |$)/);
 	});
 
 	it("uses the same drain semantics for an officially bounded OpenRouter key", () => {
