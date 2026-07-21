@@ -110,6 +110,7 @@ jittor metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] 
 jittor metrics prune --before <ms> [--json]
 jittor metrics distinct-scopes --source <s> --since <ms> --until <ms> [--limit 1..40] [--json]
 jittor metrics cost-by-task --since <ms> --until <ms> [--json]
+jittor metrics prune --before <ms> [--force] [--json]  # force required if before is newer than 24h ago
 jittor service checkpoint [--json]
 jittor telemetry poll [--json]
 jittor compaction estimate [--json]

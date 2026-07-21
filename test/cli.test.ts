@@ -75,6 +75,8 @@ describe("Jittor CLI context telemetry parity", () => {
 		expect(await runCli(["metrics", "query", "--since", "10", "--until", "5"], deps)).toBe(2);
 		expect(await runCli(["metrics", "prune", "--before", "1000", "--json"], deps)).toBe(0);
 		expect(calls.at(-1)).toEqual({ operation: "metrics.prune", input: { before: 1_000 } });
+		expect(await runCli(["metrics", "prune", "--before", "1000", "--force", "--json"], deps)).toBe(0);
+		expect(calls.at(-1)).toEqual({ operation: "metrics.prune", input: { before: 1_000, force: true } });
 	});
 
 	it("applies and clears a router override with an explicit route and optional expiry", async () => {
