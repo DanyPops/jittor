@@ -74,30 +74,35 @@ describe("Jittor integrated footer", () => {
 		expect(lines[0]).toMatch(/budget [░]+ \?/);
 	});
 
-	it("drains the context bar and tracks elapsed time while Pi compaction is active", () => {
+	it("holds the context bar steady at its initial fill and shows no timer text while compaction is still estimating (cold start)", () => {
 		const lines = renderFooterLines(
 			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
 			{ startedAt: 2_000, initialFraction: 0.75 },
 		);
-		expect(lines[0]).toMatch(/ctx ████░░░░ compact 6s \(estimating\)/);
+		// No learned estimate => no real rate to drain against => fill holds at initialFraction (6 of 8) and no
+		// timer text is shown at all: no fabricated elapsed count-up, no guessed countdown.
+		expect(lines[0]).toMatch(/ctx ██████░░ ·/);
+		expect(lines[0]).not.toContain("compact");
+		expect(lines[0]).not.toContain("estimating");
 		expect(lines[0]).not.toContain("150k/200k");
 	});
 
-	it("drains against a learned duration estimate and reports approximate time remaining once one is available", () => {
+	it("drains against a learned duration estimate and shows only a countdown, in sync with the drain, once one is available", () => {
 		const lines = renderFooterLines(
 			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
 			{ startedAt: 2_000, initialFraction: 0.75, estimatedMs: 12_000, confidence: "learned" },
 		);
-		// elapsed 6s of a 12s estimate => half drained => fraction 0.5 over an 8-wide bar => 4 filled, on-phase only.
-		expect(lines[0]).toMatch(/ctx [█░]{8} compact 6s \(~6s left\)/);
+		// elapsed 6s of a 12s estimate => half drained => fraction 0.5 over an 8-wide bar => 4 filled, on-phase only,
+		// and the countdown (~6s left) reflects the exact same elapsed/estimatedMs ratio as the bar.
+		expect(lines[0]).toMatch(/ctx [█░]{8} compact ~6s left/);
 		expect(lines[0]).not.toContain("estimating");
 	});
 
-	it("blinks the bar itself between its draining fill and a blank track, once per render tick, independent of the drain rate", () => {
+	it("blinks the bar without draining it while there is no learned estimate to drain against", () => {
 		const progress = { startedAt: 2_000, initialFraction: 0.75 };
-		// Half period is 500ms: elapsed 0 => on, 500 => off, 1000 => on. Drain step is 3000ms, so the
-		// fill itself (6 of 8, from initialFraction 0.75) does not change across these three ticks --
-		// isolating the blink from the drain, which is the point of this test.
+		// Half period is 500ms: elapsed 0 => on, 500 => off, 1000 => on. With no learned estimate the
+		// fill never drains at all -- it holds at initialFraction (6 of 8) for as long as compaction is
+		// still estimating, regardless of how much time has passed; only the blink communicates liveness.
 		const ctxSegment = (line: string) => /ctx (\S+) /.exec(line)?.[1];
 		const onPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 2_000, progress)[0]!;
 		const offPhase = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 2_500, progress)[0]!;
