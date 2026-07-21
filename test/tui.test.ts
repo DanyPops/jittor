@@ -28,6 +28,16 @@ describe("Jittor status TUI", () => {
 		expect(text).toContain("codex-subscription: fresh");
 	});
 
+	it("shows the Anthropic tokens bucket remaining when it is the active route", () => {
+		const anthropicStatus: RouterStatus = { ...status, currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" } };
+		const anthropicMetrics = [
+			...metrics,
+			{ source: "anthropic", scope: "tokens", metric: "used-fraction", value: 0.3, unit: "ratio", observedAt: 1000, id: 3, attributes: {} },
+		] as any[];
+		const text = buildStatusView(anthropicStatus, anthropicMetrics, 1_000).join("\n");
+		expect(text).toContain("Anthropic tokens: 70.0% left");
+	});
+
 	it("requires confirmation before pausing routing", async () => {
 		const calls: string[] = [];
 		let panels = 0;

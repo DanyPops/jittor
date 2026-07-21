@@ -20,6 +20,7 @@ import type { ModelCandidate } from "../../src/domain/model-ranking.ts";
 import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
+import { hasAnthropicRateLimitHeaders, parseAnthropicRateLimitHeaders } from "../../src/providers/anthropic-contracts.ts";
 import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
 import { showBenchmarkPanel } from "./benchmark-tui.ts";
 import { installIntegratedFooter, type IntegratedFooterState } from "./footer.ts";
@@ -628,12 +629,23 @@ export function registerJittorExtension(
 		if (ctx.model?.provider === "openai-codex") {
 			lastCodexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
 		}
-		if (!Object.keys(event.headers).some((name) => name.toLowerCase().startsWith("x-codex-"))) return;
-		try {
-			const updates = parseCodexRateLimitHeaders(new Headers(event.headers), Date.now());
-			await recordMetrics(client, updates.flatMap((update) => update.metrics));
-		} catch {
-			if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Codex telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
+		if (ctx.model?.provider === "anthropic") {
+			const headers = new Headers(event.headers);
+			if (hasAnthropicRateLimitHeaders(headers)) {
+				try {
+					await recordMetrics(client, parseAnthropicRateLimitHeaders(headers, Date.now()).metrics);
+				} catch {
+					if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Anthropic telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
+				}
+			}
+		}
+		if (Object.keys(event.headers).some((name) => name.toLowerCase().startsWith("x-codex-"))) {
+			try {
+				const updates = parseCodexRateLimitHeaders(new Headers(event.headers), Date.now());
+				await recordMetrics(client, updates.flatMap((update) => update.metrics));
+			} catch {
+				if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Codex telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
+			}
 		}
 		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
 	});

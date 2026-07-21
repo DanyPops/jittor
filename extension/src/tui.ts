@@ -77,6 +77,19 @@ export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObs
 			...(Number.isFinite(resetsAtSeconds) && resetsAtSeconds > 0 ? { resetsAt: resetsAtSeconds * 1_000 } : {}),
 		};
 	}
+	if (status.currentRoute.provider === "anthropic") {
+		const anthropic = latest(metrics, (row) => row.source === "anthropic" && row.metric === "used-fraction" && row.scope === "tokens" && typeof row.value === "number")
+			?? latest(metrics, (row) => row.source === "anthropic" && row.metric === "used-fraction" && row.scope === "requests" && typeof row.value === "number");
+		if (!anthropic || typeof anthropic.value !== "number") return null;
+		const resetsAt = Number(anthropic.attributes["resetsAt"]);
+		return {
+			kind: "bounded",
+			label: anthropic.scope === "tokens" ? "tok" : "req",
+			remainingFraction: 1 - anthropic.value,
+			observedAt: anthropic.observedAt,
+			...(Number.isFinite(resetsAt) && resetsAt > 0 ? { resetsAt } : {}),
+		};
+	}
 	if (status.currentRoute.provider === "openrouter") {
 		const openRouter = latest(metrics, (row) => row.source === "openrouter" && row.metric === "usage" && typeof row.value === "number");
 		const remaining = latest(metrics, (row) => row.source === "openrouter" && row.metric === "remaining-fraction" && typeof row.value === "number");
@@ -140,6 +153,11 @@ export function buildStatusView(status: RouterStatus, metrics: StoredMetricObser
 		? latest(metrics, (row) => row.source === "openrouter" && row.metric === "usage" && typeof row.value === "number")
 		: undefined;
 	if (openRouter && typeof openRouter.value === "number") lines.push(`OpenRouter spend: $${openRouter.value.toFixed(3)}`);
+	const anthropic = status.currentRoute?.provider === "anthropic"
+		? latest(metrics, (row) => row.source === "anthropic" && row.metric === "used-fraction" && row.scope === "tokens" && typeof row.value === "number")
+			?? latest(metrics, (row) => row.source === "anthropic" && row.metric === "used-fraction" && row.scope === "requests" && typeof row.value === "number")
+		: undefined;
+	if (anthropic && typeof anthropic.value === "number") lines.push(`Anthropic ${anthropic.scope}: ${((1 - anthropic.value) * 100).toFixed(1)}% left`);
 	if (status.currentRoute) lines.push(`Route: ${routeText(status.currentRoute)}`);
 	if (status.lastDecision) lines.push(`Pressure: ${Number.isFinite(status.lastDecision.pressure) ? status.lastDecision.pressure.toFixed(3) : "∞"} · ${status.lastDecision.action}`);
 	lines.push(`Next: ${nextAction(status.lastDecision?.action)}`);
