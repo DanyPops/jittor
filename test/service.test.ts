@@ -67,6 +67,16 @@ describe("Jittor operation service", () => {
 		expect(await service.execute("metrics.distinct_scopes", { source: "pi", since: 0, until: 5_000, limit: 999_999 })).toHaveLength(2);
 	});
 
+	it("sums cost/token metrics by focused task, keeping unattributed spend visible and never dropped", async () => {
+		const store = new FakeMetricStore();
+		const service = new JittorService(store);
+		await service.execute("metrics.record", { source: "pi", scope: "anthropic:claude-sonnet-5", metric: "cost", value: 0.05, unit: "usd", observedAt: 1_000, attributes: { taskId: "ship-feature-x" } });
+		await service.execute("metrics.record", { source: "pi", scope: "anthropic:claude-sonnet-5", metric: "cost", value: 0.02, unit: "usd", observedAt: 1_500, attributes: {} });
+		const summary = await service.execute("metrics.cost_by_task", { since: 0, until: 5_000 });
+		expect(summary).toMatchObject({ entries: [{ taskId: "ship-feature-x", costUsd: 0.05 }], unattributedCostUsd: 0.02, truncated: false });
+		await expect(service.execute("metrics.cost_by_task", { since: 5_000, until: 0 })).rejects.toThrow("ordered integer bounds");
+	});
+
 	it("learns a compaction duration estimate from recorded pi-context compaction-duration metrics", async () => {
 		const store = new FakeMetricStore();
 		const service = new JittorService(store);

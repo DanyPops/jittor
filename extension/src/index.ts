@@ -10,10 +10,12 @@ import {
 	MILLISECONDS_PER_MINUTE,
 	MILLISECONDS_PER_SECOND,
 	PAPYRUS_CONTEXT_INJECTION_CHANNEL,
+	PAPYRUS_TASK_FOCUS_CHANNEL,
 	CONTEXT_EVENT_DEDUP_LIMIT,
 } from "../../src/constants.ts";
 import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureKind, type CodexFailureMetadata } from "../../src/domain/codex-recovery.ts";
 import { CompactionTelemetry, papyrusContextMetric, validatePapyrusContextInjection } from "../../src/domain/context-telemetry.ts";
+import { applyTaskFocusEvent, validateTaskFocusEvent } from "../../src/domain/task-focus.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
 import { classifyTaskFromTools, modelRunMetrics, TASK_CLASSES, type ModelRunObservation, type ModelTaskClass } from "../../src/domain/model-observation.ts";
 import type { ModelCandidate } from "../../src/domain/model-ranking.ts";
@@ -228,7 +230,8 @@ async function applyDecision(
 	return halt(ctx, `Jittor could not apply any authenticated Pi route after ${decision.route.provider}/${decision.route.model} became unavailable`);
 }
 
-function assistantUsageMetrics(message: unknown, observedAt: number): MetricObservation[] {
+/** taskId, when a Papyrus task is currently focused in this session, tags the metric for real-time cost-per-task correlation without any new instrumentation surface. */
+function assistantUsageMetrics(message: unknown, observedAt: number, taskId: string | null = null): MetricObservation[] {
 	if (typeof message !== "object" || message === null || Array.isArray(message)) return [];
 	const value = message as Record<string, unknown>;
 	if (value["role"] !== "assistant" || typeof value["usage"] !== "object" || value["usage"] === null) return [];
@@ -236,7 +239,7 @@ function assistantUsageMetrics(message: unknown, observedAt: number): MetricObse
 	const provider = typeof value["provider"] === "string" ? value["provider"] : "unknown";
 	const model = typeof value["model"] === "string" ? value["model"] : "unknown";
 	const scope = `${provider}:${model}`;
-	const attributes = { provider, model };
+	const attributes = { provider, model, ...(taskId === null ? {} : { taskId }) };
 	const metrics: MetricObservation[] = [];
 	for (const [field, metric] of [["input", "input-tokens"], ["output", "output-tokens"], ["cacheRead", "cache-read-tokens"], ["cacheWrite", "cache-write-tokens"]] as const) {
 		const amount = usage[field];
@@ -272,6 +275,21 @@ export function registerJittorExtension(
 			void recordMetrics(client, [papyrusContextMetric(observation)]).catch(() => undefined);
 		} catch {
 			// Reject malformed or stale cross-extension observations without retaining payloads.
+		}
+	});
+	// Real-time cost-per-task correlation: Jittor observes Papyrus's task-focus broadcasts (Papyrus
+	// never depends on Jittor) and tags newly recorded token/cost metrics with the currently focused
+	// task id. Scoped to this Pi session: a focus change in a different concurrent session must not
+	// affect this one's attribution.
+	let currentSessionId: string | undefined;
+	let focusedTaskId: string | null = null;
+	const stopPapyrusTaskFocus = pi.events?.on?.(PAPYRUS_TASK_FOCUS_CHANNEL, (payload) => {
+		try {
+			const event = validateTaskFocusEvent(payload);
+			if (event.sessionId !== undefined && event.sessionId !== currentSessionId) return;
+			focusedTaskId = applyTaskFocusEvent(event);
+		} catch {
+			// Reject malformed or stale cross-extension events without retaining payloads or crashing the extension.
 		}
 	});
 	const recoveryPolicy = new CodexRecoveryPolicy({
@@ -534,6 +552,8 @@ export function registerJittorExtension(
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		currentSessionId = ctx.sessionManager.getSessionId();
+		focusedTaskId = null;
 		finishCompactionUi();
 		compactionTelemetry = new CompactionTelemetry();
 		activeLocalRun = undefined;
@@ -614,6 +634,7 @@ export function registerJittorExtension(
 	});
 
 	pi.on("turn_start", async (event, ctx) => {
+		currentSessionId = ctx.sessionManager.getSessionId();
 		compactionTelemetry.observeTurn();
 		lastCodexResponse = {};
 		lastGoogleVertexResponse = {};
@@ -733,7 +754,7 @@ export function registerJittorExtension(
 			}
 			lastGoogleVertexResponse = {};
 		}
-		const metrics = assistantUsageMetrics(event.message, Date.now());
+		const metrics = assistantUsageMetrics(event.message, Date.now(), focusedTaskId);
 		if (metrics.length > 0) {
 			const amount = (name: string): number => metrics.filter((metric) => metric.metric === name && typeof metric.value === "number").reduce((sum, metric) => sum + (metric.value ?? 0), 0);
 			compactionTelemetry.observeProviderUsage({ input: amount("input-tokens"), output: amount("output-tokens"), cacheRead: amount("cache-read-tokens"), cacheWrite: amount("cache-write-tokens") });
@@ -746,6 +767,7 @@ export function registerJittorExtension(
 		finishCompactionUi();
 		if (compactionTelemetry.hasOpenCompaction()) await recordMetrics(client, [compactionTelemetry.abort(Date.now(), "session-shutdown")]).catch(() => undefined);
 		stopPapyrusContext?.();
+		stopPapyrusTaskFocus?.();
 		cancelRecovery(true);
 		lastCodexResponse = {};
 		activeLocalRun = undefined;

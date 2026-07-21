@@ -28,6 +28,7 @@ import { TASK_CLASSES, type ModelTaskClass } from "./domain/model-observation.ts
 import type { ContextAssessment } from "./domain/context-telemetry.ts";
 import { METRIC_UNITS, type MetricObservation, type MetricQuery, type MetricUnit, type StoredMetricObservation } from "./domain/metric.ts";
 import type { CompactionDurationEstimate } from "./domain/context-telemetry.ts";
+import type { TaskCostSummary } from "./domain/task-cost.ts";
 import type { PolicyDecision, Route } from "./policy.ts";
 import type { RouteOverride, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
 import { EXPECTED_OPERATION_NAMES, type OperationInputs, type OperationName, type OperationOutputs } from "./service.ts";
@@ -107,6 +108,7 @@ function usage(stderr: (line: string) => void): number {
 		"  metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] [--until <ms>] [--limit <n>] [--order asc|desc] [--json]",
 		"  metrics prune --before <ms> [--json]",
 		`  metrics distinct-scopes --source <s> --since <ms> --until <ms> [--limit 1..${USAGE_MAX_DISTINCT_SCOPES}] [--json]`,
+		"  metrics cost-by-task --since <ms> --until <ms> [--json]",
 		"  telemetry poll [--json]",
 		"  compaction estimate [--json]",
 		"  router <status|decide|pause|resume|clear-override> [--json]",
@@ -253,6 +255,26 @@ function parseMetricsDistinctScopesArgs(args: string[]): MetricsDistinctScopesAr
 	}
 	if (source === undefined || since === undefined || until === undefined || until < since) return null;
 	return { input: { source, since, until, ...(limit === undefined ? {} : { limit }) }, json };
+}
+
+interface CostByTaskArgs { input: { since: number; until: number }; json: boolean }
+
+function parseCostByTaskArgs(args: string[]): CostByTaskArgs | null {
+	let json = false;
+	let since: number | undefined;
+	let until: number | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (!["--since", "--until"].includes(argument ?? "")) return null;
+		const raw = args[++index];
+		const parsed = Number(raw);
+		if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+		if (argument === "--since") since = parsed;
+		else until = parsed;
+	}
+	if (since === undefined || until === undefined || until < since) return null;
+	return { input: { since, until }, json };
 }
 
 interface MetricsPruneArgs { input: { before: number }; json: boolean }
@@ -500,6 +522,19 @@ export function formatMetricsDistinctScopes(scopes: string[]): string {
 	return [`Scopes: ${scopes.length.toLocaleString()}`, ...scopes.map((scope) => `- ${humanField(scope)}`)].join("\n");
 }
 
+function formatUsdAmount(amount: number): string {
+	return `$${amount.toFixed(Math.abs(amount) < 0.01 && amount !== 0 ? 4 : 2)}`;
+}
+
+export function formatCostByTask(summary: TaskCostSummary): string {
+	const lines = [
+		`Cost by task: ${summary.entries.length.toLocaleString()} task(s)${summary.truncated ? " (query limit reached; totals are a lower bound)" : ""}`,
+		...summary.entries.map((entry) => `- ${humanField(entry.taskId)}: ${formatUsdAmount(entry.costUsd)} · ↑${entry.inputTokens.toLocaleString()} ↓${entry.outputTokens.toLocaleString()} R${entry.cacheReadTokens.toLocaleString()} W${entry.cacheWriteTokens.toLocaleString()}`),
+		`Unattributed spend (no task was focused): ${formatUsdAmount(summary.unattributedCostUsd)}`,
+	];
+	return lines.join("\n");
+}
+
 export function formatTelemetryPoll(result: TelemetryPollResult): string {
 	if (result.sources.length === 0) return "Telemetry: no sources configured";
 	return ["Telemetry:", ...result.sources.map((source) => {
@@ -574,6 +609,11 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 			const parsed = parseMetricsDistinctScopesArgs(rest);
 			if (!parsed) return usage(deps.stderr);
 			return callAndPrint(deps, "metrics.distinct_scopes", parsed.input, parsed.json, formatMetricsDistinctScopes);
+		}
+		if (action === "cost-by-task") {
+			const parsed = parseCostByTaskArgs(rest);
+			if (!parsed) return usage(deps.stderr);
+			return callAndPrint(deps, "metrics.cost_by_task", parsed.input, parsed.json, formatCostByTask);
 		}
 		return usage(deps.stderr);
 	}

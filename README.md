@@ -68,6 +68,10 @@ Jittor observes finalized Codex assistant errors through Pi's public message lif
 
 The graph fetches metrics per distinct provider/model scope (`jittor metrics distinct-scopes`, bounded to 40 scopes, 250 rows each) rather than one flat "most recent rows" query. A flat query lets one heavy, long-running session monopolize the entire row budget with its own most recent activity, silently hiding every other provider from the chart no matter which time frame is selected, since the query would never reach back far enough in time to see anything else. Fetching per scope guarantees every active provider/model gets its own fair share of the query budget instead.
 
+### Cost per Papyrus task
+
+Jittor observes Papyrus's task-focus lifecycle in real time over a shared Pi extension event bus (`papyrus.task-focus.v1`) -- Papyrus never depends on Jittor, it only broadcasts which task is currently focused. Every token/cost metric Jittor already records on a finalized Pi assistant message is tagged with the currently focused task's id the moment it is recorded (no time-window estimation, no new instrumentation). A paused or cleared focus stops tagging; spend recorded with nothing focused is reported separately as unattributed, never dropped or folded into an invented task. Run `jittor metrics cost-by-task --since <ms> --until <ms> [--json]` for a bounded per-task breakdown of cost and input/output/cache tokens.
+
 Series are colored with a categorical palette chosen to avoid this UI's own status colors ("success"/"warning"/"error" already mean something specific elsewhere in this panel, so reusing them for arbitrary model identity would make a model's bar segment look like a warning or a failure) and instead reuses the theme's syntax-highlighting roles, which are already tuned by theme authors to stay mutually distinguishable on screen — the same design problem as a categorical data palette. Once more series are active than there are hues, a series reuses a hue in bold rather than repeating an indistinguishable color. Multiple models active within the same cumulative time frame are rendered as one bar stacked by color, not separate bars.
 
 Token-budget thresholds are optional and must be configured by the user; Jittor never infers a token allowance from Codex or another provider's subscription percentage. Configure or clear one period with `/usage budget <hourly|daily|weekly|monthly|quarterly> <positive-tokens|off>`, and inspect all of them with `/usage budget`. A configured budget appears as a horizontal threshold on the cumulative graph with explicit remaining or **OVER BUDGET** state; the cost view does not yet support a budget threshold. These private settings persist in `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`).
@@ -105,6 +109,7 @@ jittor metrics record --source <s> --scope <s> --metric <s> --value <number|null
 jittor metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] [--until <ms>] [--limit <n>] [--order asc|desc] [--json]
 jittor metrics prune --before <ms> [--json]
 jittor metrics distinct-scopes --source <s> --since <ms> --until <ms> [--limit 1..40] [--json]
+jittor metrics cost-by-task --since <ms> --until <ms> [--json]
 jittor service checkpoint [--json]
 jittor telemetry poll [--json]
 jittor compaction estimate [--json]

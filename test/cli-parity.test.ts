@@ -14,6 +14,7 @@ const cases: Case[] = [
 	{ args: ["metrics", "query", "--source", "s", "--json"], operation: "metrics.query" },
 	{ args: ["metrics", "prune", "--before", "1000", "--json"], operation: "metrics.prune" },
 	{ args: ["metrics", "distinct-scopes", "--source", "pi", "--since", "0", "--until", "1000", "--json"], operation: "metrics.distinct_scopes" },
+	{ args: ["metrics", "cost-by-task", "--since", "0", "--until", "1000", "--json"], operation: "metrics.cost_by_task" },
 	{ args: ["benchmarks", "refresh", "--json"], operation: "benchmark.refresh" },
 	{ args: ["benchmarks", "status", "--json"], operation: "benchmark.status" },
 	{ args: ["benchmarks", "list", "--source", "s", "--json"], operation: "benchmark.query" },

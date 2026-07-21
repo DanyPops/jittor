@@ -1,7 +1,8 @@
-import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES, USAGE_MAX_DISTINCT_SCOPES } from "./constants.ts";
+import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES, TASK_COST_QUERY_LIMIT, USAGE_MAX_DISTINCT_SCOPES } from "./constants.ts";
 import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
 import { assessContextTelemetry, estimateCompactionDuration, type CompactionDurationEstimate, type ContextAssessment } from "./domain/context-telemetry.ts";
+import { buildTaskCostSummary, type TaskCostSummary } from "./domain/task-cost.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
 import type { ModelRanker, ModelRecommendationInput } from "./domain/model-ranking-service.ts";
 import type { ModelRankingResult } from "./domain/model-ranking.ts";
@@ -14,6 +15,7 @@ export const EXPECTED_OPERATION_NAMES = [
 	"metrics.record",
 	"metrics.query",
 	"metrics.distinct_scopes",
+	"metrics.cost_by_task",
 	"metrics.prune",
 	"benchmark.refresh",
 	"benchmark.status",
@@ -38,6 +40,7 @@ export interface OperationInputs {
 	"metrics.record": MetricObservation;
 	"metrics.query": MetricQuery;
 	"metrics.distinct_scopes": { source: string; since: number; until: number; limit?: number };
+	"metrics.cost_by_task": { since: number; until: number };
 	"metrics.prune": { before: number };
 	"benchmark.refresh": { force?: boolean };
 	"benchmark.status": Record<string, never>;
@@ -60,6 +63,7 @@ export interface OperationOutputs {
 	"metrics.record": StoredMetricObservation;
 	"metrics.query": StoredMetricObservation[];
 	"metrics.distinct_scopes": string[];
+	"metrics.cost_by_task": TaskCostSummary;
 	"metrics.prune": { deleted: number };
 	"benchmark.refresh": BenchmarkRefreshResult;
 	"benchmark.status": BenchmarkRefreshResult;
@@ -133,6 +137,15 @@ export class JittorService {
 				const requestedLimit = input["limit"];
 				const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(USAGE_MAX_DISTINCT_SCOPES, Math.floor(requestedLimit as number))) : USAGE_MAX_DISTINCT_SCOPES;
 				return this.metrics.distinctScopes({ source, since: since as number, until: until as number, limit });
+			}
+			case "metrics.cost_by_task": {
+				const since = input["since"];
+				const until = input["until"];
+				if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || (since as number) < 0 || (until as number) < (since as number)) {
+					throw new Error("cost by task requires non-negative ordered integer bounds");
+				}
+				const rows = this.metrics.query({ source: "pi", since: since as number, until: until as number, order: "desc", limit: TASK_COST_QUERY_LIMIT });
+				return buildTaskCostSummary(rows, { since: since as number, until: until as number, truncated: rows.length >= TASK_COST_QUERY_LIMIT });
 			}
 			case "metrics.prune": {
 				const before = input["before"];
