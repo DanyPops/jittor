@@ -124,6 +124,7 @@ function harness(
 		isIdle() { return idle; },
 		hasPendingMessages() { return pendingMessages; },
 		getContextUsage() { return { tokens: 190_000, contextWindow: 200_000, percent: 95 }; },
+		sessionManager: { getSessionId: () => "test-session" },
 		ui: {
 			setStatus(_key: string, value: string | undefined) { statuses.push(value); },
 			setFooter(footer: unknown) { footers.push(footer); },
@@ -200,6 +201,64 @@ describe("Jittor Pi actuator", () => {
 		await Promise.resolve();
 		// No observable crash and no dangling reference to the finished compaction; nothing further to assert
 		// without exposing internal footer state, which stays module-private by design.
+	});
+
+	it("tags newly recorded token/cost metrics with the currently focused Papyrus task, in real time", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		await app.handlers.get("session_start")![0]!({}, app.ctx);
+		const now = Date.now();
+		const emitFocus = (overrides: Record<string, unknown>) => app.emit("papyrus.task-focus.v1", {
+			schema: "papyrus.task-focus/v1", sessionId: "test-session", observedAt: now, ...overrides,
+		});
+		const endTurnWithUsage = async () => {
+			await app.handlers.get("message_end")![0]!({ message: {
+				role: "assistant", provider: "anthropic", model: "claude-sonnet-5",
+				usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+			} }, app.ctx);
+		};
+		const recordedTaskIds = () => client.calls
+			.filter((call) => call.operation === "metrics.record" && (call.input as any).metric === "cost")
+			.map((call) => ((call.input as any).attributes as Record<string, unknown> | undefined)?.["taskId"]);
+
+		// Nothing focused yet: no taskId attribute at all (not null, not empty string).
+		await endTurnWithUsage();
+		expect(recordedTaskIds()).toEqual([undefined]);
+
+		emitFocus({ taskId: "ship-feature-x", status: "focused" });
+		await Promise.resolve();
+		await endTurnWithUsage();
+		expect(recordedTaskIds().at(-1)).toBe("ship-feature-x");
+
+		emitFocus({ taskId: "ship-feature-x", status: "paused" });
+		await Promise.resolve();
+		await endTurnWithUsage();
+		expect(recordedTaskIds().at(-1)).toBeUndefined();
+
+		emitFocus({ taskId: "ship-feature-x", status: "unpaused" });
+		await Promise.resolve();
+		await endTurnWithUsage();
+		expect(recordedTaskIds().at(-1)).toBe("ship-feature-x");
+
+		emitFocus({ taskId: null, status: "cleared" });
+		await Promise.resolve();
+		await endTurnWithUsage();
+		expect(recordedTaskIds().at(-1)).toBeUndefined();
+	});
+
+	it("ignores a task-focus event from a different Pi session, and fails closed on schema drift, without crashing", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		const now = Date.now();
+		expect(() => app.emit("papyrus.task-focus.v1", { schema: "papyrus.task-focus/v1", sessionId: "a-different-session", taskId: "other-task", status: "focused", observedAt: now })).not.toThrow();
+		expect(() => app.emit("papyrus.task-focus.v1", { schema: "v2", taskId: "x", status: "focused", observedAt: now })).not.toThrow();
+		await Promise.resolve();
+		await app.handlers.get("message_end")![0]!({ message: {
+			role: "assistant", provider: "anthropic", model: "claude-sonnet-5",
+			usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+		} }, app.ctx);
+		const recorded = client.calls.filter((call) => call.operation === "metrics.record" && (call.input as any).metric === "cost").map((call) => call.input as any);
+		expect(recorded[0]?.attributes?.taskId).toBeUndefined();
 	});
 
 	it("derives routes from Pi's current provider and authenticated model catalog without model IDs", () => {

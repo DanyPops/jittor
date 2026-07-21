@@ -47,6 +47,12 @@ export const MILLISECONDS_PER_MINUTE = 60 * MILLISECONDS_PER_SECOND;
 export const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
 export const PAPYRUS_CONTEXT_INJECTION_CHANNEL = "papyrus.context-injection.v1";
 export const PAPYRUS_CONTEXT_INJECTION_SCHEMA = "papyrus.context-injection/v1";
+/** Matches Papyrus's own constants by convention; Jittor does not depend on the Papyrus package. */
+export const PAPYRUS_TASK_FOCUS_CHANNEL = "papyrus.task-focus.v1";
+export const PAPYRUS_TASK_FOCUS_SCHEMA = "papyrus.task-focus/v1";
+export const TASK_FOCUS_EVENT_MAX_AGE_MS = 5 * MILLISECONDS_PER_MINUTE;
+export const TASK_FOCUS_ID_MAX_LENGTH = 200;
+export const TASK_COST_QUERY_LIMIT = 10_000;
 export const CONTEXT_OBSERVATION_MAX_CHARACTERS = 10_000_000;
 export const CONTEXT_OBSERVATION_MAX_AGE_MS = 5 * MILLISECONDS_PER_MINUTE;
 export const CONTEXT_ASSESSMENT_QUERY_LIMIT = 10_000;
