@@ -1,4 +1,4 @@
-import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "./constants.ts";
+import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES, USAGE_MAX_DISTINCT_SCOPES } from "./constants.ts";
 import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
 import { assessContextTelemetry, estimateCompactionDuration, type CompactionDurationEstimate, type ContextAssessment } from "./domain/context-telemetry.ts";
@@ -13,6 +13,7 @@ import type { PolicyDecision, Route } from "./policy.ts";
 export const EXPECTED_OPERATION_NAMES = [
 	"metrics.record",
 	"metrics.query",
+	"metrics.distinct_scopes",
 	"metrics.prune",
 	"benchmark.refresh",
 	"benchmark.status",
@@ -36,6 +37,7 @@ export type OperationName = typeof EXPECTED_OPERATION_NAMES[number];
 export interface OperationInputs {
 	"metrics.record": MetricObservation;
 	"metrics.query": MetricQuery;
+	"metrics.distinct_scopes": { source: string; since: number; until: number; limit?: number };
 	"metrics.prune": { before: number };
 	"benchmark.refresh": { force?: boolean };
 	"benchmark.status": Record<string, never>;
@@ -57,6 +59,7 @@ export interface OperationInputs {
 export interface OperationOutputs {
 	"metrics.record": StoredMetricObservation;
 	"metrics.query": StoredMetricObservation[];
+	"metrics.distinct_scopes": string[];
 	"metrics.prune": { deleted: number };
 	"benchmark.refresh": BenchmarkRefreshResult;
 	"benchmark.status": BenchmarkRefreshResult;
@@ -119,6 +122,18 @@ export class JittorService {
 		switch (operation) {
 			case "metrics.record": return this.metrics.record(validateMetricObservation(input));
 			case "metrics.query": return this.metrics.query(input as MetricQuery);
+			case "metrics.distinct_scopes": {
+				const source = input["source"];
+				const since = input["since"];
+				const until = input["until"];
+				if (typeof source !== "string" || source.length === 0) throw new Error("source is required");
+				if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || (since as number) < 0 || (until as number) < (since as number)) {
+					throw new Error("distinct scopes requires non-negative ordered integer bounds");
+				}
+				const requestedLimit = input["limit"];
+				const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(USAGE_MAX_DISTINCT_SCOPES, Math.floor(requestedLimit as number))) : USAGE_MAX_DISTINCT_SCOPES;
+				return this.metrics.distinctScopes({ source, since: since as number, until: until as number, limit });
+			}
 			case "metrics.prune": {
 				const before = input["before"];
 				if (typeof before !== "number") throw new Error("before is required");

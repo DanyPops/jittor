@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT } from "../constants.ts";
 import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../domain/metric.ts";
 import { validateMetricObservation } from "../domain/metric.ts";
-import type { MetricStore } from "../ports/metric-store.ts";
+import type { DistinctScopesFilter, MetricStore } from "../ports/metric-store.ts";
 
 interface MetricRow {
 	id: number;
@@ -73,6 +73,17 @@ export class SQLiteMetricStore implements MetricStore {
 			LIMIT ${limit}
 		`).all(...parameters) as MetricRow[];
 		return rows.map(fromRow);
+	}
+
+	distinctScopes(filter: DistinctScopesFilter): string[] {
+		const limit = Math.max(1, Math.min(MAX_QUERY_LIMIT, Math.floor(filter.limit)));
+		const rows = this.db.query(`
+			SELECT DISTINCT scope FROM metric_observations
+			WHERE source = ? AND observed_at >= ? AND observed_at <= ?
+			ORDER BY scope ASC
+			LIMIT ?
+		`).all(filter.source, filter.since, filter.until, limit) as Array<{ scope: string }>;
+		return rows.map((row) => row.scope);
 	}
 
 	pruneBefore(cutoff: number): number {

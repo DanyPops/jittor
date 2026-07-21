@@ -1,6 +1,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { HUMAN_TEXT_FIELD_MAX_CHARACTERS, USAGE_CHART_HEIGHT, USAGE_RENDER_MAX_SERIES, USAGE_TOKEN_QUERY_LIMIT, USAGE_Y_AXIS_WIDTH } from "../../src/constants.ts";
+import { HUMAN_TEXT_FIELD_MAX_CHARACTERS, USAGE_CHART_HEIGHT, USAGE_MAX_DISTINCT_SCOPES, USAGE_PER_SCOPE_QUERY_LIMIT, USAGE_RENDER_MAX_SERIES, USAGE_Y_AXIS_WIDTH } from "../../src/constants.ts";
 import type { StoredMetricObservation } from "../../src/domain/metric.ts";
 import {
 	buildCostGraph,
@@ -254,15 +254,27 @@ export function renderCostGraph(chart: CostGraph, width: number, theme: UsageThe
 export type UsageViewKind = "tokens" | "cost";
 const USAGE_VIEWS: UsageViewKind[] = ["tokens", "cost"];
 
+/**
+ * Fetches per distinct scope (provider:model) instead of one flat "most recent N rows" query.
+ * A single flat query lets one heavy scope (e.g. a long, heavy session on one model) monopolize
+ * the entire row budget with its most recent activity, silently starving every other provider out
+ * of the chart no matter which time frame is selected -- the query never even reaches back far
+ * enough in time to see the other scope's older rows. Bounding per scope instead guarantees every
+ * active provider/model gets its own fair share of the query budget.
+ */
 async function loadPiMetrics(client: JittorPanelClient, period: UsagePeriod, now: number): Promise<{ rows: StoredMetricObservation[]; truncated: boolean }> {
-	const rows = await client.call("metrics.query", {
-		source: "pi",
-		since: usagePeriodStart(period, now),
-		until: now,
-		order: "desc",
-		limit: USAGE_TOKEN_QUERY_LIMIT,
-	}) as StoredMetricObservation[];
-	return { rows, truncated: rows.length >= USAGE_TOKEN_QUERY_LIMIT };
+	const since = usagePeriodStart(period, now);
+	const scopes = await client.call("metrics.distinct_scopes", { source: "pi", since, until: now, limit: USAGE_MAX_DISTINCT_SCOPES }) as string[];
+	// More distinct scopes may exist beyond this bounded list -- treat that as truncation too, not just a per-scope row cap.
+	let truncated = scopes.length >= USAGE_MAX_DISTINCT_SCOPES;
+	const batches = await Promise.all(scopes.map(async (scope) => {
+		const rows = await client.call("metrics.query", {
+			source: "pi", scope, since, until: now, order: "desc", limit: USAGE_PER_SCOPE_QUERY_LIMIT,
+		}) as StoredMetricObservation[];
+		if (rows.length >= USAGE_PER_SCOPE_QUERY_LIMIT) truncated = true;
+		return rows;
+	}));
+	return { rows: batches.flat(), truncated };
 }
 
 export async function showUsagePanel(

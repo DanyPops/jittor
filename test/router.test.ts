@@ -13,6 +13,9 @@ class MemoryMetrics implements MetricStore {
 		return row;
 	}
 	query(_filter: MetricQuery = {}): StoredMetricObservation[] { return [...this.rows]; }
+	distinctScopes(filter: { source: string; since: number; until: number; limit: number }): string[] {
+		return [...new Set(this.rows.filter((row) => row.source === filter.source && row.observedAt >= filter.since && row.observedAt <= filter.until).map((row) => row.scope))].sort().slice(0, filter.limit);
+	}
 	pruneBefore(): number { return 0; }
 	checkpoint(): void {}
 	close(): void {}

@@ -17,6 +17,7 @@ import {
 	MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
 	MODEL_RANKING_MAX_SOURCES,
 	SYSTEMD_UNIT_NAME,
+	USAGE_MAX_DISTINCT_SCOPES,
 } from "./constants.ts";
 import { connectJittorClient, type JittorClient } from "./client.ts";
 import { serveMain } from "./daemon.ts";
@@ -105,6 +106,7 @@ function usage(stderr: (line: string) => void): number {
 		"  metrics record --source <s> --scope <s> --metric <s> --value <number|null> --unit <unit> [--observed-at <ms>] [--attributes <json>] [--json]",
 		"  metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] [--until <ms>] [--limit <n>] [--order asc|desc] [--json]",
 		"  metrics prune --before <ms> [--json]",
+		`  metrics distinct-scopes --source <s> --since <ms> --until <ms> [--limit 1..${USAGE_MAX_DISTINCT_SCOPES}] [--json]`,
 		"  telemetry poll [--json]",
 		"  compaction estimate [--json]",
 		"  router <status|decide|pause|resume|clear-override> [--json]",
@@ -223,6 +225,34 @@ function parseMetricsQueryArgs(args: string[]): MetricsQueryArgs | null {
 	}
 	if (input.since !== undefined && input.until !== undefined && input.until < input.since) return null;
 	return { input, json };
+}
+
+interface MetricsDistinctScopesArgs { input: { source: string; since: number; until: number; limit?: number }; json: boolean }
+
+function parseMetricsDistinctScopesArgs(args: string[]): MetricsDistinctScopesArgs | null {
+	let json = false;
+	let source: string | undefined;
+	let since: number | undefined;
+	let until: number | undefined;
+	let limit: number | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (!["--source", "--since", "--until", "--limit"].includes(argument ?? "")) return null;
+		const raw = args[++index];
+		if (raw === undefined || raw.length === 0) return null;
+		if (argument === "--source") { source = raw; continue; }
+		const parsed = Number(raw);
+		if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+		if (argument === "--since") since = parsed;
+		else if (argument === "--until") until = parsed;
+		else {
+			if (parsed < 1 || parsed > USAGE_MAX_DISTINCT_SCOPES) return null;
+			limit = parsed;
+		}
+	}
+	if (source === undefined || since === undefined || until === undefined || until < since) return null;
+	return { input: { source, since, until, ...(limit === undefined ? {} : { limit }) }, json };
 }
 
 interface MetricsPruneArgs { input: { before: number }; json: boolean }
@@ -465,6 +495,11 @@ export function formatMetricsQuery(rows: StoredMetricObservation[]): string {
 	return lines.join("\n");
 }
 
+export function formatMetricsDistinctScopes(scopes: string[]): string {
+	if (scopes.length === 0) return "Scopes: none matched";
+	return [`Scopes: ${scopes.length.toLocaleString()}`, ...scopes.map((scope) => `- ${humanField(scope)}`)].join("\n");
+}
+
 export function formatTelemetryPoll(result: TelemetryPollResult): string {
 	if (result.sources.length === 0) return "Telemetry: no sources configured";
 	return ["Telemetry:", ...result.sources.map((source) => {
@@ -534,6 +569,11 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 			const parsed = parseMetricsPruneArgs(rest);
 			if (!parsed) return usage(deps.stderr);
 			return callAndPrint(deps, "metrics.prune", parsed.input, parsed.json, (result) => `Pruned ${result.deleted.toLocaleString()} observation(s)`);
+		}
+		if (action === "distinct-scopes") {
+			const parsed = parseMetricsDistinctScopesArgs(rest);
+			if (!parsed) return usage(deps.stderr);
+			return callAndPrint(deps, "metrics.distinct_scopes", parsed.input, parsed.json, formatMetricsDistinctScopes);
 		}
 		return usage(deps.stderr);
 	}
