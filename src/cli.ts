@@ -6,7 +6,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	BENCHMARK_MAX_QUERY_LIMIT,
+	CLI_AVAILABLE_ROUTES_MAX,
+	CLI_METRICS_HUMAN_MAX_ROWS,
 	HUMAN_TEXT_FIELD_MAX_CHARACTERS,
+	MAX_QUERY_LIMIT,
 	MODEL_RANKING_DEFAULT_CONTEXT_WEIGHT,
 	MODEL_RANKING_DEFAULT_COST_WEIGHT,
 	MODEL_RANKING_DEFAULT_LATENCY_WEIGHT,
@@ -22,6 +25,10 @@ import type { ModelRecommendationInput } from "./domain/model-ranking-service.ts
 import type { ModelCandidate, ModelRankingResult, ScopeAuthority, UtilityWeights } from "./domain/model-ranking.ts";
 import { TASK_CLASSES, type ModelTaskClass } from "./domain/model-observation.ts";
 import type { ContextAssessment } from "./domain/context-telemetry.ts";
+import { METRIC_UNITS, type MetricObservation, type MetricQuery, type MetricUnit, type StoredMetricObservation } from "./domain/metric.ts";
+import type { PolicyDecision, Route } from "./policy.ts";
+import type { RouteOverride, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
+import { EXPECTED_OPERATION_NAMES, type OperationInputs, type OperationName, type OperationOutputs } from "./service.ts";
 import { resolveJittorPaths } from "./state.ts";
 
 export interface SystemdUnitOptions {
@@ -88,7 +95,22 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
 };
 
 function usage(stderr: (line: string) => void): number {
-	stderr("Usage: jittor serve | service <install|start|stop|restart|status> | context [--since <ms>] [--until <ms>] [--json] | benchmarks <status|refresh|list> [options] [--json]");
+	stderr([
+		"Usage: jittor <command> [options]",
+		"  serve",
+		"  service <install|start|stop|restart|status|checkpoint>",
+		"  context [--since <ms>] [--until <ms>] [--json]",
+		"  benchmarks <status|refresh|list|rank> [options] [--json]",
+		"  metrics record --source <s> --scope <s> --metric <s> --value <number|null> --unit <unit> [--observed-at <ms>] [--attributes <json>] [--json]",
+		"  metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] [--until <ms>] [--limit <n>] [--order asc|desc] [--json]",
+		"  metrics prune --before <ms> [--json]",
+		"  telemetry poll [--json]",
+		"  router <status|decide|pause|resume|clear-override> [--json]",
+		"  router override --route <provider/model@thinking> [--expires-at <ms>] [--json]",
+		"  router current-route --route <provider/model@thinking> [--json]",
+		"  router available-routes [--route <provider/model@thinking> ...] [--json]",
+		"  op <operation> [--input <json>]",
+	].join("\n"));
 	return 2;
 }
 
@@ -107,6 +129,206 @@ function parseContextArgs(args: string[]): { input: { since?: number; until?: nu
 	}
 	if (input.since !== undefined && input.until !== undefined && input.until < input.since) return null;
 	return { input, json };
+}
+
+function parseRoute(raw: string | undefined): Route | null {
+	if (raw === undefined) return null;
+	return parseCandidate(raw);
+}
+
+interface MetricsRecordArgs { input: MetricObservation; json: boolean }
+
+function parseMetricsRecordArgs(args: string[]): MetricsRecordArgs | null {
+	let json = false;
+	let source: string | undefined;
+	let scope: string | undefined;
+	let metric: string | undefined;
+	let value: number | null | undefined;
+	let unit: MetricUnit | undefined;
+	let observedAt: number | undefined;
+	let attributes: Record<string, unknown> | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (!["--source", "--scope", "--metric", "--value", "--unit", "--observed-at", "--attributes"].includes(argument ?? "")) return null;
+		const raw = args[++index];
+		if (raw === undefined || raw.length === 0) return null;
+		if (argument === "--source") source = raw;
+		else if (argument === "--scope") scope = raw;
+		else if (argument === "--metric") metric = raw;
+		else if (argument === "--value") {
+			if (raw.toLowerCase() === "null") value = null;
+			else {
+				const parsed = Number(raw);
+				if (!Number.isFinite(parsed)) return null;
+				value = parsed;
+			}
+		} else if (argument === "--unit") {
+			if (!METRIC_UNITS.includes(raw as MetricUnit)) return null;
+			unit = raw as MetricUnit;
+		} else if (argument === "--observed-at") {
+			const parsed = Number(raw);
+			if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+			observedAt = parsed;
+		} else {
+			try {
+				const parsed = JSON.parse(raw);
+				if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+				attributes = parsed as Record<string, unknown>;
+			} catch {
+				return null;
+			}
+		}
+	}
+	if (source === undefined || scope === undefined || metric === undefined || value === undefined || unit === undefined) return null;
+	return {
+		json,
+		input: {
+			source, scope, metric, value, unit,
+			observedAt: observedAt ?? Date.now(),
+			...(attributes ? { attributes } : {}),
+		},
+	};
+}
+
+interface MetricsQueryArgs { input: MetricQuery; json: boolean }
+
+function parseMetricsQueryArgs(args: string[]): MetricsQueryArgs | null {
+	let json = false;
+	const input: MetricQuery = {};
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (!["--source", "--scope", "--metric", "--since", "--until", "--limit", "--order"].includes(argument ?? "")) return null;
+		const raw = args[++index];
+		if (raw === undefined || raw.length === 0) return null;
+		if (argument === "--source") input.source = raw;
+		else if (argument === "--scope") input.scope = raw;
+		else if (argument === "--metric") input.metric = raw;
+		else if (argument === "--order") {
+			if (raw !== "asc" && raw !== "desc") return null;
+			input.order = raw;
+		} else {
+			const parsed = Number(raw);
+			if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+			if (argument === "--since") input.since = parsed;
+			else if (argument === "--until") input.until = parsed;
+			else {
+				if (parsed < 1 || parsed > MAX_QUERY_LIMIT) return null;
+				input.limit = parsed;
+			}
+		}
+	}
+	if (input.since !== undefined && input.until !== undefined && input.until < input.since) return null;
+	return { input, json };
+}
+
+interface MetricsPruneArgs { input: { before: number }; json: boolean }
+
+function parseMetricsPruneArgs(args: string[]): MetricsPruneArgs | null {
+	let json = false;
+	let before: number | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (argument !== "--before") return null;
+		const raw = args[++index];
+		const parsed = Number(raw);
+		if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+		before = parsed;
+	}
+	if (before === undefined) return null;
+	return { input: { before }, json };
+}
+
+interface RouterOverrideArgs { input: RouteOverride; json: boolean }
+
+function parseRouterOverrideArgs(args: string[]): RouterOverrideArgs | null {
+	let json = false;
+	let route: Route | null = null;
+	let expiresAt: number | null = null;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (!["--route", "--expires-at"].includes(argument ?? "")) return null;
+		const raw = args[++index];
+		if (raw === undefined || raw.length === 0) return null;
+		if (argument === "--route") {
+			route = parseRoute(raw);
+			if (!route) return null;
+		} else {
+			const parsed = Number(raw);
+			if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+			expiresAt = parsed;
+		}
+	}
+	if (!route) return null;
+	return { input: { route, expiresAt }, json };
+}
+
+interface RouterRouteArgs { input: Route; json: boolean }
+
+function parseRouterRouteArgs(args: string[]): RouterRouteArgs | null {
+	let json = false;
+	let route: Route | null = null;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (argument !== "--route") return null;
+		const raw = args[++index];
+		if (raw === undefined) return null;
+		route = parseRoute(raw);
+		if (!route) return null;
+	}
+	if (!route) return null;
+	return { input: route, json };
+}
+
+interface RouterAvailableRoutesArgs { input: { routes: Route[] }; json: boolean }
+
+function parseRouterAvailableRoutesArgs(args: string[]): RouterAvailableRoutesArgs | null {
+	let json = false;
+	const routes: Route[] = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (argument !== "--route") return null;
+		const raw = args[++index];
+		if (raw === undefined) return null;
+		const route = parseRoute(raw);
+		if (!route) return null;
+		if (routes.length >= CLI_AVAILABLE_ROUTES_MAX) return null;
+		routes.push(route);
+	}
+	return { input: { routes }, json };
+}
+
+function parseJsonOnlyArgs(args: string[]): { json: boolean } | null {
+	let json = false;
+	for (const argument of args) {
+		if (argument !== "--json") return null;
+		json = true;
+	}
+	return { json };
+}
+
+function parseOpArgs(args: string[]): { operation: OperationName; input: Record<string, unknown> } | null {
+	const [operation, ...rest] = args;
+	if (operation === undefined || !EXPECTED_OPERATION_NAMES.includes(operation as OperationName)) return null;
+	let input: Record<string, unknown> = {};
+	for (let index = 0; index < rest.length; index += 1) {
+		if (rest[index] !== "--input") return null;
+		const raw = rest[++index];
+		if (raw === undefined) return null;
+		try {
+			const parsed = JSON.parse(raw);
+			if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+			input = parsed as Record<string, unknown>;
+		} catch {
+			return null;
+		}
+	}
+	return { operation: operation as OperationName, input };
 }
 
 interface BenchmarkArgs {
@@ -227,9 +449,152 @@ export function formatContextAssessment(summary: ContextAssessment): string {
 	].join("\n");
 }
 
+function formatRoute(route: Route): string {
+	return `${humanField(route.provider)}/${humanField(route.model)} · ${humanField(route.thinking)}`;
+}
+
+export function formatMetricsQuery(rows: StoredMetricObservation[]): string {
+	if (rows.length === 0) return "Metrics: no observations matched";
+	const shown = rows.slice(0, CLI_METRICS_HUMAN_MAX_ROWS);
+	const lines = [
+		`Metrics: ${rows.length.toLocaleString()} observation(s)${rows.length > shown.length ? ` (showing first ${shown.length})` : ""}`,
+		...shown.map((row) => `- ${humanField(row.source)}/${humanField(row.scope)}/${humanField(row.metric)} = ${row.value === null ? "null" : row.value} ${row.unit} @ ${new Date(row.observedAt).toISOString()}`),
+	];
+	return lines.join("\n");
+}
+
+export function formatTelemetryPoll(result: TelemetryPollResult): string {
+	if (result.sources.length === 0) return "Telemetry: no sources configured";
+	return ["Telemetry:", ...result.sources.map((source) => {
+		const freshness = !source.ok ? `failed${source.error ? ` (${humanField(source.error)})` : ""}` : "ok";
+		return `- ${humanField(source.id)} (${humanField(source.provider)}): ${freshness} · ${source.metrics} metric(s)`;
+	})].join("\n");
+}
+
+export function formatRouterStatus(status: RouterStatus): string {
+	const lines = [
+		`Router: ${status.ready ? "ready" : "not ready"}${status.paused ? " · paused" : ""}`,
+		`Current route: ${status.currentRoute ? formatRoute(status.currentRoute) : "none"}`,
+		`Available routes: ${status.availableRoutes.length.toLocaleString()}`,
+		`Override: ${status.override ? `${formatRoute(status.override.route)}${status.override.expiresAt === null ? "" : ` (expires ${new Date(status.override.expiresAt).toISOString()})`}` : "none"}`,
+	];
+	if (status.lastDecision) lines.push(`Last decision: ${status.lastDecision.action} · pressure ${Number.isFinite(status.lastDecision.pressure) ? status.lastDecision.pressure.toFixed(3) : "∞"} · ${humanField(status.lastDecision.reason)}`);
+	lines.push(formatTelemetryPoll({ sources: status.sources, observedAt: Date.now() }));
+	return lines.join("\n");
+}
+
+export function formatPolicyDecision(decision: PolicyDecision): string {
+	const lines = [`Decision: ${decision.action} · pressure ${Number.isFinite(decision.pressure) ? decision.pressure.toFixed(3) : "∞"} · ${humanField(decision.reason)}`];
+	if (decision.route) lines.push(`Route: ${formatRoute(decision.route)}`);
+	if (decision.delayMs !== undefined) lines.push(`Delay: ${decision.delayMs}ms`);
+	return lines.join("\n");
+}
+
+async function callAndPrint<Name extends OperationName>(
+	deps: CliDependencies,
+	operation: Name,
+	input: OperationInputs[Name],
+	json: boolean,
+	formatHuman: (result: OperationOutputs[Name]) => string,
+): Promise<number> {
+	try {
+		const result = await deps.client.call(operation, input);
+		deps.stdout(json ? JSON.stringify(result) : formatHuman(result));
+		return 0;
+	} catch (error) {
+		deps.stderr(error instanceof Error ? error.message : String(error));
+		return 1;
+	}
+}
+
 export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEPENDENCIES): Promise<number> {
 	const [command, action, ...rest] = args;
 	if (command === "serve") { deps.serve(); return 0; }
+	if (command === "metrics") {
+		if (action === "record") {
+			const parsed = parseMetricsRecordArgs(rest);
+			if (!parsed) return usage(deps.stderr);
+			return callAndPrint(deps, "metrics.record", parsed.input, parsed.json, (row) => formatMetricsQuery([row]));
+		}
+		if (action === "query") {
+			const parsed = parseMetricsQueryArgs(rest);
+			if (!parsed) return usage(deps.stderr);
+			return callAndPrint(deps, "metrics.query", parsed.input, parsed.json, formatMetricsQuery);
+		}
+		if (action === "prune") {
+			const parsed = parseMetricsPruneArgs(rest);
+			if (!parsed) return usage(deps.stderr);
+			return callAndPrint(deps, "metrics.prune", parsed.input, parsed.json, (result) => `Pruned ${result.deleted.toLocaleString()} observation(s)`);
+		}
+		return usage(deps.stderr);
+	}
+	if (command === "telemetry") {
+		if (action !== "poll") return usage(deps.stderr);
+		const parsed = parseJsonOnlyArgs(rest);
+		if (!parsed) return usage(deps.stderr);
+		return callAndPrint(deps, "telemetry.poll", {}, parsed.json, formatTelemetryPoll);
+	}
+	if (command === "router") {
+		switch (action) {
+			case "status": {
+				const parsed = parseJsonOnlyArgs(rest);
+				if (!parsed) return usage(deps.stderr);
+				return callAndPrint(deps, "router.status", {}, parsed.json, formatRouterStatus);
+			}
+			case "decide": {
+				const parsed = parseJsonOnlyArgs(rest);
+				if (!parsed) return usage(deps.stderr);
+				return callAndPrint(deps, "router.decide", {}, parsed.json, formatPolicyDecision);
+			}
+			case "pause": {
+				const parsed = parseJsonOnlyArgs(rest);
+				if (!parsed) return usage(deps.stderr);
+				return callAndPrint(deps, "router.pause", {}, parsed.json, formatRouterStatus);
+			}
+			case "resume": {
+				const parsed = parseJsonOnlyArgs(rest);
+				if (!parsed) return usage(deps.stderr);
+				return callAndPrint(deps, "router.resume", {}, parsed.json, formatRouterStatus);
+			}
+			case "clear-override": {
+				const parsed = parseJsonOnlyArgs(rest);
+				if (!parsed) return usage(deps.stderr);
+				return callAndPrint(deps, "router.clear_override", {}, parsed.json, formatRouterStatus);
+			}
+			case "override": {
+				const parsed = parseRouterOverrideArgs(rest);
+				if (!parsed) return usage(deps.stderr);
+				return callAndPrint(deps, "router.override", parsed.input, parsed.json, formatRouterStatus);
+			}
+			case "current-route": {
+				const parsed = parseRouterRouteArgs(rest);
+				if (!parsed) return usage(deps.stderr);
+				return callAndPrint(deps, "router.current_route", parsed.input, parsed.json, formatRouterStatus);
+			}
+			case "available-routes": {
+				const parsed = parseRouterAvailableRoutesArgs(rest);
+				if (!parsed) return usage(deps.stderr);
+				return callAndPrint(deps, "router.available_routes", parsed.input, parsed.json, formatRouterStatus);
+			}
+			default: return usage(deps.stderr);
+		}
+	}
+	if (command === "op") {
+		const parsed = parseOpArgs(action === undefined ? [] : [action, ...rest]);
+		if (!parsed) return usage(deps.stderr);
+		try {
+			// The escape hatch dispatches a dynamically named operation; OperationInputs/OperationOutputs
+			// are only known statically per literal operation name, so this one call site is intentionally
+			// untyped at the boundary. parseOpArgs already restricts `operation` to EXPECTED_OPERATION_NAMES.
+			const call = deps.client.call as (operation: OperationName, input: Record<string, unknown>) => Promise<unknown>;
+			const result = await call(parsed.operation, parsed.input);
+			deps.stdout(JSON.stringify(result));
+			return 0;
+		} catch (error) {
+			deps.stderr(error instanceof Error ? error.message : String(error));
+			return 1;
+		}
+	}
 	if (command === "benchmarks") {
 		const parsed = parseBenchmarkArgs(action, rest);
 		if (!parsed) return usage(deps.stderr);
@@ -271,6 +636,11 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 		case "stop": deps.systemctl("stop", SYSTEMD_UNIT_NAME); return 0;
 		case "restart": deps.systemctl("restart", SYSTEMD_UNIT_NAME); return 0;
 		case "status": deps.systemctl("status", SYSTEMD_UNIT_NAME); return 0;
+		case "checkpoint": {
+			const parsed = parseJsonOnlyArgs(rest);
+			if (!parsed) return usage(deps.stderr);
+			return callAndPrint(deps, "service.checkpoint", {}, parsed.json, () => "Checkpoint complete");
+		}
 		default: return usage(deps.stderr);
 	}
 }
