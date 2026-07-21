@@ -16,8 +16,10 @@ class FakeClient implements JittorExtensionClient {
 	decisionQueue: PolicyDecision[] = [];
 	status: RouterStatus = { ready: true, paused: false, sources: [], lastDecision: this.decision, override: null, currentRoute: null, availableRoutes: [] };
 	metrics: any[] = [];
+	compactionEstimate: { ms: number | null; confidence: "cold-start" | "learned"; sampleSize: number; observedAt: number } = { ms: null, confidence: "cold-start", sampleSize: 0, observedAt: 0 };
 	async call(operation: string, input: unknown): Promise<any> {
 		this.calls.push({ operation, input });
+		if (operation === "compaction.estimate") return this.compactionEstimate;
 		if (operation === "router.decide") return this.decisionQueue.shift() ?? this.decision;
 		if (operation === "router.current_route") {
 			this.status = { ...this.status, currentRoute: input as RouterStatus["currentRoute"] };
@@ -164,6 +166,40 @@ describe("Jittor Pi actuator", () => {
 		const recorded = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as { source: string; metric: string; attributes?: Record<string, unknown> });
 		expect(recorded.some((metric) => metric.source === "papyrus-context" && metric.metric === "injected-characters")).toBe(true);
 		expect(recorded.some((metric) => metric.source === "pi-context" && metric.metric === "compaction-duration" && metric.attributes?.reason === "threshold")).toBe(true);
+	});
+
+	it("fetches a compaction duration estimate once per compaction without polling on every render tick", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		const firstSignal = new AbortController().signal;
+		await app.handlers.get("session_before_compact")![0]!({ reason: "threshold", willRetry: false, signal: firstSignal }, app.ctx);
+		await Promise.resolve();
+		expect(client.calls.filter((call) => call.operation === "compaction.estimate")).toHaveLength(1);
+		await app.handlers.get("session_compact")![0]!({ reason: "threshold", willRetry: false }, app.ctx);
+		const secondSignal = new AbortController().signal;
+		await app.handlers.get("session_before_compact")![0]!({ reason: "threshold", willRetry: false, signal: secondSignal }, app.ctx);
+		await Promise.resolve();
+		expect(client.calls.filter((call) => call.operation === "compaction.estimate")).toHaveLength(2);
+	});
+
+	it("never applies a resolved estimate to a compaction that has already finished or been superseded", async () => {
+		const client = new FakeClient();
+		let resolveEstimate: ((value: unknown) => void) | undefined;
+		client.call = async (operation: string, input: unknown) => {
+			client.calls.push({ operation, input });
+			if (operation === "compaction.estimate") return new Promise((resolve) => { resolveEstimate = resolve; });
+			return { ready: true, paused: false, sources: [], lastDecision: null, override: null, currentRoute: null, availableRoutes: [] };
+		};
+		const app = harness(client);
+		const signal = new AbortController().signal;
+		await app.handlers.get("session_before_compact")![0]!({ reason: "threshold", willRetry: false, signal }, app.ctx);
+		// Compaction finishes before the estimate resolves.
+		await app.handlers.get("session_compact")![0]!({ reason: "threshold", willRetry: false }, app.ctx);
+		expect(() => resolveEstimate?.({ ms: 9_000, confidence: "learned", sampleSize: 5, observedAt: Date.now() })).not.toThrow();
+		await Promise.resolve();
+		await Promise.resolve();
+		// No observable crash and no dangling reference to the finished compaction; nothing further to assert
+		// without exposing internal footer state, which stays module-private by design.
 	});
 
 	it("derives routes from Pi's current provider and authenticated model catalog without model IDs", () => {

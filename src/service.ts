@@ -1,7 +1,7 @@
-import { CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "./constants.ts";
+import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "./constants.ts";
 import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
-import { assessContextTelemetry, type ContextAssessment } from "./domain/context-telemetry.ts";
+import { assessContextTelemetry, estimateCompactionDuration, type CompactionDurationEstimate, type ContextAssessment } from "./domain/context-telemetry.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
 import type { ModelRanker, ModelRecommendationInput } from "./domain/model-ranking-service.ts";
 import type { ModelRankingResult } from "./domain/model-ranking.ts";
@@ -19,6 +19,7 @@ export const EXPECTED_OPERATION_NAMES = [
 	"benchmark.query",
 	"models.rank",
 	"context.assess",
+	"compaction.estimate",
 	"service.checkpoint",
 	"telemetry.poll",
 	"router.status",
@@ -41,6 +42,7 @@ export interface OperationInputs {
 	"benchmark.query": BenchmarkQuery;
 	"models.rank": ModelRecommendationInput;
 	"context.assess": { since?: number; until?: number };
+	"compaction.estimate": Record<string, never>;
 	"service.checkpoint": Record<string, never>;
 	"telemetry.poll": Record<string, never>;
 	"router.status": Record<string, never>;
@@ -61,6 +63,7 @@ export interface OperationOutputs {
 	"benchmark.query": BenchmarkQueryResult;
 	"models.rank": ModelRankingResult;
 	"context.assess": ContextAssessment;
+	"compaction.estimate": CompactionDurationEstimate;
 	"service.checkpoint": { ok: true };
 	"telemetry.poll": TelemetryPollResult;
 	"router.status": RouterStatus;
@@ -141,6 +144,13 @@ export class JittorService {
 					until: until as number,
 					truncated: injections.length >= CONTEXT_ASSESSMENT_QUERY_LIMIT || compactions.length >= CONTEXT_ASSESSMENT_QUERY_LIMIT,
 				});
+			}
+			case "compaction.estimate": {
+				const rows = this.metrics.query({
+					source: "pi-context", scope: "compaction", metric: "compaction-duration",
+					order: "desc", limit: COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES,
+				});
+				return estimateCompactionDuration(rows);
 			}
 			case "service.checkpoint": this.metrics.checkpoint(); return { ok: true };
 			case "telemetry.poll": return this.router.poll();

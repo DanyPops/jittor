@@ -79,8 +79,18 @@ describe("Jittor integrated footer", () => {
 			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
 			{ startedAt: 2_000, initialFraction: 0.75 },
 		);
-		expect(lines[0]).toMatch(/ctx ████░░░░ ● compact 6s/);
+		expect(lines[0]).toMatch(/ctx ████░░░░ ● compact 6s \(estimating\)/);
 		expect(lines[0]).not.toContain("150k/200k");
+	});
+
+	it("drains against a learned duration estimate and reports approximate time remaining once one is available", () => {
+		const lines = renderFooterLines(
+			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
+			{ startedAt: 2_000, initialFraction: 0.75, estimatedMs: 12_000, confidence: "learned" },
+		);
+		// elapsed 6s of a 12s estimate => half drained => fraction 0.5 over an 8-wide bar => 4 filled.
+		expect(lines[0]).toMatch(/ctx ████░░░░ [●○] compact 6s \(~6s left\)/);
+		expect(lines[0]).not.toContain("estimating");
 	});
 
 	it("blinks the compacting liveness indicator once per render tick independent of the drain rate", () => {

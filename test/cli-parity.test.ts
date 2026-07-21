@@ -20,6 +20,7 @@ const cases: Case[] = [
 	{ args: ["context", "--json"], operation: "context.assess" },
 	{ args: ["service", "checkpoint", "--json"], operation: "service.checkpoint" },
 	{ args: ["telemetry", "poll", "--json"], operation: "telemetry.poll" },
+	{ args: ["compaction", "estimate", "--json"], operation: "compaction.estimate" },
 	{ args: ["router", "status", "--json"], operation: "router.status" },
 	{ args: ["router", "decide", "--json"], operation: "router.decide" },
 	{ args: ["router", "pause", "--json"], operation: "router.pause" },

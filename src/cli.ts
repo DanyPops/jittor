@@ -26,6 +26,7 @@ import type { ModelCandidate, ModelRankingResult, ScopeAuthority, UtilityWeights
 import { TASK_CLASSES, type ModelTaskClass } from "./domain/model-observation.ts";
 import type { ContextAssessment } from "./domain/context-telemetry.ts";
 import { METRIC_UNITS, type MetricObservation, type MetricQuery, type MetricUnit, type StoredMetricObservation } from "./domain/metric.ts";
+import type { CompactionDurationEstimate } from "./domain/context-telemetry.ts";
 import type { PolicyDecision, Route } from "./policy.ts";
 import type { RouteOverride, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
 import { EXPECTED_OPERATION_NAMES, type OperationInputs, type OperationName, type OperationOutputs } from "./service.ts";
@@ -105,6 +106,7 @@ function usage(stderr: (line: string) => void): number {
 		"  metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] [--until <ms>] [--limit <n>] [--order asc|desc] [--json]",
 		"  metrics prune --before <ms> [--json]",
 		"  telemetry poll [--json]",
+		"  compaction estimate [--json]",
 		"  router <status|decide|pause|resume|clear-override> [--json]",
 		"  router override --route <provider/model@thinking> [--expires-at <ms>] [--json]",
 		"  router current-route --route <provider/model@thinking> [--json]",
@@ -483,6 +485,13 @@ export function formatRouterStatus(status: RouterStatus): string {
 	return lines.join("\n");
 }
 
+export function formatCompactionEstimate(estimate: CompactionDurationEstimate): string {
+	if (estimate.confidence === "cold-start" || estimate.ms === null) {
+		return `Compaction duration: cold-start (${estimate.sampleSize.toLocaleString()} sample(s), not enough evidence yet)`;
+	}
+	return `Compaction duration: ~${estimate.ms.toLocaleString()}ms learned from ${estimate.sampleSize.toLocaleString()} sample(s)`;
+}
+
 export function formatPolicyDecision(decision: PolicyDecision): string {
 	const lines = [`Decision: ${decision.action} · pressure ${Number.isFinite(decision.pressure) ? decision.pressure.toFixed(3) : "∞"} · ${humanField(decision.reason)}`];
 	if (decision.route) lines.push(`Route: ${formatRoute(decision.route)}`);
@@ -533,6 +542,12 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 		const parsed = parseJsonOnlyArgs(rest);
 		if (!parsed) return usage(deps.stderr);
 		return callAndPrint(deps, "telemetry.poll", {}, parsed.json, formatTelemetryPoll);
+	}
+	if (command === "compaction") {
+		if (action !== "estimate") return usage(deps.stderr);
+		const parsed = parseJsonOnlyArgs(rest);
+		if (!parsed) return usage(deps.stderr);
+		return callAndPrint(deps, "compaction.estimate", {}, parsed.json, formatCompactionEstimate);
 	}
 	if (command === "router") {
 		switch (action) {
