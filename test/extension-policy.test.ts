@@ -433,6 +433,8 @@ describe("Jittor footer status", () => {
 		{ source: "codex-subscription", scope: "codex_bengalfox:primary", metric: "used-fraction", value: 0, unit: "ratio", observedAt: 3, id: 3, attributes: { limitId: "codex_bengalfox", limitName: "GPT-5.3-Codex-Spark", windowSeconds: 604_800, resetsAt: 1_800_100_000 } },
 		{ source: "openrouter", scope: "key:default", metric: "remaining-fraction", value: 0.4, unit: "ratio", observedAt: 5, id: 5, attributes: { limit: 100, remaining: 40, reset: "monthly" } },
 		{ source: "openrouter", scope: "key:default", metric: "usage", value: 60, unit: "usd", observedAt: 4, id: 4, attributes: {} },
+		{ source: "anthropic", scope: "requests", metric: "used-fraction", value: 0.1, unit: "ratio", observedAt: 6, id: 6, attributes: { resetsAt: 1_800_000_000_000 } },
+		{ source: "anthropic", scope: "tokens", metric: "used-fraction", value: 0.25, unit: "ratio", observedAt: 7, id: 7, attributes: { resetsAt: 1_800_050_000_000 } },
 	] as any[];
 
 	it("shows the default Codex budget remaining instead of a same-duration additional model limit", () => {
@@ -457,6 +459,21 @@ describe("Jittor footer status", () => {
 			kind: "bounded", label: "OR", remainingFraction: 0.4, resetText: "monthly reset",
 		});
 		expect(formatFooterStatus(routeStatus, metrics)).toBe("OR 40.0% left");
+	});
+
+	it("prefers the Anthropic tokens bucket over requests, since it reflects the most restrictive limit in effect", () => {
+		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
+		expect(buildFooterBudget(routeStatus, metrics)).toMatchObject({
+			kind: "bounded", label: "tok", remainingFraction: 0.75, resetsAt: 1_800_050_000_000,
+		});
+		expect(formatFooterStatus(routeStatus, metrics)).toBe("tok 75.0% left");
+	});
+
+	it("falls back to the Anthropic requests bucket when no tokens bucket was observed", () => {
+		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
+		expect(buildFooterBudget(routeStatus, metrics.filter((metric) => metric.scope !== "tokens"))).toMatchObject({
+			kind: "bounded", label: "req", remainingFraction: 0.9, resetsAt: 1_800_000_000_000,
+		});
 	});
 
 	it("keeps OpenRouter spend text-only when the key has no official limit", () => {
