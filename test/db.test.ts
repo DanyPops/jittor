@@ -44,6 +44,19 @@ describe("SQLite metric store", () => {
 		expect(observations.every((observation) => typeof observation.id === "number")).toBe(true);
 	});
 
+	it("finds distinct scopes for a source within a time window, bounded and alphabetically ordered", () => {
+		const { store } = fixture();
+		store.record({ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 100, unit: "tokens", observedAt: 1_000 });
+		store.record({ source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 200, unit: "tokens", observedAt: 2_000 });
+		store.record({ source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "output-tokens", value: 50, unit: "tokens", observedAt: 2_500 });
+		store.record({ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 999, unit: "tokens", observedAt: 10_000 });
+		store.record({ source: "openrouter", scope: "key:default", metric: "cost", value: 0.1, unit: "usd", observedAt: 2_000 });
+
+		expect(store.distinctScopes({ source: "pi", since: 0, until: 5_000, limit: 40 })).toEqual(["anthropic-vertex:claude-sonnet-5", "openai-codex:gpt-5.6-sol"]);
+		expect(store.distinctScopes({ source: "pi", since: 0, until: 5_000, limit: 1 })).toHaveLength(1);
+		expect(store.distinctScopes({ source: "pi", since: 20_000, until: 30_000, limit: 40 })).toEqual([]);
+	});
+
 	it("prunes only observations older than the cutoff", () => {
 		const { store } = fixture();
 		for (const observedAt of [1000, 2000, 3000]) {

@@ -76,7 +76,7 @@ describe("model utility ranking", () => {
   it("exposes ranking through the authenticated operation service without accepting evidence in the request", async () => {
     const benchmark = evidence("openai", "gpt-fast", "quality-coding", 0.7)
     const benchmarkStore = { publish() { throw new Error("unused") }, latest(sourceId: string) { return sourceId === "benchmark" ? { sourceId, snapshotId: "s1", retrievedAt: 1_000, publishedAt: 1_000, observations: [benchmark] } : null } }
-    const metrics: MetricStore = { record() { throw new Error("unused") }, query() { return [] }, pruneBefore() { return 0 }, checkpoint() {}, close() {} }
+    const metrics: MetricStore = { record() { throw new Error("unused") }, query() { return [] }, distinctScopes() { return [] }, pruneBefore() { return 0 }, checkpoint() {}, close() {} }
     const ranker = new EvidenceModelRanker(benchmarkStore, metrics, () => 2_000)
     const service = new JittorService(metrics, undefined, undefined, ranker)
     const result = await service.execute("models.rank", {

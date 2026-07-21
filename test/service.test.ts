@@ -15,6 +15,9 @@ class FakeMetricStore implements MetricStore {
 	query(filter: MetricQuery = {}): StoredMetricObservation[] {
 		return this.rows.filter((row) => !filter.source || row.source === filter.source).map((row) => structuredClone(row));
 	}
+	distinctScopes(filter: { source: string; since: number; until: number; limit: number }): string[] {
+		return [...new Set(this.rows.filter((row) => row.source === filter.source && row.observedAt >= filter.since && row.observedAt <= filter.until).map((row) => row.scope))].sort().slice(0, filter.limit);
+	}
 	pruneBefore(cutoff: number): number {
 		const before = this.rows.length;
 		for (let index = this.rows.length - 1; index >= 0; index--) if (this.rows[index]!.observedAt < cutoff) this.rows.splice(index, 1);
@@ -49,6 +52,19 @@ describe("Jittor operation service", () => {
 			source: "openrouter", scope: "key:default", metric: "cost", value: 1,
 			unit: "credits" as never, observedAt: 1000,
 		})).rejects.toThrow("unit is not supported");
+	});
+
+	it("finds bounded distinct scopes for a source within a time window, fairly surfacing every series", async () => {
+		const store = new FakeMetricStore();
+		const service = new JittorService(store);
+		await service.execute("metrics.record", { source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 1, unit: "tokens", observedAt: 1_000 });
+		await service.execute("metrics.record", { source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 1, unit: "tokens", observedAt: 2_000 });
+		expect(await service.execute("metrics.distinct_scopes", { source: "pi", since: 0, until: 5_000 })).toEqual(["anthropic-vertex:claude-sonnet-5", "openai-codex:gpt-5.6-sol"]);
+		expect(await service.execute("metrics.distinct_scopes", { source: "pi", since: 0, until: 5_000, limit: 1 })).toHaveLength(1);
+		await expect(service.execute("metrics.distinct_scopes", { source: "pi", since: 5_000, until: 0 })).rejects.toThrow("ordered integer bounds");
+		await expect(service.execute("metrics.distinct_scopes", { since: 0, until: 5_000 })).rejects.toThrow("source is required");
+		// A generously large requested limit is still clamped server-side, not trusted from the client.
+		expect(await service.execute("metrics.distinct_scopes", { source: "pi", since: 0, until: 5_000, limit: 999_999 })).toHaveLength(2);
 	});
 
 	it("learns a compaction duration estimate from recorded pi-context compaction-duration metrics", async () => {

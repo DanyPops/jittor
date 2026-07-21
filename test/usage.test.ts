@@ -21,6 +21,29 @@ const observations = [
 	metric(5, now - 2 * hour, "openai-codex:gpt-5.6-sol", "cache-read-tokens", 3_000),
 ];
 
+/** Fakes the daemon's per-scope query fan-out: metrics.distinct_scopes then one metrics.query per scope. */
+function fakePiClient(rows: StoredMetricObservation[]) {
+	const calls: Array<{ operation: string; input: any }> = [];
+	return {
+		calls,
+		async call(operation: string, input: any): Promise<unknown> {
+			calls.push({ operation, input });
+			const inWindow = (row: StoredMetricObservation) =>
+				(!input.source || row.source === input.source)
+				&& (input.since === undefined || row.observedAt >= input.since)
+				&& (input.until === undefined || row.observedAt <= input.until);
+			if (operation === "metrics.distinct_scopes") {
+				const scopes = [...new Set(rows.filter(inWindow).map((row) => row.scope))].sort();
+				return scopes.slice(0, input.limit ?? scopes.length);
+			}
+			if (operation === "metrics.query") {
+				return rows.filter((row) => inWindow(row) && (!input.scope || row.scope === input.scope));
+			}
+			throw new Error(`unexpected operation ${operation}`);
+		},
+	};
+}
+
 describe("usage graph projection", () => {
 	it("uses explicit periods, buckets token observations, and preserves provider/model series", () => {
 		expect(USAGE_PERIODS.map(({ id, label }) => [id, label])).toEqual([
@@ -69,13 +92,17 @@ describe("cost graph projection", () => {
 
 describe("usage graph TUI", () => {
 	it("exposes usage through its own dedicated /usage command, separate from /jittor", async () => {
+		// Command dispatch calls showUsagePanel with the real Date.now(), not the fixed test `now`
+		// constant, so this fixture must actually be recent (unlike the other tests below, which pass
+		// an explicit `now` to showUsagePanel directly and can use the fixed constant).
+		const recentObservations = [metric(1, Date.now() - 60_000, "openai-codex:gpt-5.6-sol", "input-tokens", 8_000)];
 		const commands = new Map<string, unknown>();
-		const calls: string[] = [];
+		const fake = fakePiClient(recentObservations);
 		const pi = {
 			registerCommand(name: string, command: unknown) { commands.set(name, command); },
 			on() {},
 		} as unknown as ExtensionAPI;
-		registerJittorExtension(pi, { async call(operation: string) { calls.push(operation); return observations; } });
+		registerJittorExtension(pi, fake);
 		expect([...commands.keys()]).toEqual(["jittor", "usage"]);
 
 		const notifications: string[] = [];
@@ -84,7 +111,7 @@ describe("usage graph TUI", () => {
 			mode: "print",
 			ui: { notify(message: string) { notifications.push(message); } },
 		} as unknown as ExtensionCommandContext);
-		expect(calls).toEqual(["metrics.query"]);
+		expect(fake.calls.map((call) => call.operation)).toEqual(["metrics.distinct_scopes", "metrics.query"]);
 		expect(notifications.join("\n")).toContain("Hourly token usage");
 		notifications.length = 0;
 		await command.handler("cost", {
@@ -95,13 +122,30 @@ describe("usage graph TUI", () => {
 	});
 
 	it("opens directly into the cost view when requested, independent of command dispatch", async () => {
-		const calls: Array<{ operation: string; input: any }> = [];
-		const client = { async call(operation: string, input: any) { calls.push({ operation, input }); return operation === "metrics.query" ? observations : {}; } };
+		const fake = fakePiClient(observations);
 		const notifications: string[] = [];
 		const ctx = { mode: "print", ui: { notify(message: string) { notifications.push(message); } } } as unknown as ExtensionCommandContext;
 		const budgets = { getUsageTokenBudget: () => undefined };
-		await showUsagePanel(ctx, client, budgets, now, "cost");
+		await showUsagePanel(ctx, fake, budgets, now, "cost");
 		expect(notifications.join("\n")).toContain("Hourly cost");
+	});
+
+	it("fetches per distinct scope instead of one flat query, so a heavy scope cannot starve another out of the window", async () => {
+		// Simulate the real-world bug: many recent rows for one scope, and a single row for another,
+		// both well inside the same (default Hourly) window.
+		const heavyScope = Array.from({ length: 50 }, (_, index) => metric(1_000 + index, now - 50 * 60_000 + index * 10, "anthropic-vertex:claude-sonnet-5", "input-tokens", 10));
+		const starvedScope = [metric(2, now - 55 * 60_000, "openai-codex:gpt-5.6-sol", "input-tokens", 8_000)];
+		const fake = fakePiClient([...heavyScope, ...starvedScope]);
+		const notifications: string[] = [];
+		const ctx = { mode: "print", ui: { notify(message: string) { notifications.push(message); } } } as unknown as ExtensionCommandContext;
+		const budgets = { getUsageTokenBudget: () => undefined };
+		await showUsagePanel(ctx, fake, budgets, now, "tokens");
+		// distinct_scopes finds both scopes up front, so the starved (much lower-volume) scope is never
+		// at risk of being crowded out by row-count alone, unlike the old single flat "most recent N rows" query.
+		const distinctScopeCalls = fake.calls.filter((call) => call.operation === "metrics.distinct_scopes");
+		expect(distinctScopeCalls).toHaveLength(1);
+		const perScopeQueries = fake.calls.filter((call) => call.operation === "metrics.query").map((call) => call.input.scope);
+		expect(new Set(perScopeQueries)).toEqual(new Set(["anthropic-vertex:claude-sonnet-5", "openai-codex:gpt-5.6-sol"]));
 	});
 
 	it("renders a bounded cumulative graph with an honest configured threshold and over-budget state", () => {
@@ -194,10 +238,7 @@ describe("usage graph TUI", () => {
 	});
 
 	it("cycles time frame with Tab and Shift+Tab, in addition to the arrow keys", async () => {
-		const client = { async call(operation: string) {
-			if (operation === "metrics.query") return observations;
-			throw new Error(`unexpected operation ${operation}`);
-		} };
+		const client = fakePiClient(observations);
 		const renders: string[] = [];
 		let panel = 0;
 		const ctx = {
@@ -222,12 +263,7 @@ describe("usage graph TUI", () => {
 	});
 
 	it("queries only daemon metrics and supports period changes", async () => {
-		const calls: Array<{ operation: string; input: any }> = [];
-		const client = { async call(operation: string, input: any) {
-			calls.push({ operation, input });
-			if (operation === "metrics.query") return observations;
-			throw new Error(`unexpected operation ${operation}`);
-		} };
+		const client = fakePiClient(observations);
 		let panels = 0;
 		const ctx = {
 			mode: "tui",
@@ -239,10 +275,15 @@ describe("usage graph TUI", () => {
 		} as unknown as ExtensionCommandContext;
 		const budgets = { getUsageTokenBudget(period: string) { return period === "daily" ? 20_000 : undefined; } };
 		await showUsagePanel(ctx, client, budgets, now);
-		expect(calls).toHaveLength(2);
-		expect(calls.every((call) => call.operation === "metrics.query" && call.input.source === "pi")).toBe(true);
-		expect(calls[0]!.input.since).toBe(now - hour);
-		expect(calls[1]!.input.since).toBe(now - 24 * hour);
-		expect(calls[1]!.input).not.toHaveProperty("source", "codex-subscription");
+		// Hourly finds no scopes at all (every fixture row is older than 1 hour): just 1 distinct_scopes
+		// call. Daily finds both fixture scopes: 1 distinct_scopes call + 1 metrics.query per scope.
+		expect(client.calls).toHaveLength(4);
+		expect(client.calls.every((call) => call.input.source === "pi")).toBe(true);
+		const distinctScopeCalls = client.calls.filter((call) => call.operation === "metrics.distinct_scopes");
+		expect(distinctScopeCalls.map((call) => call.input.since)).toEqual([now - hour, now - 24 * hour]);
+		const queryCalls = client.calls.filter((call) => call.operation === "metrics.query");
+		expect(queryCalls).toHaveLength(2);
+		expect(queryCalls.every((call) => call.input.since === now - 24 * hour)).toBe(true);
+		expect(client.calls.some((call) => call.input.source === "codex-subscription")).toBe(false);
 	});
 });

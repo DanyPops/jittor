@@ -68,6 +68,7 @@ function storeWithRows(rows: StoredMetricObservation[]): MetricStore {
   return {
     record(observation) { return { id: 1, ...observation, attributes: observation.attributes ?? {} } },
     query() { return rows },
+    distinctScopes() { return [...new Set(rows.map((row) => row.scope))] },
     pruneBefore() { return 0 },
     checkpoint() {},
     close() {},

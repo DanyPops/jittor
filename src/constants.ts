@@ -62,7 +62,17 @@ export const HANDLE_FILENAME = "daemon.json";
 export const SYSTEMD_UNIT_NAME = "jittor.service";
 export const USAGE_CHART_HEIGHT = 8;
 export const USAGE_Y_AXIS_WIDTH = 7;
-export const USAGE_TOKEN_QUERY_LIMIT = 10_000;
+/**
+ * A single flat "most recent N rows" query lets one heavy provider/model monopolize the entire
+ * budget within the query window, silently starving every other series out of the chart no matter
+ * which time frame is selected (a real bug: a single long, heavy session can fill 10k rows within
+ * a few hours, hiding a whole other provider's usage from a day earlier even in the Monthly view).
+ * The usage/cost dashboard instead fetches per distinct scope (see distinctScopes), bounded by
+ * these two limits; the worst-case total row volume (40 * 250 = 10,000) matches the old flat cap,
+ * but is now fairly distributed across every active series instead of claimable by just one.
+ */
+export const USAGE_MAX_DISTINCT_SCOPES = 40;
+export const USAGE_PER_SCOPE_QUERY_LIMIT = 250;
 export const USAGE_RENDER_MAX_SERIES = 20;
 export const HUMAN_STATUS_MAX_SOURCES = 20;
 export const HUMAN_TEXT_FIELD_MAX_CHARACTERS = 160;
