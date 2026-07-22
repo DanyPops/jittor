@@ -27,6 +27,7 @@ export interface AnthropicRateLimitSnapshot {
 }
 
 function metric(
+	source: AnthropicMetricSource,
 	scope: string,
 	name: string,
 	value: number,
@@ -34,7 +35,7 @@ function metric(
 	observedAt: number,
 	attributes: Record<string, unknown> = {},
 ): MetricObservation {
-	return { source: "anthropic", scope, metric: name, value, unit, observedAt, attributes };
+	return { source, scope, metric: name, value, unit, observedAt, attributes };
 }
 
 function headerInteger(headers: Headers, name: string): number | null {
@@ -61,20 +62,30 @@ function parseWindow(headers: Headers, prefix: string): AnthropicRateLimitWindow
 	return { limit, remaining, resetsAt };
 }
 
-function windowMetrics(scope: string, window: AnthropicRateLimitWindow | null, observedAt: number): MetricObservation[] {
+function windowMetrics(source: AnthropicMetricSource, scope: string, window: AnthropicRateLimitWindow | null, observedAt: number): MetricObservation[] {
 	if (!window) return [];
 	const metrics: MetricObservation[] = [];
 	const attributes = { limit: window.limit, remaining: window.remaining, resetsAt: window.resetsAt };
 	if (window.limit !== null && window.limit > 0 && window.remaining !== null) {
 		const remainingFraction = window.remaining / window.limit;
 		if (remainingFraction < 0 || remainingFraction > 1) throw new Error(`Anthropic ${scope} remaining exceeds its configured limit`);
-		metrics.push(metric(scope, "remaining-fraction", remainingFraction, "ratio", observedAt, attributes));
-		metrics.push(metric(scope, "used-fraction", 1 - remainingFraction, "ratio", observedAt, attributes));
+		metrics.push(metric(source, scope, "remaining-fraction", remainingFraction, "ratio", observedAt, attributes));
+		metrics.push(metric(source, scope, "used-fraction", 1 - remainingFraction, "ratio", observedAt, attributes));
 	}
 	return metrics;
 }
 
-export function parseAnthropicRateLimitHeaders(headers: Headers, observedAt = Date.now()): AnthropicRateLimitSnapshot {
+/**
+ * Direct Anthropic API calls and Anthropic-on-Vertex passthroughs (e.g. the third-party
+ * `@twogiants/pi-anthropic-vertex` extension, which reuses Pi's built-in Anthropic Messages stream
+ * with Anthropic's own `@anthropic-ai/vertex-sdk` client) may both emit this same header shape, but
+ * they are different accounts against different quota pools -- Anthropic's own org-scoped buckets
+ * vs whatever a Vertex project's passthrough exposes, if anything. Tagging the metric source keeps
+ * them from ever being blended into one budget reading.
+ */
+export type AnthropicMetricSource = "anthropic" | "anthropic-vertex";
+
+export function parseAnthropicRateLimitHeaders(headers: Headers, observedAt = Date.now(), source: AnthropicMetricSource = "anthropic"): AnthropicRateLimitSnapshot {
 	const requests = parseWindow(headers, "anthropic-ratelimit-requests");
 	const tokens = parseWindow(headers, "anthropic-ratelimit-tokens");
 	const inputTokens = parseWindow(headers, "anthropic-ratelimit-input-tokens");
@@ -96,12 +107,12 @@ export function parseAnthropicRateLimitHeaders(headers: Headers, observedAt = Da
 		retryAfterMs: retryAfterSeconds === null ? null : Math.round(retryAfterSeconds * 1_000),
 		observedAt,
 		metrics: [
-			...windowMetrics("requests", requests, observedAt),
-			...windowMetrics("tokens", tokens, observedAt),
-			...windowMetrics("input-tokens", inputTokens, observedAt),
-			...windowMetrics("output-tokens", outputTokens, observedAt),
-			...windowMetrics("priority-input-tokens", priorityInputTokens, observedAt),
-			...windowMetrics("priority-output-tokens", priorityOutputTokens, observedAt),
+			...windowMetrics(source, "requests", requests, observedAt),
+			...windowMetrics(source, "tokens", tokens, observedAt),
+			...windowMetrics(source, "input-tokens", inputTokens, observedAt),
+			...windowMetrics(source, "output-tokens", outputTokens, observedAt),
+			...windowMetrics(source, "priority-input-tokens", priorityInputTokens, observedAt),
+			...windowMetrics(source, "priority-output-tokens", priorityOutputTokens, observedAt),
 		],
 	};
 }

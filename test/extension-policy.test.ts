@@ -475,6 +475,43 @@ describe("Jittor Pi actuator", () => {
 		expect(records.some((record) => record.unit === "ratio")).toBe(false);
 		expect(JSON.stringify(records)).not.toContain("Quota exceeded");
 	});
+
+	it("classifies a failed anthropic-vertex response as a bounded failure-count metric tagged distinctly from google-vertex", async () => {
+		// Real-world evidence: Claude-on-Vertex 429s carry GCP's own quota-exceeded shape even through
+		// Anthropic's own official Vertex SDK client, so the same classification applies here -- but
+		// tagged with its own source since this is a different, unrelated Vertex route from google-vertex.
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, { provider: "anthropic-vertex", id: "claude-sonnet-5" });
+		await app.handlers.get("after_provider_response")![0]!({ status: 429, headers: {} }, app.ctx);
+		await app.handlers.get("message_end")![0]!({ message: {
+			role: "assistant", provider: "anthropic-vertex", stopReason: "error",
+			errorMessage: "429 - Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model",
+		} }, app.ctx);
+		const records = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as any);
+		expect(records).toContainEqual(expect.objectContaining({ source: "anthropic-vertex", scope: "failure", metric: "quota", value: 1, unit: "count" }));
+		expect(records.some((record) => record.source === "google-vertex")).toBe(false);
+	});
+
+	it("tags Anthropic-style rate-limit headers on anthropic-vertex distinctly from direct Anthropic, best-effort, if they are ever observed", async () => {
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, { provider: "anthropic-vertex", id: "claude-sonnet-5" });
+		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {
+			"anthropic-ratelimit-tokens-limit": "2000000",
+			"anthropic-ratelimit-tokens-remaining": "800000",
+			"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
+		} }, app.ctx);
+		const records = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as any);
+		expect(records).toContainEqual(expect.objectContaining({ source: "anthropic-vertex", scope: "tokens", metric: "used-fraction", value: 0.6 }));
+		expect(records.some((record) => record.source === "anthropic")).toBe(false);
+	});
+
+	it("notifies instead of silently dropping telemetry on anthropic-vertex header schema drift", async () => {
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, { provider: "anthropic-vertex", id: "claude-sonnet-5" });
+		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: { "anthropic-ratelimit-requests-limit": "not-a-number" } }, app.ctx);
+		expect(app.notifications.at(-1)).toContain("Anthropic-on-Vertex telemetry schema drift");
+		expect(client.calls.some((call) => call.operation === "metrics.record" && (call.input as any).source === "anthropic-vertex")).toBe(false);
+	});
 });
 
 describe("Jittor Codex settled-turn recovery", () => {
@@ -574,6 +611,7 @@ describe("Jittor footer status", () => {
 		{ source: "openrouter", scope: "key:default", metric: "usage", value: 60, unit: "usd", observedAt: 4, id: 4, attributes: {} },
 		{ source: "anthropic", scope: "requests", metric: "used-fraction", value: 0.1, unit: "ratio", observedAt: 6, id: 6, attributes: { resetsAt: 1_800_000_000_000 } },
 		{ source: "anthropic", scope: "tokens", metric: "used-fraction", value: 0.25, unit: "ratio", observedAt: 7, id: 7, attributes: { resetsAt: 1_800_050_000_000 } },
+		{ source: "anthropic-vertex", scope: "tokens", metric: "used-fraction", value: 0.6, unit: "ratio", observedAt: 8, id: 8, attributes: { resetsAt: 1_800_090_000_000 } },
 	] as any[];
 
 	it("shows the default Codex budget remaining instead of a same-duration additional model limit", () => {
@@ -629,5 +667,21 @@ describe("Jittor footer status", () => {
 		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "google-vertex", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
 		expect(buildFooterBudget(routeStatus, metrics)).toBeUndefined();
 		expect(formatFooterStatus(routeStatus, metrics)).toBe("");
+	});
+
+	it("shows a distinctly labeled bounded budget for anthropic-vertex when Anthropic-style headers were actually observed on that passthrough", () => {
+		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "anthropic-vertex", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
+		expect(buildFooterBudget(routeStatus, metrics)).toMatchObject({
+			kind: "bounded", label: "vtok", remainingFraction: 0.4, resetsAt: 1_800_090_000_000,
+		});
+		// Never blended with direct Anthropic's own "tok" bucket, even though both are present here.
+		expect(formatFooterStatus(routeStatus, metrics)).toBe("vtok 40.0% left");
+	});
+
+	it("reports null (not yet known, may still resolve), not undefined, for anthropic-vertex before any header has ever been observed", () => {
+		// Unlike google-vertex, this transport has not been shown to structurally lack the signal --
+		// only that it hasn't been seen yet on this route, which could change.
+		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "anthropic-vertex", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
+		expect(buildFooterBudget(routeStatus, metrics.filter((row) => row.source !== "anthropic-vertex"))).toBeNull();
 	});
 });

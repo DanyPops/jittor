@@ -46,4 +46,13 @@ describe("Google Vertex failure classification", () => {
 		}]);
 		expect(metrics.some((metric) => metric.unit === "ratio")).toBe(false);
 	});
+
+	it("tags the failure-count metric with the given source, so anthropic-vertex and google-vertex never blend", () => {
+		const failure = classifyGoogleVertexFailure("429 RESOURCE_EXHAUSTED", { status: 429 });
+		const metrics = googleVertexFailureMetrics(failure, 1_700_000_000_000, "anthropic-vertex");
+		expect(metrics).toEqual([{
+			source: "anthropic-vertex", scope: "failure", metric: "quota", value: 1, unit: "count", observedAt: 1_700_000_000_000,
+			attributes: { transient: true, status: "RESOURCE_EXHAUSTED", code: 429 },
+		}]);
+	});
 });
