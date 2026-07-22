@@ -19,6 +19,11 @@ import {
 	writeDaemonHandle,
 	type JittorPaths,
 } from "./state.ts";
+import { logEvent } from "./log.ts";
+
+export function reportMaintenanceFailure(event: string, error: unknown): void {
+	logEvent("error", event, { message: error instanceof Error ? error.message : String(error) });
+}
 
 export interface RunningDaemon {
 	host: typeof LOOPBACK_HOST;
@@ -75,12 +80,14 @@ export function startDaemon(
 	}
 	writeDaemonHandle(paths, { host: LOOPBACK_HOST, port, pid: process.pid });
 	const maintenance = setInterval(() => {
-		void service.execute("service.checkpoint", {});
-		void benchmarks.refresh();
+		service.execute("service.checkpoint", {}).catch((error) => reportMaintenanceFailure("checkpoint_failed", error));
+		benchmarks.refresh().catch((error) => reportMaintenanceFailure("benchmark_refresh_failed", error));
 	}, MAINTENANCE_INTERVAL_MS);
-	const poll = setInterval(() => { void router.poll(); }, TELEMETRY_POLL_INTERVAL_MS);
-	if (sources.length > 0) void router.poll();
-	if (benchmarkSources.length > 0) void benchmarks.refresh();
+	const poll = setInterval(() => {
+		router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error));
+	}, TELEMETRY_POLL_INTERVAL_MS);
+	if (sources.length > 0) router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error));
+	if (benchmarkSources.length > 0) benchmarks.refresh().catch((error) => reportMaintenanceFailure("benchmark_refresh_failed", error));
 	let stopped = false;
 	return {
 		host: LOOPBACK_HOST,
