@@ -74,6 +74,12 @@ describe("Jittor integrated footer", () => {
 		expect(lines[0]).toMatch(/budget [░]+ \?/);
 	});
 
+	it("omits the budget segment entirely, rather than showing a permanent placeholder, when no budget signal is possible for the provider", () => {
+		const lines = renderFooterLines(context(null, null), footerData, theme, undefined, "high", 140, 2_000);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).not.toContain("budget");
+	});
+
 	it("holds the context bar steady at its initial fill and shows no timer text while compaction is still estimating (cold start)", () => {
 		const lines = renderFooterLines(
 			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,

@@ -238,7 +238,13 @@ function resetLabel(resetsAt: number | undefined, now: number): string | undefin
 	return `resets in ${Math.max(1, Math.ceil(remaining / MILLISECONDS_PER_MINUTE))}m`;
 }
 
-function budgetSegment(budget: ProviderBudget | null, theme: FooterTheme, width: number, compact: boolean, now: number): string {
+/**
+ * `undefined` means no budget signal is possible for this provider at all (see buildFooterBudget);
+ * the segment is omitted entirely rather than showing a placeholder that could never resolve.
+ * `null` means not known yet but might resolve, which still earns the `?` placeholder.
+ */
+function budgetSegment(budget: ProviderBudget | null | undefined, theme: FooterTheme, width: number, compact: boolean, now: number): string | undefined {
+	if (budget === undefined) return undefined;
 	const w = barWidth(width);
 	if (!budget) return `budget ${theme.fg("dim", progressBar(null, w))} ?`;
 	const stale = budget.observedAt !== undefined && now - budget.observedAt > TELEMETRY_STALE_AFTER_MS;
@@ -298,7 +304,7 @@ export function renderFooterLines(
 	context: FooterContext,
 	footerData: FooterData,
 	theme: FooterTheme,
-	providerBudget: ProviderBudget | null,
+	providerBudget: ProviderBudget | null | undefined,
 	thinkingLevel: string,
 	width: number,
 	now = Date.now(),
@@ -335,7 +341,7 @@ export function renderFooterLines(
 }
 
 export interface IntegratedFooterState {
-	providerBudget: ProviderBudget | null;
+	providerBudget: ProviderBudget | null | undefined;
 	compaction?: CompactionProgress;
 	requestRender?: () => void;
 }

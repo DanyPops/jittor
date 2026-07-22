@@ -622,4 +622,12 @@ describe("Jittor footer status", () => {
 		);
 		expect(text).toBe("$60.000");
 	});
+
+	it("reports undefined (never displayable), not null (not yet known), for a provider with no possible budget signal at all", () => {
+		// Google Vertex has no documented rate-limit/quota header or endpoint (see google-vertex-contracts.ts):
+		// there is nothing that could ever populate this, so it must be distinguishable from "not yet observed".
+		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "google-vertex", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
+		expect(buildFooterBudget(routeStatus, metrics)).toBeUndefined();
+		expect(formatFooterStatus(routeStatus, metrics)).toBe("");
+	});
 });

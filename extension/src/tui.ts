@@ -63,7 +63,15 @@ function windowName(seconds: number): string {
 	return `${Math.round(seconds / 60)}m`;
 }
 
-export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObservation[]): ProviderBudget | null {
+/**
+ * `null` means "not known yet, but this provider can report a budget once data arrives" -- router
+ * not ready, or a supported provider whose telemetry hasn't been observed yet; the footer shows a
+ * placeholder that may resolve. `undefined` means "no budget signal is possible for this provider
+ * at all" (e.g. google-vertex, which has no documented rate-limit or quota header/endpoint Jittor
+ * could ever read -- see google-vertex-contracts.ts); the footer omits the segment entirely rather
+ * than showing a `?` that can never resolve.
+ */
+export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObservation[]): ProviderBudget | null | undefined {
 	if (!status.ready || !status.currentRoute) return null;
 	if (status.currentRoute.provider === "openai-codex") {
 		const codex = codexWindowForModel(metrics, status.currentRoute.model);
@@ -106,7 +114,7 @@ export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObs
 		if (!openRouter || typeof openRouter.value !== "number") return null;
 		return { kind: "unbounded", label: "spend", valueText: `$${openRouter.value.toFixed(3)}`, observedAt: openRouter.observedAt };
 	}
-	return null;
+	return undefined;
 }
 
 export function formatFooterStatus(status: RouterStatus, metrics: StoredMetricObservation[]): string {
