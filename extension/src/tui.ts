@@ -98,6 +98,25 @@ export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObs
 			...(Number.isFinite(resetsAt) && resetsAt > 0 ? { resetsAt } : {}),
 		};
 	}
+	if (status.currentRoute.provider === "anthropic-vertex") {
+		// Best-effort only (see index.ts): these metrics only exist if Anthropic-style rate-limit
+		// headers were actually observed on this passthrough, which is unverified. Labeled distinctly
+		// ("vtok"/"vreq") from direct Anthropic's "tok"/"req" since they are a different account/quota
+		// pool even if the header shape is identical. If nothing was ever observed, this stays null
+		// (may still resolve later), not undefined (never possible) -- unlike google-vertex, this
+		// provider's transport has not been shown to structurally lack the signal.
+		const anthropicVertex = latest(metrics, (row) => row.source === "anthropic-vertex" && row.metric === "used-fraction" && row.scope === "tokens" && typeof row.value === "number")
+			?? latest(metrics, (row) => row.source === "anthropic-vertex" && row.metric === "used-fraction" && row.scope === "requests" && typeof row.value === "number");
+		if (!anthropicVertex || typeof anthropicVertex.value !== "number") return null;
+		const resetsAt = Number(anthropicVertex.attributes["resetsAt"]);
+		return {
+			kind: "bounded",
+			label: anthropicVertex.scope === "tokens" ? "vtok" : "vreq",
+			remainingFraction: 1 - anthropicVertex.value,
+			observedAt: anthropicVertex.observedAt,
+			...(Number.isFinite(resetsAt) && resetsAt > 0 ? { resetsAt } : {}),
+		};
+	}
 	if (status.currentRoute.provider === "openrouter") {
 		const openRouter = latest(metrics, (row) => row.source === "openrouter" && row.metric === "usage" && typeof row.value === "number");
 		const remaining = latest(metrics, (row) => row.source === "openrouter" && row.metric === "remaining-fraction" && typeof row.value === "number");

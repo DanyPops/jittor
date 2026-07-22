@@ -303,6 +303,11 @@ export function registerJittorExtension(
 	let recoveryCooldown: { until: number; attempt: number; failureKind: CodexFailureKind } | undefined;
 	let lastCodexResponse: CodexFailureMetadata = {};
 	let lastGoogleVertexResponse: GoogleVertexFailureMetadata = {};
+	// The third-party "anthropic-vertex" provider (Anthropic Claude via Google Vertex) is tracked
+	// separately from "google-vertex" (Pi's own, unrelated native Vertex provider): different code
+	// path, different account/quota pool, and its metrics must stay distinguishable -- see
+	// google-vertex-contracts.ts and anthropic-contracts.ts.
+	let lastAnthropicVertexResponse: GoogleVertexFailureMetadata = {};
 	const cancelRecovery = (resetPolicy: boolean): void => {
 		if (recoveryTimer !== undefined) recoveryRuntime.clearTimeout(recoveryTimer);
 		recoveryTimer = undefined;
@@ -561,6 +566,7 @@ export function registerJittorExtension(
 		cancelRecovery(true);
 		lastCodexResponse = {};
 		lastGoogleVertexResponse = {};
+		lastAnthropicVertexResponse = {};
 		ctx.ui.setStatus("jittor", undefined);
 		showFooter(ctx);
 		try {
@@ -638,6 +644,7 @@ export function registerJittorExtension(
 		compactionTelemetry.observeTurn();
 		lastCodexResponse = {};
 		lastGoogleVertexResponse = {};
+		lastAnthropicVertexResponse = {};
 		activeLocalRun = {
 			runId: `local-${event.timestamp}-${++localRunSequence}`,
 			startedAt: event.timestamp,
@@ -684,6 +691,22 @@ export function registerJittorExtension(
 					if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Anthropic telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
 				}
 			}
+		}
+		if (ctx.model?.provider === "anthropic-vertex") {
+			// Best-effort only: unverified whether this passthrough ever forwards Anthropic's own
+			// rate-limit headers. If it doesn't, hasAnthropicRateLimitHeaders is false and nothing is
+			// recorded -- the same honest default as every other unconfirmed signal in this file.
+			const headers = new Headers(event.headers);
+			if (hasAnthropicRateLimitHeaders(headers)) {
+				try {
+					await recordMetrics(client, parseAnthropicRateLimitHeaders(headers, Date.now(), "anthropic-vertex").metrics);
+				} catch {
+					if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Anthropic-on-Vertex telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
+				}
+			}
+			// Well-evidenced regardless of headers: GCP's own quota system fronts this transport, so the
+			// same failure classification as google-vertex applies -- see google-vertex-contracts.ts.
+			lastAnthropicVertexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
 		}
 		if (ctx.model?.provider === "google-vertex") {
 			lastGoogleVertexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
@@ -753,6 +776,13 @@ export function registerJittorExtension(
 				await recordMetrics(client, googleVertexFailureMetrics(failure, Date.now())).catch(() => undefined);
 			}
 			lastGoogleVertexResponse = {};
+		}
+		if (event.message.role === "assistant" && event.message.provider === "anthropic-vertex") {
+			if (event.message.stopReason === "error") {
+				const failure = classifyGoogleVertexFailure(event.message.errorMessage, lastAnthropicVertexResponse);
+				await recordMetrics(client, googleVertexFailureMetrics(failure, Date.now(), "anthropic-vertex")).catch(() => undefined);
+			}
+			lastAnthropicVertexResponse = {};
 		}
 		const metrics = assistantUsageMetrics(event.message, Date.now(), focusedTaskId);
 		if (metrics.length > 0) {

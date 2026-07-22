@@ -86,10 +86,22 @@ export function classifyGoogleVertexFailure(value: unknown, metadata: GoogleVert
 	return { kind: "unknown", transient: false, ...base };
 }
 
+/**
+ * Also reused for the third-party `anthropic-vertex` provider (Anthropic Claude models served
+ * through Google Vertex, e.g. via `@twogiants/pi-anthropic-vertex`): real-world reports show its
+ * 429s still carry GCP's own quota-exceeded message shape
+ * (`aiplatform.googleapis.com/online_prediction_requests_per_base_model`) even through Anthropic's
+ * own official Vertex SDK client, since Google's quota enforcement happens at the infra layer
+ * regardless of client wire format. `source` keeps its metrics distinguishable from Pi's native
+ * `google-vertex` provider (a different, unrelated Vertex route) and from direct Anthropic (a
+ * different account/quota pool at Anthropic's origin).
+ */
+export type GoogleVertexMetricSource = "google-vertex" | "anthropic-vertex";
+
 /** A bounded failure-count observation; never a fabricated remaining-budget fraction. */
-export function googleVertexFailureMetrics(failure: GoogleVertexFailure, observedAt: number): MetricObservation[] {
+export function googleVertexFailureMetrics(failure: GoogleVertexFailure, observedAt: number, source: GoogleVertexMetricSource = "google-vertex"): MetricObservation[] {
 	return [{
-		source: "google-vertex",
+		source,
 		scope: "failure",
 		metric: failure.kind,
 		value: 1,

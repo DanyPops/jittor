@@ -66,4 +66,13 @@ describe("Anthropic official rate-limit response headers", () => {
 		}), 1_000)).toThrow("remaining exceeds its configured limit");
 		expect(() => parseAnthropicRateLimitHeaders(new Headers({ "retry-after": "-1" }), 1_000)).toThrow("header schema changed");
 	});
+
+	it("tags metrics with the given source, so the same header shape stays distinguishable across accounts/quota pools", () => {
+		const headers = new Headers({
+			"anthropic-ratelimit-tokens-limit": "1000", "anthropic-ratelimit-tokens-remaining": "400", "anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
+		});
+		expect(parseAnthropicRateLimitHeaders(headers, 1_000).metrics).toContainEqual(expect.objectContaining({ source: "anthropic" }));
+		expect(parseAnthropicRateLimitHeaders(headers, 1_000, "anthropic-vertex").metrics).toContainEqual(expect.objectContaining({ source: "anthropic-vertex" }));
+		expect(parseAnthropicRateLimitHeaders(headers, 1_000, "anthropic-vertex").metrics.some((metric) => metric.source === "anthropic")).toBe(false);
+	});
 });
