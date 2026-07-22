@@ -1,12 +1,44 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderSystemdUnit } from "../src/cli.ts";
 import { connectJittorClient } from "../src/client.ts";
-import { benchmarkSourcesFromEnvironment, startDaemon, telemetrySourcesFromEnvironment } from "../src/daemon.ts";
+import { benchmarkSourcesFromEnvironment, reportMaintenanceFailure, startDaemon, telemetrySourcesFromEnvironment } from "../src/daemon.ts";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, writeDaemonHandle } from "../src/state.ts";
 import { VERSION } from "../src/version.ts";
+
+describe("reportMaintenanceFailure", () => {
+	// This is the seam that replaced `void somePromise()` with no .catch at
+	// all in the maintenance/poll timers. An unhandled rejection there used
+	// to be fatal -- verified directly (Bun crashes the process; it does not
+	// invoke `process.on("unhandledRejection")` first). Every timer callback
+	// now routes failures through this function instead of letting them
+	// become unhandled rejections.
+	it("logs a structured, credential-safe event instead of throwing or crashing", () => {
+		const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+		try {
+			expect(() => reportMaintenanceFailure("checkpoint_failed", new Error("disk full"))).not.toThrow();
+			expect(errorSpy).toHaveBeenCalledTimes(1);
+			const logged = JSON.parse(String(errorSpy.mock.calls[0]?.[0]));
+			expect(logged).toMatchObject({ level: "error", component: "jittor-daemon", event: "checkpoint_failed", message: "disk full" });
+			expect(typeof logged.timestamp).toBe("string");
+		} finally {
+			errorSpy.mockRestore();
+		}
+	});
+
+	it("stringifies a non-Error rejection reason rather than losing it", () => {
+		const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+		try {
+			reportMaintenanceFailure("benchmark_refresh_failed", "plain string rejection");
+			const logged = JSON.parse(String(errorSpy.mock.calls[0]?.[0]));
+			expect(logged.message).toBe("plain string rejection");
+		} finally {
+			errorSpy.mockRestore();
+		}
+	});
+});
 
 describe("Jittor daemon state", () => {
 	it("resolves database, runtime handle, and config through XDG paths", () => {
@@ -40,6 +72,27 @@ describe("Jittor daemon state", () => {
 		expect(benchmarkSourcesFromEnvironment({})).toEqual([]);
 		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1" }).map((source) => source.id)).toEqual(["openrouter-models"]);
 		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "openrouter-artificial-analysis"]);
+	});
+
+	it("starting with a configured (but unreachable) telemetry source never crashes or hangs the daemon", async () => {
+		// router.poll() and benchmarks.refresh() both already catch per-source
+		// failures internally and never reject their outer promise (verified
+		// by reading router.ts/benchmark.ts directly) -- so this exercises the
+		// realistic "misconfigured auth file" path end to end and confirms it
+		// stays a non-event for the daemon, matching that internal contract.
+		const root = mkdtempSync(join(tmpdir(), "jittor-daemon-poll-fail-"));
+		const paths = resolveJittorPaths({
+			home: root, uid: 1000,
+			env: { XDG_DATA_HOME: join(root, "data"), XDG_STATE_HOME: join(root, "state"), XDG_RUNTIME_DIR: join(root, "run"), XDG_CONFIG_HOME: join(root, "config") },
+		});
+		const daemon = startDaemon(paths, { JITTOR_CODEX_AUTH_FILE: join(root, "definitely-does-not-exist.json") });
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			const client = connectJittorClient(paths);
+			expect(await client.health()).toEqual({ ok: true, version: VERSION });
+		} finally {
+			await daemon.stop();
+		}
 	});
 
 	it("composes SQLite, authenticated HTTP, and the typed client", async () => {
