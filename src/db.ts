@@ -1,7 +1,6 @@
-import { Database } from "bun:sqlite";
-import { dirname } from "node:path";
-import { mkdirSync } from "node:fs";
-import { SQLITE_BUSY_TIMEOUT_MS, SQLITE_SCHEMA_VERSION } from "./constants.ts";
+import type { Database } from "bun:sqlite";
+import { openSqliteWithPragmas } from "@danypops/daemon-kit/storage";
+import { SQLITE_BUSY_TIMEOUT_MS } from "./constants.ts";
 
 const INITIAL_SCHEMA = `
 CREATE TABLE metric_observations (
@@ -20,31 +19,15 @@ CREATE INDEX metric_observations_time_idx
 	ON metric_observations(observed_at);
 `;
 
-function migrate(db: Database): void {
-	const row = db.query("PRAGMA user_version").get() as { user_version: number };
-	if (row.user_version > SQLITE_SCHEMA_VERSION) {
-		throw new Error(`database schema ${row.user_version} is newer than supported ${SQLITE_SCHEMA_VERSION}`);
-	}
-	if (row.user_version < 1) {
-		const migration = db.transaction(() => {
-			db.exec(INITIAL_SCHEMA);
-			db.exec("PRAGMA user_version = 1");
-		});
-		migration.immediate();
-	}
-	const migrated = db.query("PRAGMA user_version").get() as { user_version: number };
-	if (migrated.user_version !== SQLITE_SCHEMA_VERSION) {
-		throw new Error(`missing migration from schema ${migrated.user_version} to ${SQLITE_SCHEMA_VERSION}`);
-	}
-}
-
+/**
+ * Delegates bootstrap (pragmas, migration engine) to `@danypops/daemon-kit/storage`, which
+ * generalizes the byte-identical pragma/PRAGMA-user_version skeleton jittor's own db.ts used to
+ * hand-roll (see daemon-kit's README). Jittor's only remaining responsibility is its own schema.
+ */
 export function openJittorDb(path: string): Database {
-	if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-	const db = new Database(path, { create: true, strict: true });
-	db.exec("PRAGMA foreign_keys = ON");
-	db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
-	if (path !== ":memory:") db.exec("PRAGMA journal_mode = WAL");
-	migrate(db);
-	db.exec("PRAGMA optimize=0x10002");
-	return db;
+	return openSqliteWithPragmas(path, {
+		databaseOptions: { create: true, strict: true },
+		busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS,
+		migrations: [{ version: 1, up: (db) => db.exec(INITIAL_SCHEMA) }],
+	});
 }

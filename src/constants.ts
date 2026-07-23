@@ -1,4 +1,3 @@
-export const SQLITE_SCHEMA_VERSION = 1;
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 export const DEFAULT_QUERY_LIMIT = 1_000;
 export const MAX_QUERY_LIMIT = 10_000;
@@ -60,7 +59,6 @@ export const CONTEXT_ASSESSMENT_QUERY_LIMIT = 10_000;
 export const CONTEXT_EVENT_DEDUP_LIMIT = 1_000;
 export const CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS = 24 * MILLISECONDS_PER_HOUR;
 export const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR;
-export const LOOPBACK_HOST = "127.0.0.1";
 export const JITTOR_STATE_DIRECTORY = "jittor";
 export const JITTOR_EXTENSION_SETTINGS_FILENAME = "extension.json";
 export const DATABASE_FILENAME = "jittor.db";

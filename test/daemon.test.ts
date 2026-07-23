@@ -21,7 +21,10 @@ describe("reportMaintenanceFailure", () => {
 			expect(() => reportMaintenanceFailure("checkpoint_failed", new Error("disk full"))).not.toThrow();
 			expect(errorSpy).toHaveBeenCalledTimes(1);
 			const logged = JSON.parse(String(errorSpy.mock.calls[0]?.[0]));
-			expect(logged).toMatchObject({ level: "error", component: "jittor-daemon", event: "checkpoint_failed", message: "disk full" });
+			// `msg`, not a separate `event` field, since log.ts now delegates to daemon-kit's
+			// pino-backed createLogger -- one deliberate, disclosed shape change from the old
+			// hand-rolled format (see log.ts's doc comment).
+			expect(logged).toMatchObject({ level: "error", component: "jittor-daemon", msg: "checkpoint_failed", message: "disk full" });
 			expect(typeof logged.timestamp).toBe("string");
 		} finally {
 			errorSpy.mockRestore();

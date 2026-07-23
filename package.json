@@ -23,6 +23,7 @@
     "typebox": "*"
   },
   "dependencies": {
+    "@danypops/daemon-kit": "^0.3.1",
     "google-auth-library": "^10.9.0"
   },
   "devDependencies": {
