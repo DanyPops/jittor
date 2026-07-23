@@ -1,4 +1,5 @@
-import { LOOPBACK_HOST, MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
+import { startDaemon as startDaemonKit, type RunningDaemon } from "@danypops/daemon-kit/daemon";
+import { MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
 import { DEFAULT_POLICY, UNCONFIGURED_ROUTE } from "./config.ts";
 import { SQLiteMetricStore } from "./adapters/sqlite-metric-store.ts";
 import { MetricBenchmarkStore } from "./adapters/metric-benchmark-store.ts";
@@ -15,23 +16,13 @@ import { CodexTelemetrySource, GoogleVertexBudgetTelemetrySource, OpenRouterTele
 import { createGoogleAdcTokenProvider } from "./providers/google-adc-auth.ts";
 import { GOOGLE_PUBSUB_READONLY_SCOPE } from "./providers/google-vertex-budget.ts";
 import type { GoogleVertexMetricSource } from "./providers/google-vertex-contracts.ts";
-import {
-	ensureAuthToken,
-	removeDaemonHandle,
-	resolveJittorPaths,
-	writeDaemonHandle,
-	type JittorPaths,
-} from "./state.ts";
-import { logEvent } from "./log.ts";
+import { ensureAuthToken, resolveJittorPaths, type JittorPaths } from "./state.ts";
+import { logEvent, logger } from "./log.ts";
+
+export type { RunningDaemon } from "@danypops/daemon-kit/daemon";
 
 export function reportMaintenanceFailure(event: string, error: unknown): void {
 	logEvent("error", event, { message: error instanceof Error ? error.message : String(error) });
-}
-
-export interface RunningDaemon {
-	host: typeof LOOPBACK_HOST;
-	port: number;
-	stop(): Promise<void>;
 }
 
 export function benchmarkSourcesFromEnvironment(env: Record<string, string | undefined> = process.env): BenchmarkSource[] {
@@ -58,6 +49,16 @@ export function telemetrySourcesFromEnvironment(env: Record<string, string | und
 	return sources;
 }
 
+/**
+ * Composition root, now built on `@danypops/daemon-kit/daemon`'s `startDaemon` for binding,
+ * atomic handle write, maintenance-timer driving, and clean shutdown -- the skeleton that used to
+ * be hand-rolled here (and, byte-identically, in web-spider-daemon's and papyrus's daemon.ts; see
+ * daemon-kit's README). Each maintenance task still catches and classifies its own failure via
+ * `reportMaintenanceFailure` (preserving Jittor's specific `checkpoint_failed`/
+ * `benchmark_refresh_failed`/`telemetry_poll_failed` event taxonomy) rather than relying on
+ * daemon-kit's own generic "maintenance task failed: <name>" catch, which exists as a safety net
+ * for tasks that don't self-classify, not to replace a consumer's own richer classification.
+ */
 export function startDaemon(
 	paths: JittorPaths = resolveJittorPaths(),
 	env: Record<string, string | undefined> = process.env,
@@ -77,42 +78,24 @@ export function startDaemon(
 		currentRoute: UNCONFIGURED_ROUTE,
 	});
 	const service = new JittorService(metrics, router, benchmarks, modelRanker);
-	const app = createApp({ service, token });
-	const server = Bun.serve({
-		hostname: LOOPBACK_HOST,
-		port: 0,
-		fetch: (request) => app.fetch(request),
+
+	const daemon = startDaemonKit({
+		daemonLabel: "Jittor",
+		handlePath: paths.handle,
+		logger,
+		buildApp: () => createApp({ service, token }),
+		maintenanceTasks: [
+			{ name: "checkpoint", intervalMs: MAINTENANCE_INTERVAL_MS, run: async () => { await service.execute("service.checkpoint", {}).catch((error) => reportMaintenanceFailure("checkpoint_failed", error)); } },
+			{ name: "benchmark-refresh", intervalMs: MAINTENANCE_INTERVAL_MS, run: async () => { await benchmarks.refresh().catch((error) => reportMaintenanceFailure("benchmark_refresh_failed", error)); } },
+			{ name: "telemetry-poll", intervalMs: TELEMETRY_POLL_INTERVAL_MS, run: async () => { await router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error)); } },
+		],
+		onShutdown: () => { service.close(); },
 	});
-	const port = server.port;
-	if (port === undefined) {
-		server.stop(true);
-		service.close();
-		throw new Error("Jittor daemon failed to bind a loopback port");
-	}
-	writeDaemonHandle(paths, { host: LOOPBACK_HOST, port, pid: process.pid });
-	const maintenance = setInterval(() => {
-		service.execute("service.checkpoint", {}).catch((error) => reportMaintenanceFailure("checkpoint_failed", error));
-		benchmarks.refresh().catch((error) => reportMaintenanceFailure("benchmark_refresh_failed", error));
-	}, MAINTENANCE_INTERVAL_MS);
-	const poll = setInterval(() => {
-		router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error));
-	}, TELEMETRY_POLL_INTERVAL_MS);
+
 	if (sources.length > 0) router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error));
 	if (benchmarkSources.length > 0) benchmarks.refresh().catch((error) => reportMaintenanceFailure("benchmark_refresh_failed", error));
-	let stopped = false;
-	return {
-		host: LOOPBACK_HOST,
-		port,
-		async stop(): Promise<void> {
-			if (stopped) return;
-			stopped = true;
-			clearInterval(maintenance);
-			clearInterval(poll);
-			await server.stop(true);
-			service.close();
-			removeDaemonHandle(paths);
-		},
-	};
+
+	return daemon;
 }
 
 export function serveMain(): void {
