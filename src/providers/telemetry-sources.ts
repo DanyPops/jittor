@@ -2,6 +2,9 @@ import type { BudgetWindow } from "../policy.ts";
 import type { TelemetryBatch, TelemetrySource } from "../ports/telemetry-source.ts";
 import { CodexSubscriptionTelemetryAdapter, loadCodexFileCredentials, type CodexRateLimitSnapshot, type CodexWindow, type CodexTransport } from "./codex.ts";
 import { OpenRouterTelemetryAdapter, type OpenRouterTransport } from "./openrouter.ts";
+import { GoogleVertexBudgetTelemetryAdapter, type GoogleVertexBudgetTransport } from "./google-vertex-budget.ts";
+import type { GoogleVertexMetricSource } from "./google-vertex-contracts.ts";
+import type { GoogleAdcTokenProvider } from "./google-adc-auth.ts";
 
 function budgetWindow(
 	limit: CodexRateLimitSnapshot,
@@ -65,5 +68,37 @@ export class OpenRouterTelemetrySource implements TelemetrySource {
 		const observedAt = this.clock();
 		const snapshot = await new OpenRouterTelemetryAdapter(this.apiKey, this.transport).readKey(observedAt);
 		return { observedAt, metrics: snapshot.metrics, windows: [] };
+	}
+}
+
+/**
+ * Optional (never `required`): the one-time GCP setup (Pub/Sub topic + pull subscription
+ * connected to the individual project's budget) lives entirely outside Jittor, so a subscription
+ * that doesn't exist yet, or a project not yet migrated onto the individual-project model, must
+ * not block every other route the way a missing required source would.
+ */
+export class GoogleVertexBudgetTelemetrySource implements TelemetrySource {
+	readonly id: string;
+	readonly provider = "google-vertex";
+	readonly required = false;
+
+	private readonly adapter: GoogleVertexBudgetTelemetryAdapter;
+
+	constructor(
+		subscription: string,
+		tokenProvider: GoogleAdcTokenProvider,
+		private readonly clock: () => number = Date.now,
+		transport: GoogleVertexBudgetTransport = fetch,
+		source: GoogleVertexMetricSource = "google-vertex",
+	) {
+		this.id = `google-vertex-budget:${source}`;
+		this.adapter = new GoogleVertexBudgetTelemetryAdapter(subscription, tokenProvider, transport, source);
+	}
+
+	async poll(): Promise<TelemetryBatch> {
+		const observedAt = this.clock();
+		const snapshot = await this.adapter.pull(observedAt);
+		if (!snapshot) return { observedAt, metrics: [], windows: [] };
+		return { observedAt, metrics: snapshot.metrics, windows: snapshot.window ? [snapshot.window] : [] };
 	}
 }

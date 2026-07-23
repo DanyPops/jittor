@@ -22,6 +22,9 @@
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
+  "dependencies": {
+    "google-auth-library": "^10.9.0"
+  },
   "devDependencies": {
     "bun-types": "latest"
   },
