@@ -98,3 +98,13 @@ export const CODEX_RECOVERY_MAX_DELAY_MS = CODEX_RETRY_AFTER_MAX_MS;
 export const CODEX_RECOVERY_MAX_ATTEMPTS = 3;
 export const CODEX_RECOVERY_ATTEMPT_WINDOW_MS = 10 * MILLISECONDS_PER_MINUTE;
 export const CODEX_RECOVERY_JITTER_RATIO = 0.2;
+export const GOOGLE_VERTEX_BUDGET_DISPLAY_NAME_MAX_CHARACTERS = 160;
+/** Bounded per-poll pull size; a budget subscription realistically holds at most a few pending notifications. */
+export const GOOGLE_VERTEX_BUDGET_MAX_MESSAGES_PER_PULL = 20;
+/**
+ * Lower than Codex's header-derived 0.8: this is Google's own documented "estimated ... subject to
+ * change until your invoice is finalized" data, delivered at-least-once and possibly out of order,
+ * multiple times per day rather than on every response.
+ */
+export const GOOGLE_VERTEX_BUDGET_CONFIDENCE = 0.6;
+export const GOOGLE_ADC_TOKEN_REFRESH_SKEW_MS = 60_000;

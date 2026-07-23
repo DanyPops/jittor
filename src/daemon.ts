@@ -11,7 +11,10 @@ import { createApp, JittorService } from "./service.ts";
 import { JittorRouter } from "./router.ts";
 import type { BenchmarkSource } from "./ports/benchmark-source.ts";
 import type { TelemetrySource } from "./ports/telemetry-source.ts";
-import { CodexTelemetrySource, OpenRouterTelemetrySource } from "./providers/telemetry-sources.ts";
+import { CodexTelemetrySource, GoogleVertexBudgetTelemetrySource, OpenRouterTelemetrySource } from "./providers/telemetry-sources.ts";
+import { createGoogleAdcTokenProvider } from "./providers/google-adc-auth.ts";
+import { GOOGLE_PUBSUB_READONLY_SCOPE } from "./providers/google-vertex-budget.ts";
+import type { GoogleVertexMetricSource } from "./providers/google-vertex-contracts.ts";
 import {
 	ensureAuthToken,
 	removeDaemonHandle,
@@ -44,6 +47,14 @@ export function telemetrySourcesFromEnvironment(env: Record<string, string | und
 	if (codexAuthFile) sources.push(new CodexTelemetrySource(codexAuthFile));
 	const openRouterKey = env["OPENROUTER_API_KEY"];
 	if (openRouterKey) sources.push(new OpenRouterTelemetrySource(openRouterKey));
+	// Opt-in only: the Pub/Sub subscription is one-time GCP console/CLI setup outside Jittor (see
+	// docs/PROVIDER_RESEARCH.md), so its absence must never attempt ADC discovery or a network call.
+	const vertexBudgetSubscription = env["JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION"];
+	if (vertexBudgetSubscription) {
+		const source = (env["JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE"] ?? "google-vertex") as GoogleVertexMetricSource;
+		const tokenProvider = createGoogleAdcTokenProvider([GOOGLE_PUBSUB_READONLY_SCOPE]);
+		sources.push(new GoogleVertexBudgetTelemetrySource(vertexBudgetSubscription, tokenProvider, Date.now, fetch, source));
+	}
 	return sources;
 }
 
