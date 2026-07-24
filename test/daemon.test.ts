@@ -73,8 +73,10 @@ describe("Jittor daemon state", () => {
 		expect(telemetrySourcesFromEnvironment({ JITTOR_CODEX_AUTH_FILE: "/private/auth.json" }).map((source) => source.id)).toEqual(["codex-subscription"]);
 		expect(telemetrySourcesFromEnvironment({ OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter"]);
 		expect(benchmarkSourcesFromEnvironment({})).toEqual([]);
-		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1" }).map((source) => source.id)).toEqual(["openrouter-models"]);
-		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "openrouter-artificial-analysis", "openrouter-design-arena"]);
+		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf"]);
+		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "openrouter-design-arena"]);
+		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", ARTIFICIAL_ANALYSIS_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "artificial-analysis-direct"]);
+		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret", ARTIFICIAL_ANALYSIS_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "openrouter-design-arena", "artificial-analysis-direct"]);
 	});
 
 	it("starting with a configured (but unreachable) telemetry source never crashes or hangs the daemon", async () => {

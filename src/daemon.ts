@@ -3,9 +3,10 @@ import { MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants
 import { DEFAULT_POLICY, UNCONFIGURED_ROUTE } from "./config.ts";
 import { SQLiteMetricStore } from "./adapters/sqlite-metric-store.ts";
 import { MetricBenchmarkStore } from "./adapters/metric-benchmark-store.ts";
-import { OpenRouterBenchmarkIndexSource } from "./adapters/openrouter-benchmark-index-source.ts";
 import { OpenRouterBenchmarkSource } from "./adapters/openrouter-benchmark-source.ts";
 import { OpenRouterDesignArenaSource } from "./adapters/openrouter-design-arena-source.ts";
+import { LmArenaHfSource } from "./adapters/lmarena-hf-source.ts";
+import { ArtificialAnalysisDirectSource } from "./adapters/artificial-analysis-direct-source.ts";
 import { openJittorDb } from "./db.ts";
 import { BenchmarkCatalog } from "./domain/benchmark.ts";
 import { EvidenceModelRanker } from "./domain/model-ranking-service.ts";
@@ -26,13 +27,15 @@ export function reportMaintenanceFailure(event: string, error: unknown): void {
 	logEvent("error", event, { message: error instanceof Error ? error.message : String(error) });
 }
 
+// Flag name predates non-OpenRouter sources; kept as the one "opt into online benchmark
+// ingestion" toggle rather than adding a second flag for the same decision.
 export function benchmarkSourcesFromEnvironment(env: Record<string, string | undefined> = process.env): BenchmarkSource[] {
 	if (env["JITTOR_OPENROUTER_BENCHMARKS"] !== "1") return [];
-	const sources: BenchmarkSource[] = [new OpenRouterBenchmarkSource()];
-	if (env["OPENROUTER_API_KEY"]) {
-		sources.push(new OpenRouterBenchmarkIndexSource(env["OPENROUTER_API_KEY"]));
-		sources.push(new OpenRouterDesignArenaSource(env["OPENROUTER_API_KEY"]));
-	}
+	const sources: BenchmarkSource[] = [new OpenRouterBenchmarkSource(), new LmArenaHfSource()];
+	// Design Arena's own API needs manual approval, unlike Artificial Analysis's instant signup --
+	// no direct alternative exists yet, so the OpenRouter passthrough stays.
+	if (env["OPENROUTER_API_KEY"]) sources.push(new OpenRouterDesignArenaSource(env["OPENROUTER_API_KEY"]));
+	if (env["ARTIFICIAL_ANALYSIS_API_KEY"]) sources.push(new ArtificialAnalysisDirectSource(env["ARTIFICIAL_ANALYSIS_API_KEY"]));
 	return sources;
 }
 

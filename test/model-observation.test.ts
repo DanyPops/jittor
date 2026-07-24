@@ -88,6 +88,15 @@ describe("local model observations", () => {
     expect(groups.some((group) => group.domain === "design")).toBe(true)
   })
 
+  it("accepts the math domain (Artificial Analysis direct evidence) through validateModelRunObservation and aggregateModelMetrics, same as coding and design", () => {
+    const mathRun = run({ domain: "math", type: "general" })
+    expect(validateModelRunObservation(mathRun).domain).toBe("math")
+    const mathStored = stored(87.2, 1_000)
+    mathStored.attributes = { ...mathStored.attributes, domain: "math" }
+    const groups = aggregateModelMetrics([mathStored], { now: 2_000, freshForMs: 10_000 })
+    expect(groups.some((group) => group.domain === "math")).toBe(true)
+  })
+
   it("aggregates robustly with sample size dispersion recency and confidence", () => {
     const metrics = [stored(100, 1_000), stored(110, 2_000), stored(10_000, 3_000), stored(50, 3_000, "output-throughput")]
     const groups = aggregateModelMetrics(metrics, { now: 4_000, freshForMs: 10_000 })
