@@ -1,6 +1,6 @@
 {
   "name": "@danypops/jittor",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Just-in-Time Token Optimizing Router for Pi",
   "type": "module",
   "keywords": ["pi-package", "llm-router", "token-budget"],
