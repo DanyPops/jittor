@@ -85,7 +85,7 @@ export async function showBenchmarkPanel(
 				context: MODEL_RANKING_DEFAULT_CONTEXT_WEIGHT,
 				reliability: MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
 			},
-			sourceIds: ["openrouter-models", "openrouter-artificial-analysis", "openrouter-design-arena"],
+			sourceIds: ["openrouter-models", "lmarena-hf", "artificial-analysis-direct", "openrouter-design-arena"],
 		}) as ModelRankingResult;
 		if (ctx.mode !== "tui") {
 			ctx.ui.notify(renderBenchmarkView(result, currentIdentity, 100, { fg: (_color, text) => text, bold: (text) => text }).join("\n"), "info");

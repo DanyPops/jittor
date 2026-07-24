@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
-import { OpenRouterBenchmarkIndexSource } from "../src/adapters/openrouter-benchmark-index-source.ts"
 import { OpenRouterBenchmarkSource } from "../src/adapters/openrouter-benchmark-source.ts"
 import { OpenRouterDesignArenaSource } from "../src/adapters/openrouter-design-arena-source.ts"
+import { LmArenaHfSource } from "../src/adapters/lmarena-hf-source.ts"
+import { ArtificialAnalysisDirectSource } from "../src/adapters/artificial-analysis-direct-source.ts"
 import { MetricBenchmarkStore } from "../src/adapters/metric-benchmark-store.ts"
 import {
   BenchmarkCatalog,
@@ -132,24 +133,6 @@ describe("benchmark evidence", () => {
     expect(snapshot.observations.every((item) => item.model.canonical === "openai/gpt-5.4")).toBe(true)
   })
 
-  it("maps versioned OpenRouter benchmark indices without exposing the API credential", async () => {
-    const requests: Request[] = []
-    const source = new OpenRouterBenchmarkIndexSource("api-secret", async (request) => {
-      requests.push(request)
-      return Response.json({
-        data: [{ source: "artificial-analysis", model_permaslug: "openai/gpt-5.4", display_name: "GPT 5.4", intelligence_index: 82, coding_index: 91, agentic_index: 88, pricing: { prompt: "0.000002", completion: "0.000010" } }],
-        meta: { as_of: "2026-06-01", version: "2026-06-01", source: "artificial-analysis", source_url: "https://artificialanalysis.ai/", citation: "Artificial Analysis", model_count: 1, task_type: "coding" },
-      })
-    }, () => 2_000_000_000_000)
-    const snapshot = await source.fetch()
-    expect(requests[0]?.url).toContain("/benchmarks?source=artificial-analysis")
-    expect(requests[0]?.headers.get("authorization")).toBe("Bearer api-secret")
-    expect(snapshot.snapshotId).toContain("2026-06-01")
-    expect(snapshot.observations.map((item) => item.dimension)).toEqual(["quality-coding", "quality-general", "quality-type-planning", "price-input", "price-output"])
-    expect(snapshot.observations[0]?.model.aliases).toContain("openrouter/openai/gpt-5.4")
-    expect(JSON.stringify(snapshot)).not.toContain("api-secret")
-  })
-
   it("fetches a curated allowlist of Design Arena categories, tags them one quality-design dimension, and drops OpenRouter-unreachable models", async () => {
     const requests: Request[] = []
     const source = new OpenRouterDesignArenaSource("api-secret", async (request) => {
@@ -183,6 +166,84 @@ describe("benchmark evidence", () => {
       meta: { as_of: "2026-06-01", source: "design-arena" },
     }), () => 2_000_000_000_000)
     await expect(source.fetch()).rejects.toThrow("schema changed")
+  })
+
+  it("tags LMArena arena evidence under its own dimensions, never the AA-scale quality-coding/quality-type-planning ones", async () => {
+    const requests: Request[] = []
+    const source = new LmArenaHfSource(async (request) => {
+      requests.push(request)
+      const config = new URL(request.url).searchParams.get("config")
+      const row = config === "webdev"
+        ? { model_name: "Claude Fable 5 (High)", organization: "anthropic", license: "Proprietary", rating: 1633.6, rating_lower: 1621.4, rating_upper: 1645.8, variance: 38.6, vote_count: 3021, rank: 1, category: "overall", leaderboard_publish_date: "2026-07-21" }
+        : { model_name: "Claude Fable 5 (High)", organization: "anthropic", license: "Proprietary", score: 0.127, score_ci_lower: 0.107, score_ci_upper: 0.147, observation_count: 831160, session_count: 23549, rank: 1, category: "overall", leaderboard_publish_date: "2026-07-21" }
+      return Response.json({ rows: [{ row_idx: 0, row, truncated_cells: [] }], num_rows_total: 1, num_rows_per_page: 100, partial: false })
+    }, () => 2_000_000_000_000)
+    const snapshot = await source.fetch()
+    expect(requests).toHaveLength(2)
+    expect(requests.map((request) => new URL(request.url).searchParams.get("config")).sort()).toEqual(["agent", "webdev"])
+    expect(requests.every((request) => request.url.includes("dataset=lmarena-ai%2Fleaderboard-dataset"))).toBe(true)
+    expect(snapshot.observations.map((item) => item.dimension).sort()).toEqual(["quality-coding-arena", "quality-type-planning-arena"])
+    // Distinct from AA's/Design Arena's dimensions, so ranking's flat per-dimension average never blends a ~1600 Bradley-Terry rating with a 0-100 index.
+    expect(snapshot.observations.every((item) => item.dimension !== "quality-coding" && item.dimension !== "quality-type-planning")).toBe(true)
+    expect(snapshot.observations.every((item) => item.model.provider === "anthropic" && item.model.model === "claude-fable-5")).toBe(true)
+    expect(snapshot.observations.every((item) => item.provenance.sourceType === "preference")).toBe(true)
+  })
+
+  it("skips non-overall LMArena rows and fails closed on schema drift", async () => {
+    const withNonOverall = new LmArenaHfSource(async () => Response.json({
+      rows: [
+        { row_idx: 0, row: { model_name: "Model A", organization: "openai", rating: 1500, rank: 2, category: "coding", leaderboard_publish_date: "2026-07-21" }, truncated_cells: [] },
+      ],
+      num_rows_total: 1, num_rows_per_page: 100, partial: false,
+    }), () => 2_000_000_000_000)
+    expect((await withNonOverall.fetch()).observations).toHaveLength(0)
+
+    const malformed = new LmArenaHfSource(async () => Response.json({
+      rows: [{ row_idx: 0, row: { model_name: "Model A", organization: "openai", category: "overall", leaderboard_publish_date: "2026-07-21" /* no rating/score */ }, truncated_cells: [] }],
+      num_rows_total: 1, num_rows_per_page: 100, partial: false,
+    }), () => 2_000_000_000_000)
+    await expect(malformed.fetch()).rejects.toThrow("schema changed")
+  })
+
+  it("maps Artificial Analysis's direct API into the SAME dimensions as the OpenRouter passthrough, plus a new quality-math domain and measured latency", async () => {
+    const requests: Request[] = []
+    const source = new ArtificialAnalysisDirectSource("aa-secret", async (request) => {
+      requests.push(request)
+      return Response.json({
+        status: 200,
+        data: [{
+          id: "model-1", name: "o3-mini", slug: "o3-mini",
+          model_creator: { id: "creator-1", name: "OpenAI", slug: "openai" },
+          evaluations: { artificial_analysis_intelligence_index: 62.9, artificial_analysis_coding_index: 55.8, artificial_analysis_math_index: 87.2, gpqa: 0.748 },
+          pricing: { price_1m_input_tokens: 1.1, price_1m_output_tokens: 4.4 },
+          median_output_tokens_per_second: 153.831,
+          median_time_to_first_token_seconds: 14.939,
+        }],
+      })
+    }, () => 2_000_000_000_000)
+    const snapshot = await source.fetch()
+    expect(requests[0]?.url).toBe("https://artificialanalysis.ai/api/v2/data/llms/models")
+    expect(requests[0]?.headers.get("x-api-key")).toBe("aa-secret")
+    expect(snapshot.observations.map((item) => item.dimension).sort()).toEqual(["latency", "quality-coding", "quality-general", "quality-math"])
+    expect(snapshot.observations.find((item) => item.dimension === "quality-math")?.value).toBe(87.2)
+    expect(snapshot.observations.find((item) => item.dimension === "latency")?.value).toBe(14_939)
+    expect(snapshot.observations.find((item) => item.dimension === "latency")?.unit).toBe("milliseconds")
+    expect(snapshot.observations.every((item) => item.model.canonical === "openai/o3-mini")).toBe(true)
+    expect(snapshot.observations.every((item) => item.provenance.sourceType === "creator")).toBe(true)
+    expect(JSON.stringify(snapshot)).not.toContain("aa-secret")
+  })
+
+  it("omits a dimension entirely when Artificial Analysis has no evaluation for it, rather than fabricating a zero", async () => {
+    const source = new ArtificialAnalysisDirectSource("aa-secret", async () => Response.json({
+      status: 200,
+      data: [{
+        id: "model-2", name: "tiny-model", slug: "tiny-model",
+        model_creator: { id: "creator-2", name: "Tiny Labs", slug: "tinylabs" },
+        evaluations: { artificial_analysis_intelligence_index: 40.1 },
+      }],
+    }), () => 2_000_000_000_000)
+    const snapshot = await source.fetch()
+    expect(snapshot.observations.map((item) => item.dimension)).toEqual(["quality-general"])
   })
 
   it("retains last known evidence and reports schema drift without partial publication", async () => {

@@ -89,6 +89,33 @@ describe("model utility ranking", () => {
     expect(result.ranked[0]?.candidate.provider).toBe("openai")
   })
 
+  it("never blends LMArena's arena-scale evidence into the AA-scale quality-coding average, since they're deliberately separate dimensions", () => {
+    const result = rankModelCandidates(input({
+      domain: "coding", type: "general",
+      externalEvidence: [
+        evidence("openai", "gpt-fast", "quality-coding", 0.9),
+        // A ~1600-scale rating under a *different* dimension name -- if this leaked into the same
+        // average as the 0.9 above, the blended value would be dominated by the larger number.
+        evidence("openai", "gpt-fast", "quality-coding-arena", 1650),
+      ],
+      localEvidence: [],
+    }))
+    const quality = result.ranked.find((item) => item.identity.startsWith("openai/"))?.components.find((item) => item.name === "quality")
+    expect(quality?.score).not.toBeNull()
+    // Only the 0.9 AA-scale observation should have contributed -- evidenceCount of 1, not 2.
+    expect(quality?.evidenceCount).toBe(1)
+  })
+
+  it("ranks against the new math domain (Artificial Analysis math_index) the same way it ranks coding and design", () => {
+    const result = rankModelCandidates(input({
+      domain: "math", type: "general",
+      externalEvidence: [evidence("openai", "gpt-fast", "quality-math", 87.2), evidence("anthropic", "claude-strong", "quality-math", 62.9)],
+      localEvidence: [],
+    }))
+    expect(result.ranked.every((item) => item.components.find((component) => component.name === "quality")?.score !== null)).toBe(true)
+    expect(result.ranked[0]?.candidate.provider).toBe("openai")
+  })
+
   it("falls back to quality-general when neither domain nor type has specific evidence", () => {
     const result = rankModelCandidates(input({
       domain: "general", type: "general",
