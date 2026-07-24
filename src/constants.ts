@@ -88,6 +88,8 @@ export const COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES = 20;
 /** Below this many samples the estimate stays explicit cold-start uncertainty rather than a guess. */
 export const COMPACTION_DURATION_ESTIMATE_MIN_SAMPLES = 3;
 export const MAX_USAGE_BUCKETS = 120;
+/** Defense-in-depth cap on the SQL-side usage aggregation result: (scopes x metrics x buckets) is already small by construction, but this bounds it explicitly rather than trusting that alone. */
+export const USAGE_AGGREGATE_MAX_ROWS = 25_000;
 export const MAX_DYNAMIC_ROUTES = 100;
 export const CODEX_ERROR_MESSAGE_LIMIT = 160;
 export const CODEX_RETRY_AFTER_MAX_MS = 5 * MILLISECONDS_PER_MINUTE;

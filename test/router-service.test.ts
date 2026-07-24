@@ -9,6 +9,7 @@ class EmptyMetricStore implements MetricStore {
 	record(observation: MetricObservation): StoredMetricObservation { return { ...observation, attributes: observation.attributes ?? {}, id: 1 }; }
 	query(_filter: MetricQuery = {}): StoredMetricObservation[] { return []; }
 	distinctScopes(): string[] { return []; }
+	aggregateUsage(): never[] { return []; }
 	pruneBefore(): number { return 0; }
 	checkpoint(): void {}
 	close(): void {}

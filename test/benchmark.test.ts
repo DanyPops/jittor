@@ -37,6 +37,8 @@ class MemoryMetricStore implements MetricStore {
     return [...new Set(this.rows.filter((row) => row.source === filter.source && row.observedAt >= filter.since && row.observedAt <= filter.until).map((row) => row.scope))].sort().slice(0, filter.limit)
   }
 
+  aggregateUsage(): never[] { return [] }
+
   pruneBefore(): number { return 0 }
   checkpoint(): void {}
   close(): void {}

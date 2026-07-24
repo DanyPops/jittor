@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { JittorClient } from "../src/client.ts";
 import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/domain/metric.ts";
-import type { MetricStore } from "../src/ports/metric-store.ts";
+import { usageBucketIndex, type UsageAggregateRow, type UsageBucketWindow } from "../src/domain/usage.ts";
+import type { MetricStore, UsageAggregateFilter } from "../src/ports/metric-store.ts";
 import { EXPECTED_OPERATION_NAMES, JittorService, createApp } from "../src/service.ts";
 
 class FakeMetricStore implements MetricStore {
@@ -17,6 +18,21 @@ class FakeMetricStore implements MetricStore {
 	}
 	distinctScopes(filter: { source: string; since: number; until: number; limit: number }): string[] {
 		return [...new Set(this.rows.filter((row) => row.source === filter.source && row.observedAt >= filter.since && row.observedAt <= filter.until).map((row) => row.scope))].sort().slice(0, filter.limit);
+	}
+	aggregateUsage(filter: UsageAggregateFilter): UsageAggregateRow[] {
+		const window: UsageBucketWindow = { start: filter.since, end: filter.until, bucketCount: filter.bucketCount, bucketSizeMs: filter.bucketSizeMs };
+		const sums = new Map<string, UsageAggregateRow>();
+		for (const row of this.rows) {
+			if (row.source !== filter.source || !filter.scopes.includes(row.scope)) continue;
+			if (row.observedAt < filter.since || row.observedAt > filter.until) continue;
+			if (typeof row.value !== "number" || row.value < 0) continue;
+			const bucketIndex = usageBucketIndex(row.observedAt, window);
+			const key = `${row.scope}\u0000${row.metric}\u0000${bucketIndex}`;
+			const existing = sums.get(key);
+			if (existing) existing.sum += row.value;
+			else sums.set(key, { scope: row.scope, metric: row.metric, bucketIndex, sum: row.value });
+		}
+		return [...sums.values()];
 	}
 	pruneBefore(cutoff: number): number {
 		const before = this.rows.length;
@@ -65,6 +81,36 @@ describe("Jittor operation service", () => {
 		await expect(service.execute("metrics.distinct_scopes", { since: 0, until: 5_000 })).rejects.toThrow("source is required");
 		// A generously large requested limit is still clamped server-side, not trusted from the client.
 		expect(await service.execute("metrics.distinct_scopes", { source: "pi", since: 0, until: 5_000, limit: 999_999 })).toHaveLength(2);
+	});
+
+	it("aggregates usage server-side instead of returning raw rows, so a heavy scope's full history always fits", async () => {
+		const store = new FakeMetricStore();
+		const service = new JittorService(store);
+		// Two rows, same scope+metric, same bucket -- must be summed server-side, never handed back raw.
+		await service.execute("metrics.record", { source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 100, unit: "tokens", observedAt: 1_000 });
+		await service.execute("metrics.record", { source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 50, unit: "tokens", observedAt: 1_500 });
+		// A later row landing in the next bucket must not bleed into the first.
+		await service.execute("metrics.record", { source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 999, unit: "tokens", observedAt: 6_000 });
+
+		const result = await service.execute("metrics.usage_series", {
+			source: "pi", since: 0, until: 10_000, bucketSizeMs: 5_000, bucketCount: 2,
+		}) as { rows: unknown[]; truncated: boolean };
+		expect(result.truncated).toBe(false);
+		expect(result.rows).toEqual([
+			{ scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", bucketIndex: 0, sum: 150 },
+			{ scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", bucketIndex: 1, sum: 999 },
+		]);
+
+		// A scope-discovery cap that's actually exceeded is still honestly reported as truncated.
+		await service.execute("metrics.record", { source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 1, unit: "tokens", observedAt: 1_000 });
+		const capped = await service.execute("metrics.usage_series", {
+			source: "pi", since: 0, until: 10_000, bucketSizeMs: 5_000, bucketCount: 2, scopeLimit: 1,
+		}) as { rows: unknown[]; truncated: boolean };
+		expect(capped.truncated).toBe(true);
+
+		await expect(service.execute("metrics.usage_series", { source: "pi", since: 0, until: 10_000, bucketSizeMs: 0, bucketCount: 2 })).rejects.toThrow("bucketSizeMs must be a positive number");
+		await expect(service.execute("metrics.usage_series", { source: "pi", since: 0, until: 10_000, bucketSizeMs: 5_000, bucketCount: 0 })).rejects.toThrow("bucketCount must be a positive integer");
+		await expect(service.execute("metrics.usage_series", { since: 0, until: 10_000, bucketSizeMs: 5_000, bucketCount: 2 })).rejects.toThrow("source is required");
 	});
 
 	it("refuses to prune metrics newer than the safety window unless force is set, but always allows genuinely old cutoffs", async () => {
