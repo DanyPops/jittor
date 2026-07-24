@@ -230,8 +230,12 @@ async function applyDecision(
 	return halt(ctx, `Jittor could not apply any authenticated Pi route after ${decision.route.provider}/${decision.route.model} became unavailable`);
 }
 
-/** taskId, when a Papyrus task is currently focused in this session, tags the metric for real-time cost-per-task correlation without any new instrumentation surface. */
-function assistantUsageMetrics(message: unknown, observedAt: number, taskId: string | null = null): MetricObservation[] {
+/**
+ * taskId, when a Papyrus task is focused, tags the metric for cost-per-task correlation. thinking
+ * comes from pi.getThinkingLevel() at message_end time, not from the message itself -- AssistantMessage
+ * has no thinking field of its own, and the level can't have changed mid-message.
+ */
+function assistantUsageMetrics(message: unknown, observedAt: number, taskId: string | null = null, thinking: string | null = null): MetricObservation[] {
 	if (typeof message !== "object" || message === null || Array.isArray(message)) return [];
 	const value = message as Record<string, unknown>;
 	if (value["role"] !== "assistant" || typeof value["usage"] !== "object" || value["usage"] === null) return [];
@@ -239,7 +243,7 @@ function assistantUsageMetrics(message: unknown, observedAt: number, taskId: str
 	const provider = typeof value["provider"] === "string" ? value["provider"] : "unknown";
 	const model = typeof value["model"] === "string" ? value["model"] : "unknown";
 	const scope = `${provider}:${model}`;
-	const attributes = { provider, model, ...(taskId === null ? {} : { taskId }) };
+	const attributes = { provider, model, ...(taskId === null ? {} : { taskId }), ...(thinking === null || thinking.length === 0 ? {} : { thinking }) };
 	const metrics: MetricObservation[] = [];
 	for (const [field, metric] of [["input", "input-tokens"], ["output", "output-tokens"], ["cacheRead", "cache-read-tokens"], ["cacheWrite", "cache-write-tokens"]] as const) {
 		const amount = usage[field];
@@ -796,7 +800,7 @@ export function registerJittorExtension(
 			}
 			lastAnthropicVertexResponse = {};
 		}
-		const metrics = assistantUsageMetrics(event.message, Date.now(), focusedTaskId);
+		const metrics = assistantUsageMetrics(event.message, Date.now(), focusedTaskId, pi.getThinkingLevel());
 		if (metrics.length > 0) {
 			const amount = (name: string): number => metrics.filter((metric) => metric.metric === name && typeof metric.value === "number").reduce((sum, metric) => sum + (metric.value ?? 0), 0);
 			compactionTelemetry.observeProviderUsage({ input: amount("input-tokens"), output: amount("output-tokens"), cacheRead: amount("cache-read-tokens"), cacheWrite: amount("cache-write-tokens") });

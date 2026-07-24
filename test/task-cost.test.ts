@@ -23,10 +23,34 @@ describe("Task cost summary", () => {
 		];
 		const summary = buildTaskCostSummary(rows, { since: 0, until: 2_000 });
 		expect(summary.entries).toEqual([
-			{ taskId: "ship-feature-x", costUsd: 0.05, inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 5_000, cacheWriteTokens: 500 },
-			{ taskId: "fix-bug-y", costUsd: 0.02, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+			{ taskId: "ship-feature-x", costUsd: 0.05, inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 5_000, cacheWriteTokens: 500,
+				byModel: [{ provider: "unknown", model: "unknown", thinking: "unknown", costUsd: 0.05, inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 5_000, cacheWriteTokens: 500 }] },
+			{ taskId: "fix-bug-y", costUsd: 0.02, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+				byModel: [{ provider: "unknown", model: "unknown", thinking: "unknown", costUsd: 0.02, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }] },
 		]);
 		expect(summary.unattributedCostUsd).toBe(0);
+	});
+
+	it("breaks each task's total down by provider/model/thinking, sorted by cost descending", () => {
+		const rows = [
+			row({ observedAt: 1_000, metric: "cost", value: 0.05, unit: "usd", attributes: { taskId: "ship-feature-x", provider: "anthropic", model: "claude-sonnet-5", thinking: "high" } }),
+			row({ observedAt: 1_100, metric: "input-tokens", value: 1_000, unit: "tokens", attributes: { taskId: "ship-feature-x", provider: "anthropic", model: "claude-sonnet-5", thinking: "high" } }),
+			row({ observedAt: 1_200, metric: "cost", value: 0.02, unit: "usd", attributes: { taskId: "ship-feature-x", provider: "anthropic", model: "claude-haiku-5", thinking: "off" } }),
+		];
+		const summary = buildTaskCostSummary(rows, { since: 0, until: 2_000 });
+		expect(summary.entries).toEqual([{
+			taskId: "ship-feature-x", costUsd: 0.07, inputTokens: 1_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+			byModel: [
+				{ provider: "anthropic", model: "claude-sonnet-5", thinking: "high", costUsd: 0.05, inputTokens: 1_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+				{ provider: "anthropic", model: "claude-haiku-5", thinking: "off", costUsd: 0.02, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+			],
+		}]);
+	});
+
+	it("falls back to \"unknown\" provider/model/thinking for rows recorded before that attribution existed", () => {
+		const rows = [row({ observedAt: 1_000, metric: "cost", value: 0.02, unit: "usd", attributes: { taskId: "legacy-task" } })];
+		const summary = buildTaskCostSummary(rows, { since: 0, until: 2_000 });
+		expect(summary.entries[0]?.byModel).toEqual([{ provider: "unknown", model: "unknown", thinking: "unknown", costUsd: 0.02, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }]);
 	});
 
 	it("reports spend recorded with nothing focused as unattributed, never dropped or folded into a task", () => {
@@ -36,7 +60,8 @@ describe("Task cost summary", () => {
 		];
 		const summary = buildTaskCostSummary(rows, { since: 0, until: 2_000 });
 		expect(summary.unattributedCostUsd).toBeCloseTo(0.03);
-		expect(summary.entries).toEqual([{ taskId: "ship-feature-x", costUsd: 0.01, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }]);
+		expect(summary.entries).toEqual([{ taskId: "ship-feature-x", costUsd: 0.01, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+			byModel: [{ provider: "unknown", model: "unknown", thinking: "unknown", costUsd: 0.01, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }] }]);
 	});
 
 	it("ignores token metrics that have no taskId (nothing to attribute them to), negative values, and rows outside the window", () => {

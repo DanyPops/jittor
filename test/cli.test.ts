@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { formatMetricsQuery, formatRouterStatus, runCli } from "../src/cli.ts";
+import { formatCostByTask, formatMetricsQuery, formatRouterStatus, runCli } from "../src/cli.ts";
 import type { ContextAssessment } from "../src/domain/context-telemetry.ts";
 import type { RouterStatus } from "../src/ports/router-controller.ts";
 import type { StoredMetricObservation } from "../src/domain/metric.ts";
+import type { TaskCostSummary } from "../src/domain/task-cost.ts";
 
 const summary: ContextAssessment = {
 	window: { since: 1_000, until: 2_000 }, completeness: "complete",
@@ -130,6 +131,24 @@ describe("Jittor CLI context telemetry parity", () => {
 		expect(text).toContain("75 observation(s)");
 		expect(text).toContain("showing first 50");
 		expect(text.split("\n")).toHaveLength(51);
+	});
+
+	it("renders per-task cost with a provider/model/thinking breakdown beneath each task's total", () => {
+		const summary: TaskCostSummary = {
+			since: 0, until: 2_000, unattributedCostUsd: 0.42, truncated: false,
+			entries: [{
+				taskId: "ship-feature-x", costUsd: 0.07, inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0,
+				byModel: [
+					{ provider: "anthropic", model: "claude-sonnet-5", thinking: "high", costUsd: 0.05, inputTokens: 800, outputTokens: 150, cacheReadTokens: 0, cacheWriteTokens: 0 },
+					{ provider: "anthropic", model: "claude-haiku-5", thinking: "off", costUsd: 0.02, inputTokens: 200, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
+				],
+			}],
+		};
+		const text = formatCostByTask(summary);
+		expect(text).toContain("ship-feature-x");
+		expect(text).toContain("anthropic/claude-sonnet-5 (high)");
+		expect(text).toContain("anthropic/claude-haiku-5 (off)");
+		expect(text.indexOf("ship-feature-x")).toBeLessThan(text.indexOf("claude-sonnet-5"));
 	});
 
 	it("renders actionable human output and rejects invalid bounds", async () => {

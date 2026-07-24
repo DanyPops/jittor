@@ -246,6 +246,17 @@ describe("Jittor Pi actuator", () => {
 		expect(recordedTaskIds().at(-1)).toBeUndefined();
 	});
 
+	it("tags recorded token/cost metrics with the current thinking level, from pi.getThinkingLevel not the message", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		await app.handlers.get("message_end")![0]!({ message: {
+			role: "assistant", provider: "anthropic", model: "claude-sonnet-5",
+			usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+		} }, app.ctx);
+		const recorded = client.calls.filter((call) => call.operation === "metrics.record" && (call.input as any).metric === "cost").map((call) => call.input as any);
+		expect(recorded[0]?.attributes?.thinking).toBe("high");
+	});
+
 	it("ignores a task-focus event from a different Pi session, and fails closed on schema drift, without crashing", async () => {
 		const client = new FakeClient();
 		const app = harness(client);

@@ -573,7 +573,10 @@ function formatUsdAmount(amount: number): string {
 export function formatCostByTask(summary: TaskCostSummary): string {
 	const lines = [
 		`Cost by task: ${summary.entries.length.toLocaleString()} task(s)${summary.truncated ? " (query limit reached; totals are a lower bound)" : ""}`,
-		...summary.entries.map((entry) => `- ${humanField(entry.taskId)}: ${formatUsdAmount(entry.costUsd)} · ↑${entry.inputTokens.toLocaleString()} ↓${entry.outputTokens.toLocaleString()} R${entry.cacheReadTokens.toLocaleString()} W${entry.cacheWriteTokens.toLocaleString()}`),
+		...summary.entries.flatMap((entry) => [
+			`- ${humanField(entry.taskId)}: ${formatUsdAmount(entry.costUsd)} · ↑${entry.inputTokens.toLocaleString()} ↓${entry.outputTokens.toLocaleString()} R${entry.cacheReadTokens.toLocaleString()} W${entry.cacheWriteTokens.toLocaleString()}`,
+			...entry.byModel.map((model) => `    · ${humanField(model.provider)}/${humanField(model.model)} (${humanField(model.thinking)}): ${formatUsdAmount(model.costUsd)} · ↑${model.inputTokens.toLocaleString()} ↓${model.outputTokens.toLocaleString()} R${model.cacheReadTokens.toLocaleString()} W${model.cacheWriteTokens.toLocaleString()}`),
+		]),
 		`Unattributed spend (no task was focused): ${formatUsdAmount(summary.unattributedCostUsd)}`,
 	];
 	return lines.join("\n");
