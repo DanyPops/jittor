@@ -79,6 +79,15 @@ describe("local model observations", () => {
     expect(classifyTaskFromTools(["bash", "tasks"])).toEqual({ domain: "coding", type: "planning" })
   })
 
+  it("accepts the design domain (Design Arena evidence) through validateModelRunObservation and aggregateModelMetrics, same as coding", () => {
+    const designRun = run({ domain: "design", type: "general" })
+    expect(validateModelRunObservation(designRun).domain).toBe("design")
+    const designStored = stored(1380, 1_000)
+    designStored.attributes = { ...designStored.attributes, domain: "design" }
+    const groups = aggregateModelMetrics([designStored], { now: 2_000, freshForMs: 10_000 })
+    expect(groups.some((group) => group.domain === "design")).toBe(true)
+  })
+
   it("aggregates robustly with sample size dispersion recency and confidence", () => {
     const metrics = [stored(100, 1_000), stored(110, 2_000), stored(10_000, 3_000), stored(50, 3_000, "output-throughput")]
     const groups = aggregateModelMetrics(metrics, { now: 4_000, freshForMs: 10_000 })
