@@ -74,7 +74,7 @@ describe("Jittor daemon state", () => {
 		expect(telemetrySourcesFromEnvironment({ OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter"]);
 		expect(benchmarkSourcesFromEnvironment({})).toEqual([]);
 		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1" }).map((source) => source.id)).toEqual(["openrouter-models"]);
-		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "openrouter-artificial-analysis"]);
+		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "openrouter-artificial-analysis", "openrouter-design-arena"]);
 	});
 
 	it("starting with a configured (but unreachable) telemetry source never crashes or hangs the daemon", async () => {

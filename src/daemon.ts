@@ -5,6 +5,7 @@ import { SQLiteMetricStore } from "./adapters/sqlite-metric-store.ts";
 import { MetricBenchmarkStore } from "./adapters/metric-benchmark-store.ts";
 import { OpenRouterBenchmarkIndexSource } from "./adapters/openrouter-benchmark-index-source.ts";
 import { OpenRouterBenchmarkSource } from "./adapters/openrouter-benchmark-source.ts";
+import { OpenRouterDesignArenaSource } from "./adapters/openrouter-design-arena-source.ts";
 import { openJittorDb } from "./db.ts";
 import { BenchmarkCatalog } from "./domain/benchmark.ts";
 import { EvidenceModelRanker } from "./domain/model-ranking-service.ts";
@@ -28,7 +29,10 @@ export function reportMaintenanceFailure(event: string, error: unknown): void {
 export function benchmarkSourcesFromEnvironment(env: Record<string, string | undefined> = process.env): BenchmarkSource[] {
 	if (env["JITTOR_OPENROUTER_BENCHMARKS"] !== "1") return [];
 	const sources: BenchmarkSource[] = [new OpenRouterBenchmarkSource()];
-	if (env["OPENROUTER_API_KEY"]) sources.push(new OpenRouterBenchmarkIndexSource(env["OPENROUTER_API_KEY"]));
+	if (env["OPENROUTER_API_KEY"]) {
+		sources.push(new OpenRouterBenchmarkIndexSource(env["OPENROUTER_API_KEY"]));
+		sources.push(new OpenRouterDesignArenaSource(env["OPENROUTER_API_KEY"]));
+	}
 	return sources;
 }
 

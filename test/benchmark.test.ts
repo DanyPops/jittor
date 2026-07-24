@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { OpenRouterBenchmarkIndexSource } from "../src/adapters/openrouter-benchmark-index-source.ts"
 import { OpenRouterBenchmarkSource } from "../src/adapters/openrouter-benchmark-source.ts"
+import { OpenRouterDesignArenaSource } from "../src/adapters/openrouter-design-arena-source.ts"
 import { MetricBenchmarkStore } from "../src/adapters/metric-benchmark-store.ts"
 import {
   BenchmarkCatalog,
@@ -147,6 +148,41 @@ describe("benchmark evidence", () => {
     expect(snapshot.observations.map((item) => item.dimension)).toEqual(["quality-coding", "quality-general", "quality-type-planning", "price-input", "price-output"])
     expect(snapshot.observations[0]?.model.aliases).toContain("openrouter/openai/gpt-5.4")
     expect(JSON.stringify(snapshot)).not.toContain("api-secret")
+  })
+
+  it("fetches a curated allowlist of Design Arena categories, tags them one quality-design dimension, and drops OpenRouter-unreachable models", async () => {
+    const requests: Request[] = []
+    const source = new OpenRouterDesignArenaSource("api-secret", async (request) => {
+      requests.push(request)
+      const category = new URL(request.url).searchParams.get("task_type")
+      return Response.json({
+        data: [
+          { source: "design-arena", open_router_id: "anthropic/claude-sonnet-4", elo: 1380, win_rate: 63.0 },
+          { source: "design-arena", open_router_id: null, elo: 1340, win_rate: 62.0 },
+        ],
+        meta: { as_of: "2026-06-01", source: "design-arena", category },
+      })
+    }, () => 2_000_000_000_000)
+    const snapshot = await source.fetch()
+    expect(requests).toHaveLength(5)
+    expect(requests.map((request) => new URL(request.url).searchParams.get("task_type")).sort()).toEqual(["codecategories", "dataviz", "svg", "uicomponent", "website"])
+    expect(requests.every((request) => request.url.includes("source=design-arena"))).toBe(true)
+    expect(requests.every((request) => request.headers.get("authorization") === "Bearer api-secret")).toBe(true)
+    // Five categories, one non-null-openRouterId row each -- the null-id row is dropped every time.
+    expect(snapshot.observations).toHaveLength(5)
+    expect(snapshot.observations.every((item) => item.dimension === "quality-design")).toBe(true)
+    expect(snapshot.observations.every((item) => item.unit === "elo")).toBe(true)
+    expect(snapshot.observations.every((item) => item.value === 1380)).toBe(true)
+    expect(snapshot.observations.every((item) => item.model.canonical === "anthropic/claude-sonnet-4")).toBe(true)
+    expect(JSON.stringify(snapshot)).not.toContain("api-secret")
+  })
+
+  it("fails closed on Design Arena schema drift instead of guessing a shape", async () => {
+    const source = new OpenRouterDesignArenaSource("api-secret", async () => Response.json({
+      data: [{ source: "design-arena", open_router_id: "anthropic/claude-sonnet-4" /* elo missing */ }],
+      meta: { as_of: "2026-06-01", source: "design-arena" },
+    }), () => 2_000_000_000_000)
+    await expect(source.fetch()).rejects.toThrow("schema changed")
   })
 
   it("retains last known evidence and reports schema drift without partial publication", async () => {

@@ -79,6 +79,16 @@ describe("model utility ranking", () => {
     expect(result.ranked.every((item) => item.components.find((component) => component.name === "quality")?.score !== null)).toBe(true)
   })
 
+  it("ranks against the design domain (Design Arena Elo evidence) the same way it ranks coding", () => {
+    const result = rankModelCandidates(input({
+      domain: "design", type: "general",
+      externalEvidence: [evidence("openai", "gpt-fast", "quality-design", 1380), evidence("anthropic", "claude-strong", "quality-design", 1290)],
+      localEvidence: [],
+    }))
+    expect(result.ranked.every((item) => item.components.find((component) => component.name === "quality")?.score !== null)).toBe(true)
+    expect(result.ranked[0]?.candidate.provider).toBe("openai")
+  })
+
   it("falls back to quality-general when neither domain nor type has specific evidence", () => {
     const result = rankModelCandidates(input({
       domain: "general", type: "general",

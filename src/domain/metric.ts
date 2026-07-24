@@ -1,6 +1,6 @@
 import { METRIC_ATTRIBUTES_MAX_DEPTH, METRIC_ATTRIBUTES_MAX_SERIALIZED_CHARACTERS, METRIC_IDENTITY_MAX_CHARACTERS } from "../constants.ts";
 
-export const METRIC_UNITS = ["ratio", "usd", "tokens", "tokens-per-second", "requests", "milliseconds", "count"] as const;
+export const METRIC_UNITS = ["ratio", "usd", "tokens", "tokens-per-second", "requests", "milliseconds", "count", "elo"] as const;
 export type MetricUnit = typeof METRIC_UNITS[number];
 
 export interface MetricObservation {
