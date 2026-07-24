@@ -14,6 +14,7 @@ const cases: Case[] = [
 	{ args: ["metrics", "query", "--source", "s", "--json"], operation: "metrics.query" },
 	{ args: ["metrics", "prune", "--before", "1000", "--json"], operation: "metrics.prune" },
 	{ args: ["metrics", "distinct-scopes", "--source", "pi", "--since", "0", "--until", "1000", "--json"], operation: "metrics.distinct_scopes" },
+	{ args: ["metrics", "usage-series", "--source", "pi", "--since", "0", "--until", "1000", "--bucket-size-ms", "100", "--bucket-count", "10", "--json"], operation: "metrics.usage_series" },
 	{ args: ["metrics", "cost-by-task", "--since", "0", "--until", "1000", "--json"], operation: "metrics.cost_by_task" },
 	{ args: ["benchmarks", "refresh", "--json"], operation: "benchmark.refresh" },
 	{ args: ["benchmarks", "status", "--json"], operation: "benchmark.status" },
@@ -50,7 +51,7 @@ describe("Jittor CLI operation parity", () => {
 		for (const testCase of cases) {
 			const calls: Array<{ operation: string; input: unknown }> = [];
 			const code = await runCli(testCase.args, fakeDeps(calls, {
-				deleted: 0, ranked: [], sources: [], observations: [], observedAt: 1, availableRoutes: [], ready: true, paused: false, lastDecision: null, override: null, currentRoute: null,
+				deleted: 0, ranked: [], sources: [], observations: [], observedAt: 1, availableRoutes: [], ready: true, paused: false, lastDecision: null, override: null, currentRoute: null, rows: [], truncated: false,
 			}));
 			expect(code).toBe(0);
 			expect(calls).toHaveLength(1);

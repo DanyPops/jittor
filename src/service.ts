@@ -1,9 +1,10 @@
 import { errorResponse, healthResponse, readyResponse, requireBearerToken } from "@danypops/daemon-kit/http";
-import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, PRUNE_MIN_AGE_MS, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES, TASK_COST_QUERY_LIMIT, USAGE_MAX_DISTINCT_SCOPES } from "./constants.ts";
+import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, MAX_USAGE_BUCKETS, PRUNE_MIN_AGE_MS, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES, TASK_COST_QUERY_LIMIT, USAGE_MAX_DISTINCT_SCOPES } from "./constants.ts";
 import { VERSION } from "./version.ts";
 import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
 import { assessContextTelemetry, estimateCompactionDuration, type CompactionDurationEstimate, type ContextAssessment } from "./domain/context-telemetry.ts";
 import { buildTaskCostSummary, type TaskCostSummary } from "./domain/task-cost.ts";
+import type { UsageAggregateRow } from "./domain/usage.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
 import type { ModelRanker, ModelRecommendationInput } from "./domain/model-ranking-service.ts";
 import type { ModelRankingResult } from "./domain/model-ranking.ts";
@@ -16,6 +17,7 @@ export const EXPECTED_OPERATION_NAMES = [
 	"metrics.record",
 	"metrics.query",
 	"metrics.distinct_scopes",
+	"metrics.usage_series",
 	"metrics.cost_by_task",
 	"metrics.prune",
 	"benchmark.refresh",
@@ -41,6 +43,7 @@ export interface OperationInputs {
 	"metrics.record": MetricObservation;
 	"metrics.query": MetricQuery;
 	"metrics.distinct_scopes": { source: string; since: number; until: number; limit?: number };
+	"metrics.usage_series": { source: string; since: number; until: number; bucketSizeMs: number; bucketCount: number; scopeLimit?: number };
 	"metrics.cost_by_task": { since: number; until: number };
 	"metrics.prune": { before: number; force?: boolean };
 	"benchmark.refresh": { force?: boolean };
@@ -64,6 +67,7 @@ export interface OperationOutputs {
 	"metrics.record": StoredMetricObservation;
 	"metrics.query": StoredMetricObservation[];
 	"metrics.distinct_scopes": string[];
+	"metrics.usage_series": { rows: UsageAggregateRow[]; truncated: boolean };
 	"metrics.cost_by_task": TaskCostSummary;
 	"metrics.prune": { deleted: number };
 	"benchmark.refresh": BenchmarkRefreshResult;
@@ -138,6 +142,32 @@ export class JittorService {
 				const requestedLimit = input["limit"];
 				const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(USAGE_MAX_DISTINCT_SCOPES, Math.floor(requestedLimit as number))) : USAGE_MAX_DISTINCT_SCOPES;
 				return this.metrics.distinctScopes({ source, since: since as number, until: until as number, limit });
+			}
+			case "metrics.usage_series": {
+				const source = input["source"];
+				const since = input["since"];
+				const until = input["until"];
+				const bucketSizeMs = input["bucketSizeMs"];
+				const bucketCount = input["bucketCount"];
+				if (typeof source !== "string" || source.length === 0) throw new Error("source is required");
+				if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || (since as number) < 0 || (until as number) < (since as number)) {
+					throw new Error("usage series requires non-negative ordered integer bounds");
+				}
+				if (typeof bucketSizeMs !== "number" || !Number.isFinite(bucketSizeMs) || bucketSizeMs <= 0) throw new Error("bucketSizeMs must be a positive number");
+				if (!Number.isInteger(bucketCount) || (bucketCount as number) <= 0 || (bucketCount as number) > MAX_USAGE_BUCKETS) {
+					throw new Error(`bucketCount must be a positive integer up to ${MAX_USAGE_BUCKETS}`);
+				}
+				const requestedScopeLimit = input["scopeLimit"];
+				const scopeLimit = Number.isFinite(requestedScopeLimit) ? Math.max(1, Math.min(USAGE_MAX_DISTINCT_SCOPES, Math.floor(requestedScopeLimit as number))) : USAGE_MAX_DISTINCT_SCOPES;
+				const scopes = this.metrics.distinctScopes({ source, since: since as number, until: until as number, limit: scopeLimit });
+				// More distinct scopes may exist beyond this bounded list -- that is the only remaining
+				// truncation risk once aggregation replaces a per-scope raw-row fetch (see aggregateUsage's
+				// own doc comment for the incident this was built to stop repeating).
+				const truncated = scopes.length >= scopeLimit;
+				const rows = scopes.length === 0 ? [] : this.metrics.aggregateUsage({
+					source, scopes, since: since as number, until: until as number, bucketSizeMs, bucketCount: bucketCount as number,
+				});
+				return { rows, truncated };
 			}
 			case "metrics.cost_by_task": {
 				const since = input["since"];

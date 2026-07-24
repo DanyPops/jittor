@@ -17,6 +17,7 @@ import {
 	MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
 	MODEL_RANKING_MAX_SOURCES,
 	SYSTEMD_UNIT_NAME,
+	MAX_USAGE_BUCKETS,
 	USAGE_MAX_DISTINCT_SCOPES,
 } from "./constants.ts";
 import { connectJittorClient, type JittorClient } from "./client.ts";
@@ -108,6 +109,7 @@ function usage(stderr: (line: string) => void): number {
 		"  metrics query [--source <s>] [--scope <s>] [--metric <s>] [--since <ms>] [--until <ms>] [--limit <n>] [--order asc|desc] [--json]",
 		"  metrics prune --before <ms> [--force] [--json] (force required if before is newer than 24h ago)",
 		`  metrics distinct-scopes --source <s> --since <ms> --until <ms> [--limit 1..${USAGE_MAX_DISTINCT_SCOPES}] [--json]`,
+		`  metrics usage-series --source <s> --since <ms> --until <ms> --bucket-size-ms <ms> --bucket-count 1..${MAX_USAGE_BUCKETS} [--scope-limit 1..${USAGE_MAX_DISTINCT_SCOPES}] [--json]`,
 		"  metrics cost-by-task --since <ms> --until <ms> [--json]",
 		"  telemetry poll [--json]",
 		"  compaction estimate [--json]",
@@ -255,6 +257,35 @@ function parseMetricsDistinctScopesArgs(args: string[]): MetricsDistinctScopesAr
 	}
 	if (source === undefined || since === undefined || until === undefined || until < since) return null;
 	return { input: { source, since, until, ...(limit === undefined ? {} : { limit }) }, json };
+}
+
+interface MetricsUsageSeriesArgs { input: { source: string; since: number; until: number; bucketSizeMs: number; bucketCount: number; scopeLimit?: number }; json: boolean }
+
+function parseMetricsUsageSeriesArgs(args: string[]): MetricsUsageSeriesArgs | null {
+	let json = false;
+	let source: string | undefined;
+	let since: number | undefined;
+	let until: number | undefined;
+	let bucketSizeMs: number | undefined;
+	let bucketCount: number | undefined;
+	let scopeLimit: number | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--json") { json = true; continue; }
+		if (!(["--source", "--since", "--until", "--bucket-size-ms", "--bucket-count", "--scope-limit"].includes(argument ?? ""))) return null;
+		const raw = args[++index];
+		if (raw === undefined || raw.length === 0) return null;
+		if (argument === "--source") { source = raw; continue; }
+		const parsed = Number(raw);
+		if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+		if (argument === "--since") since = parsed;
+		else if (argument === "--until") until = parsed;
+		else if (argument === "--bucket-size-ms") { if (parsed < 1) return null; bucketSizeMs = parsed; }
+		else if (argument === "--bucket-count") { if (parsed < 1 || parsed > MAX_USAGE_BUCKETS) return null; bucketCount = parsed; }
+		else { if (parsed < 1 || parsed > USAGE_MAX_DISTINCT_SCOPES) return null; scopeLimit = parsed; }
+	}
+	if (source === undefined || since === undefined || until === undefined || until < since || bucketSizeMs === undefined || bucketCount === undefined) return null;
+	return { input: { source, since, until, bucketSizeMs, bucketCount, ...(scopeLimit === undefined ? {} : { scopeLimit }) }, json };
 }
 
 interface CostByTaskArgs { input: { since: number; until: number }; json: boolean }
@@ -524,6 +555,13 @@ export function formatMetricsDistinctScopes(scopes: string[]): string {
 	return [`Scopes: ${scopes.length.toLocaleString()}`, ...scopes.map((scope) => `- ${humanField(scope)}`)].join("\n");
 }
 
+export function formatMetricsUsageSeries(result: { rows: Array<{ scope: string; metric: string; bucketIndex: number; sum: number }>; truncated: boolean }): string {
+	if (result.rows.length === 0) return `Usage series: no data${result.truncated ? " (scope limit reached)" : ""}`;
+	const lines = [`Usage series: ${result.rows.length.toLocaleString()} bucket(s)${result.truncated ? " (scope limit reached)" : ""}`];
+	for (const row of result.rows) lines.push(`- ${humanField(row.scope)}/${humanField(row.metric)} bucket ${row.bucketIndex}: ${row.sum.toLocaleString()}`);
+	return lines.join("\n");
+}
+
 function formatUsdAmount(amount: number): string {
 	return `$${amount.toFixed(Math.abs(amount) < 0.01 && amount !== 0 ? 4 : 2)}`;
 }
@@ -611,6 +649,11 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 			const parsed = parseMetricsDistinctScopesArgs(rest);
 			if (!parsed) return usage(deps.stderr);
 			return callAndPrint(deps, "metrics.distinct_scopes", parsed.input, parsed.json, formatMetricsDistinctScopes);
+		}
+		if (action === "usage-series") {
+			const parsed = parseMetricsUsageSeriesArgs(rest);
+			if (!parsed) return usage(deps.stderr);
+			return callAndPrint(deps, "metrics.usage_series", parsed.input, parsed.json, formatMetricsUsageSeries);
 		}
 		if (action === "cost-by-task") {
 			const parsed = parseCostByTaskArgs(rest);

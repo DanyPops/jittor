@@ -1,14 +1,14 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { HUMAN_TEXT_FIELD_MAX_CHARACTERS, USAGE_CHART_HEIGHT, USAGE_MAX_DISTINCT_SCOPES, USAGE_PER_SCOPE_QUERY_LIMIT, USAGE_RENDER_MAX_SERIES, USAGE_Y_AXIS_WIDTH } from "../../src/constants.ts";
-import type { StoredMetricObservation } from "../../src/domain/metric.ts";
+import { HUMAN_TEXT_FIELD_MAX_CHARACTERS, USAGE_CHART_HEIGHT, USAGE_MAX_DISTINCT_SCOPES, USAGE_RENDER_MAX_SERIES, USAGE_Y_AXIS_WIDTH } from "../../src/constants.ts";
 import {
 	buildCostGraph,
 	buildUsageGraph,
+	resolveUsageWindow,
 	USAGE_PERIODS,
 	usagePeriod,
-	usagePeriodStart,
 	type CostGraph,
+	type UsageAggregateRow,
 	type UsageGraph,
 	type UsagePeriod,
 } from "../../src/domain/usage.ts";
@@ -255,26 +255,22 @@ export type UsageViewKind = "tokens" | "cost";
 const USAGE_VIEWS: UsageViewKind[] = ["tokens", "cost"];
 
 /**
- * Fetches per distinct scope (provider:model) instead of one flat "most recent N rows" query.
- * A single flat query lets one heavy scope (e.g. a long, heavy session on one model) monopolize
- * the entire row budget with its most recent activity, silently starving every other provider out
- * of the chart no matter which time frame is selected -- the query never even reaches back far
- * enough in time to see the other scope's older rows. Bounding per scope instead guarantees every
- * active provider/model gets its own fair share of the query budget.
+ * One bounded round trip: the daemon discovers distinct scopes (still capped at
+ * USAGE_MAX_DISTINCT_SCOPES -- more scopes than that is still a real, honestly-reported
+ * truncation) and SQL-side aggregates every matching observation into (scope, metric, bucket)
+ * sums for the exact window this panel renders. Replaces a per-scope fetch of up to
+ * USAGE_PER_SCOPE_QUERY_LIMIT raw rows each, which fixed a *different* problem (one heavy scope
+ * starving *other* scopes out of a shared row budget) but could still silently truncate a single
+ * heavy scope's *own* older history within the same window -- a real incident: a scope logging
+ * tens of thousands of rows a week had its "weekly" chart built from a few minutes of its most
+ * recent rows alone. Aggregation has no such failure mode: result size scales with (scopes x
+ * metrics x buckets), never with raw event count.
  */
-async function loadPiMetrics(client: JittorPanelClient, period: UsagePeriod, now: number): Promise<{ rows: StoredMetricObservation[]; truncated: boolean }> {
-	const since = usagePeriodStart(period, now);
-	const scopes = await client.call("metrics.distinct_scopes", { source: "pi", since, until: now, limit: USAGE_MAX_DISTINCT_SCOPES }) as string[];
-	// More distinct scopes may exist beyond this bounded list -- treat that as truncation too, not just a per-scope row cap.
-	let truncated = scopes.length >= USAGE_MAX_DISTINCT_SCOPES;
-	const batches = await Promise.all(scopes.map(async (scope) => {
-		const rows = await client.call("metrics.query", {
-			source: "pi", scope, since, until: now, order: "desc", limit: USAGE_PER_SCOPE_QUERY_LIMIT,
-		}) as StoredMetricObservation[];
-		if (rows.length >= USAGE_PER_SCOPE_QUERY_LIMIT) truncated = true;
-		return rows;
-	}));
-	return { rows: batches.flat(), truncated };
+async function loadPiMetrics(client: JittorPanelClient, window: ReturnType<typeof resolveUsageWindow>): Promise<{ rows: UsageAggregateRow[]; truncated: boolean }> {
+	const result = await client.call("metrics.usage_series", {
+		source: "pi", since: window.start, until: window.end, bucketSizeMs: window.bucketSizeMs, bucketCount: window.bucketCount, scopeLimit: USAGE_MAX_DISTINCT_SCOPES,
+	}) as { rows: UsageAggregateRow[]; truncated: boolean };
+	return result;
 }
 
 export async function showUsagePanel(
@@ -288,11 +284,12 @@ export async function showUsagePanel(
 	let viewIndex = Math.max(0, USAGE_VIEWS.indexOf(initialView));
 	for (;;) {
 		const period = USAGE_PERIODS[periodIndex]!.id;
+		const window = resolveUsageWindow(period, now);
 		// One bounded query serves both views: token and cost metrics share the same "pi" source rows.
-		const { rows, truncated } = await loadPiMetrics(client, period, now);
+		const { rows, truncated } = await loadPiMetrics(client, window);
 		const view = USAGE_VIEWS[viewIndex]!;
-		const tokenChart = buildUsageGraph(rows, { period, now, truncated });
-		const costChart = buildCostGraph(rows, { period, now, truncated });
+		const tokenChart = buildUsageGraph(rows, window, { period, truncated });
+		const costChart = buildCostGraph(rows, window, { period, truncated });
 		const tokenBudget = budgets.getUsageTokenBudget(period);
 		const renderActive = (width: number, theme: UsageTheme): string[] =>
 			view === "tokens" ? renderUsageGraph(tokenChart, width, theme, tokenBudget) : renderCostGraph(costChart, width, theme);

@@ -57,6 +57,52 @@ describe("SQLite metric store", () => {
 		expect(store.distinctScopes({ source: "pi", since: 20_000, until: 30_000, limit: 40 })).toEqual([]);
 	});
 
+	it("aggregates usage into (scope, metric, bucket) sums instead of returning raw rows", () => {
+		const { store } = fixture();
+		// Two rows for the same scope+metric landing in the same bucket must be summed, not returned
+		// as separate rows -- that is the entire point of aggregating in SQL.
+		store.record({ source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 100, unit: "tokens", observedAt: 1_000 });
+		store.record({ source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 50, unit: "tokens", observedAt: 1_500 });
+		// A different metric, same scope and bucket -- must not be folded into the same sum.
+		store.record({ source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "output-tokens", value: 10, unit: "tokens", observedAt: 1_200 });
+		// A later timestamp landing in the next bucket -- must not bleed into bucket 0.
+		store.record({ source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 999, unit: "tokens", observedAt: 5_500 });
+		// A scope not included in the filter's bounded scope list -- must never appear in the result.
+		store.record({ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 777, unit: "tokens", observedAt: 1_000 });
+		// A negative value -- must be excluded, matching every other consumer's non-negative filter.
+		store.record({ source: "pi", scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: -5, unit: "tokens", observedAt: 1_000 });
+
+		const rows = store.aggregateUsage({
+			source: "pi", scopes: ["anthropic-vertex:claude-sonnet-5"], since: 0, until: 10_000, bucketSizeMs: 5_000, bucketCount: 2,
+		});
+
+		expect(rows.sort((left, right) => left.metric.localeCompare(right.metric) || left.bucketIndex - right.bucketIndex)).toEqual([
+			{ scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", bucketIndex: 0, sum: 150 },
+			{ scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", bucketIndex: 1, sum: 999 },
+			{ scope: "anthropic-vertex:claude-sonnet-5", metric: "output-tokens", bucketIndex: 0, sum: 10 },
+		]);
+	});
+
+	it("aggregates a heavy scope's full history exactly, not just a recent tail (the real incident this replaced)", () => {
+		// Directly reproduces what a per-scope-row-capped fetch got wrong: many more observations
+		// than any reasonable row limit, spread across the whole window. Every bucket must still carry
+		// its real sum -- aggregation has no row-count-based failure mode to silently truncate this.
+		const { store } = fixture();
+		const scope = "anthropic-vertex:claude-sonnet-5";
+		const totalRows = 2_000;
+		const windowMs = 7 * 24 * 60 * 60 * 1_000;
+		for (let index = 0; index < totalRows; index += 1) {
+			store.record({ source: "pi", scope, metric: "input-tokens", value: 10, unit: "tokens", observedAt: Math.floor((index / totalRows) * windowMs) });
+		}
+
+		const bucketCount = 28;
+		const rows = store.aggregateUsage({ source: "pi", scopes: [scope], since: 0, until: windowMs, bucketSizeMs: windowMs / bucketCount, bucketCount });
+
+		expect(rows.reduce((sum, row) => sum + row.sum, 0)).toBe(totalRows * 10);
+		// Every one of the 28 buckets received some of the 2,000 evenly-spread rows -- none silently empty.
+		expect(new Set(rows.map((row) => row.bucketIndex)).size).toBe(bucketCount);
+	});
+
 	it("prunes only observations older than the cutoff", () => {
 		const { store } = fixture();
 		for (const observedAt of [1000, 2000, 3000]) {
