@@ -32,7 +32,7 @@ class FakeClient implements JittorExtensionClient {
 		if (operation === "router.status") return this.status;
 		if (operation === "metrics.query") return this.metrics;
 		if (operation === "metrics.record") return { id: this.calls.length, ...(input as object) };
-		if (operation === "models.rank") return { scopeAuthority: "available-models", scopeWarning: "exact session scope unavailable", taskClass: "coding", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
+		if (operation === "models.rank") return { scopeAuthority: "available-models", scopeWarning: "exact session scope unavailable", domain: "coding", type: "general", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
 		return {};
 	}
 }
@@ -317,10 +317,40 @@ describe("Jittor Pi actuator", () => {
 		};
 		await app.commands.get("jittor").handler("benchmarks coding", app.ctx);
 		const call = client.calls.find((candidate) => candidate.operation === "models.rank")!;
-		expect(call.input).toMatchObject({ scopeAuthority: "available-models", taskClass: "coding" });
+		expect(call.input).toMatchObject({ scopeAuthority: "available-models", domain: "coding", type: "general" });
 		expect((call.input as any).candidates).toHaveLength(4);
 		expect((call.input as any).candidates.map((candidate: any) => `${candidate.provider}/${candidate.model}`)).toContain("openrouter/openai/gpt-4.1-mini");
 		expect(rendered).toContain("ADVISORY");
+	});
+
+	it("resolves domain and type from /jittor benchmarks as two independent, order-free positional words", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		(app.ctx.ui as any).custom = async (factory: Function) => { factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined); return "close"; };
+
+		await app.commands.get("jittor").handler("benchmarks research", app.ctx);
+		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({ domain: "general", type: "research" });
+		client.calls.length = 0;
+
+		await app.commands.get("jittor").handler("benchmarks research coding", app.ctx);
+		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({ domain: "coding", type: "research" });
+		client.calls.length = 0;
+
+		await app.commands.get("jittor").handler("benchmarks coding research", app.ctx);
+		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({ domain: "coding", type: "research" });
+	});
+
+	it("refuses a malformed /jittor benchmarks request instead of guessing -- two words for the same axis, or an unrecognized word", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		const notified: Array<[string, string]> = [];
+		(app.ctx.ui as any).notify = (message: string, level: string) => notified.push([message, level]);
+
+		await app.commands.get("jittor").handler("benchmarks research planning", app.ctx);
+		await app.commands.get("jittor").handler("benchmarks bogus", app.ctx);
+		expect(client.calls.some((call) => call.operation === "models.rank")).toBe(false);
+		expect(notified.every(([message, level]) => level === "warning" && message.startsWith("Usage:"))).toBe(true);
+		expect(notified.length).toBe(2);
 	});
 
 	it("supports a local emergency off switch without calling the daemon", async () => {
@@ -424,7 +454,7 @@ describe("Jittor Pi actuator", () => {
 		expect(local.map((metric) => metric.metric)).toContain("ttft");
 		expect(local.map((metric) => metric.metric)).toContain("tool-calls");
 		expect(local.some((metric) => metric.metric === "outcome-accepted" && metric.value === 1)).toBe(true);
-		expect(local.every((metric) => metric.attributes.taskClass === "coding")).toBe(true);
+		expect(local.every((metric) => metric.attributes.domain === "coding" && metric.attributes.type === "general")).toBe(true);
 		expect(JSON.stringify(local)).not.toContain("private");
 	});
 

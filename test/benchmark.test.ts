@@ -144,7 +144,7 @@ describe("benchmark evidence", () => {
     expect(requests[0]?.url).toContain("/benchmarks?source=artificial-analysis")
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer api-secret")
     expect(snapshot.snapshotId).toContain("2026-06-01")
-    expect(snapshot.observations.map((item) => item.dimension)).toEqual(["quality-coding", "quality-general", "quality-planning", "price-input", "price-output"])
+    expect(snapshot.observations.map((item) => item.dimension)).toEqual(["quality-coding", "quality-general", "quality-type-planning", "price-input", "price-output"])
     expect(snapshot.observations[0]?.model.aliases).toContain("openrouter/openai/gpt-5.4")
     expect(JSON.stringify(snapshot)).not.toContain("api-secret")
   })

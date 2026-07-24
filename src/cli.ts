@@ -25,7 +25,7 @@ import { serveMain } from "./daemon.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
 import type { ModelRecommendationInput } from "./domain/model-ranking-service.ts";
 import type { ModelCandidate, ModelRankingResult, ScopeAuthority, UtilityWeights } from "./domain/model-ranking.ts";
-import { TASK_CLASSES, type ModelTaskClass } from "./domain/model-observation.ts";
+import { TASK_DOMAINS, TASK_TYPES, type ModelTaskDomain, type ModelTaskType } from "./domain/model-observation.ts";
 import type { ContextAssessment } from "./domain/context-telemetry.ts";
 import { METRIC_UNITS, type MetricObservation, type MetricQuery, type MetricUnit, type StoredMetricObservation } from "./domain/metric.ts";
 import type { CompactionDurationEstimate } from "./domain/context-telemetry.ts";
@@ -441,7 +441,8 @@ function parseBenchmarkArgs(action: string | undefined, args: string[]): Benchma
 	const candidates: ModelCandidate[] = [];
 	const sourceIds: string[] = [];
 	let scopeAuthority: ScopeAuthority = "available-models";
-	let taskClass: ModelTaskClass = "general";
+	let domain: ModelTaskDomain = "general";
+	let type: ModelTaskType = "general";
 	let budgetPressure = 0;
 	const weights: UtilityWeights = {
 		quality: MODEL_RANKING_DEFAULT_QUALITY_WEIGHT, cost: MODEL_RANKING_DEFAULT_COST_WEIGHT,
@@ -453,7 +454,7 @@ function parseBenchmarkArgs(action: string | undefined, args: string[]): Benchma
 		if (argument === "--json") { json = true; continue; }
 		if (argument === "--force" && action === "refresh") { force = true; continue; }
 		const allowed = action === "list" ? ["--source", "--model", "--dimension", "--limit"]
-			: action === "rank" ? ["--candidate", "--source", "--task", "--scope", "--budget", "--weight-quality", "--weight-cost", "--weight-latency", "--weight-context", "--weight-reliability"] : [];
+			: action === "rank" ? ["--candidate", "--source", "--domain", "--type", "--scope", "--budget", "--weight-quality", "--weight-cost", "--weight-latency", "--weight-context", "--weight-reliability"] : [];
 		if (!allowed.includes(argument ?? "")) return null;
 		const raw = args[++index];
 		if (raw === undefined || raw.length === 0) return null;
@@ -472,9 +473,12 @@ function parseBenchmarkArgs(action: string | undefined, args: string[]): Benchma
 			if (!candidate) return null;
 			candidates.push(candidate);
 		} else if (argument === "--source") sourceIds.push(raw);
-		else if (argument === "--task") {
-			if (!TASK_CLASSES.includes(raw as ModelTaskClass)) return null;
-			taskClass = raw as ModelTaskClass;
+		else if (argument === "--domain") {
+			if (!TASK_DOMAINS.includes(raw as ModelTaskDomain)) return null;
+			domain = raw as ModelTaskDomain;
+		} else if (argument === "--type") {
+			if (!TASK_TYPES.includes(raw as ModelTaskType)) return null;
+			type = raw as ModelTaskType;
 		} else if (argument === "--scope") {
 			if (raw !== "exact-session" && raw !== "available-models") return null;
 			scopeAuthority = raw;
@@ -490,7 +494,7 @@ function parseBenchmarkArgs(action: string | undefined, args: string[]): Benchma
 	return {
 		action, json, force,
 		...(action === "list" ? { query: query as BenchmarkQuery } : {}),
-		...(action === "rank" ? { recommendation: { candidates, sourceIds: [...new Set(sourceIds)], scopeAuthority, taskClass, budgetPressure, weights } } : {}),
+		...(action === "rank" ? { recommendation: { candidates, sourceIds: [...new Set(sourceIds)], scopeAuthority, domain, type, budgetPressure, weights } } : {}),
 	};
 }
 
