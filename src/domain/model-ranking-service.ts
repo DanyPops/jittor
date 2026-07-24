@@ -3,12 +3,13 @@ import type { BenchmarkStore } from "../ports/benchmark-store.ts";
 import type { MetricStore } from "../ports/metric-store.ts";
 import { aggregateModelMetrics } from "./model-observation.ts";
 import { rankModelCandidates, type ModelCandidate, type ModelRankingResult, type ScopeAuthority, type UtilityWeights } from "./model-ranking.ts";
-import type { ModelTaskClass } from "./model-observation.ts";
+import type { ModelTaskDomain, ModelTaskType } from "./model-observation.ts";
 
 export interface ModelRecommendationInput {
 	candidates: ModelCandidate[];
 	scopeAuthority: ScopeAuthority;
-	taskClass: ModelTaskClass;
+	domain: ModelTaskDomain;
+	type: ModelTaskType;
 	budgetPressure: number;
 	weights: UtilityWeights;
 	sourceIds: string[];

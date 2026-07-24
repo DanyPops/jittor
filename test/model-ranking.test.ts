@@ -21,14 +21,15 @@ function evidence(provider: string, model: string, dimension: string, value: num
 }
 
 function local(provider: string, model: string, dimension: string, median: number, confidence = 0.8): ModelMetricAggregate {
-  return { provider, model, thinking: "high", taskClass: "coding", dimension, unit: dimension === "wall-latency" ? "milliseconds" : "ratio", sampleSize: 10, median, p90: median, medianAbsoluteDeviation: 0, latestAt: 1_000, freshness: "fresh", confidence }
+  return { provider, model, thinking: "high", domain: "coding", type: "general", dimension, unit: dimension === "wall-latency" ? "milliseconds" : "ratio", sampleSize: 10, median, p90: median, medianAbsoluteDeviation: 0, latestAt: 1_000, freshness: "fresh", confidence }
 }
 
 function input(overrides: Partial<ModelRankingInput> = {}): ModelRankingInput {
   return {
     candidates,
     scopeAuthority: "available-models",
-    taskClass: "coding",
+    domain: "coding",
+    type: "general",
     budgetPressure: 0.5,
     weights: { quality: 3, cost: 2, latency: 1, context: 1, reliability: 2 },
     externalEvidence: [
@@ -64,6 +65,30 @@ describe("model utility ranking", () => {
     expect(result.completeness).toBe("insufficient-evidence")
   })
 
+  it("weighs domain-quality and type-quality evidence independently, both on top of the universal general fallback", () => {
+    // gpt-fast only has domain (coding) evidence; claude-strong only has type (planning/agentic) evidence.
+    // Neither should be treated as having zero quality evidence -- each axis is genuinely optional.
+    const result = rankModelCandidates(input({
+      domain: "coding", type: "planning",
+      externalEvidence: [
+        evidence("openai", "gpt-fast", "quality-coding", 0.9),
+        evidence("anthropic", "claude-strong", "quality-type-planning", 0.9),
+      ],
+      localEvidence: [],
+    }))
+    expect(result.ranked.every((item) => item.components.find((component) => component.name === "quality")?.score !== null)).toBe(true)
+  })
+
+  it("falls back to quality-general when neither domain nor type has specific evidence", () => {
+    const result = rankModelCandidates(input({
+      domain: "general", type: "general",
+      externalEvidence: [evidence("openai", "gpt-fast", "quality-general", 0.8)],
+      localEvidence: [],
+    }))
+    const quality = result.ranked.find((item) => item.identity.startsWith("openai/"))?.components.find((item) => item.name === "quality")
+    expect(quality?.score).not.toBeNull()
+  })
+
   it("reduces confidence for stale evidence while retaining its provenance", () => {
     const stale = evidence("openai", "gpt-fast", "quality-coding", 0.9, 0.9, 1_500)
     const result = rankModelCandidates(input({ externalEvidence: [stale], localEvidence: [], now: 2_000 }))
@@ -80,7 +105,7 @@ describe("model utility ranking", () => {
     const ranker = new EvidenceModelRanker(benchmarkStore, metrics, () => 2_000)
     const service = new JittorService(metrics, undefined, undefined, ranker)
     const result = await service.execute("models.rank", {
-      candidates, scopeAuthority: "available-models", taskClass: "coding", budgetPressure: 0.5,
+      candidates, scopeAuthority: "available-models", domain: "coding", type: "general", budgetPressure: 0.5,
       weights: { quality: 3, cost: 2, latency: 1, context: 1, reliability: 2 }, sourceIds: ["benchmark"],
     })
     expect(service.operationNames()).toContain("models.rank")

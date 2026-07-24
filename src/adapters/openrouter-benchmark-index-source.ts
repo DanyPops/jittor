@@ -83,7 +83,8 @@ export class OpenRouterBenchmarkIndexSource implements BenchmarkSource {
 			return [
 				validateBenchmarkObservation({ ...common, dimension: "quality-coding", value: requiredNumber(row["coding_index"], "coding index"), unit: "ratio", methodology }),
 				validateBenchmarkObservation({ ...common, dimension: "quality-general", value: requiredNumber(row["intelligence_index"], "intelligence index"), unit: "ratio", methodology }),
-				validateBenchmarkObservation({ ...common, dimension: "quality-planning", value: requiredNumber(row["agentic_index"], "agentic index"), unit: "ratio", methodology }),
+				// agentic_index measures tool-use/agentic execution style, an activity (type), not a subject-matter domain.
+				validateBenchmarkObservation({ ...common, dimension: "quality-type-planning", value: requiredNumber(row["agentic_index"], "agentic index"), unit: "ratio", methodology }),
 				validateBenchmarkObservation({ ...common, dimension: "price-input", value: price(pricing["prompt"], "prompt pricing"), unit: "usd", methodology: { ...methodology, basis: "OpenRouter USD per input token" } }),
 				validateBenchmarkObservation({ ...common, dimension: "price-output", value: price(pricing["completion"], "completion pricing"), unit: "usd", methodology: { ...methodology, basis: "OpenRouter USD per output token" } }),
 			];

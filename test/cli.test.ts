@@ -54,12 +54,12 @@ describe("Jittor CLI context telemetry parity", () => {
 	it("exposes model ranking with explicit candidates and scope authority", async () => {
 		const output: string[] = [];
 		const calls: Array<{ operation: string; input: any }> = [];
-		const ranking = { scopeAuthority: "available-models", scopeWarning: "Pi available models are not the exact session scope", taskClass: "coding", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
+		const ranking = { scopeAuthority: "available-models", scopeWarning: "Pi available models are not the exact session scope", domain: "coding", type: "general", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
 		const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return ranking; } };
-		expect(await runCli(["benchmarks", "rank", "--candidate", "openai/gpt-5.4@high", "--source", "openrouter-models", "--task", "coding", "--budget", "0.5", "--json"], {
+		expect(await runCli(["benchmarks", "rank", "--candidate", "openai/gpt-5.4@high", "--source", "openrouter-models", "--domain", "coding", "--budget", "0.5", "--json"], {
 			client: client as never, stdout: (line) => output.push(line), stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: () => {},
 		})).toBe(0);
-		expect(calls[0]).toMatchObject({ operation: "models.rank", input: { candidates: [{ provider: "openai", model: "gpt-5.4", thinking: "high" }], scopeAuthority: "available-models", taskClass: "coding", budgetPressure: 0.5, sourceIds: ["openrouter-models"] } });
+		expect(calls[0]).toMatchObject({ operation: "models.rank", input: { candidates: [{ provider: "openai", model: "gpt-5.4", thinking: "high" }], scopeAuthority: "available-models", domain: "coding", type: "general", budgetPressure: 0.5, sourceIds: ["openrouter-models"] } });
 		expect(JSON.parse(output[0]!)).toEqual(ranking);
 	});
 

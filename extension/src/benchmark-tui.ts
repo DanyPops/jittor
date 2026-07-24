@@ -9,7 +9,7 @@ import {
 	MODEL_RANKING_DEFAULT_QUALITY_WEIGHT,
 	MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
 } from "../../src/constants.ts";
-import type { ModelTaskClass } from "../../src/domain/model-observation.ts";
+import type { ModelTaskDomain, ModelTaskType } from "../../src/domain/model-observation.ts";
 import type { ModelCandidate, ModelRankingResult, RankedModel, UtilityComponentName } from "../../src/domain/model-ranking.ts";
 
 export interface BenchmarkPanelClient {
@@ -52,7 +52,7 @@ export function renderBenchmarkView(result: ModelRankingResult, currentIdentity:
 		theme.fg("borderMuted", "─".repeat(safeWidth)),
 		theme.bold("Jittor Benchmark Recommendations"),
 		result.scopeAuthority === "exact-session" ? "Scope: exact session" : "Scope: available models · ADVISORY (exact session scope unavailable)",
-		`Task: ${result.taskClass} · evidence ${result.completeness}`,
+		`Domain: ${result.domain} · Type: ${result.type} · evidence ${result.completeness}`,
 		reason,
 		...shown.flatMap((item, index) => candidateLines(item, index, currentIdentity)),
 		...(result.ranked.length > shown.length ? [` … ${result.ranked.length - shown.length} more candidates omitted`] : []),
@@ -68,13 +68,15 @@ export async function showBenchmarkPanel(
 	client: BenchmarkPanelClient,
 	candidates: ModelCandidate[],
 	currentIdentity: string,
-	taskClass: ModelTaskClass,
+	domain: ModelTaskDomain,
+	type: ModelTaskType,
 ): Promise<void> {
 	for (;;) {
 		const result = await client.call("models.rank", {
 			candidates,
 			scopeAuthority: "available-models",
-			taskClass,
+			domain,
+			type,
 			budgetPressure: 0,
 			weights: {
 				quality: MODEL_RANKING_DEFAULT_QUALITY_WEIGHT,

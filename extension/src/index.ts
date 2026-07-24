@@ -17,7 +17,7 @@ import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureKind, type 
 import { CompactionTelemetry, papyrusContextMetric, validatePapyrusContextInjection } from "../../src/domain/context-telemetry.ts";
 import { applyTaskFocusEvent, validateTaskFocusEvent } from "../../src/domain/task-focus.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
-import { classifyTaskFromTools, modelRunMetrics, TASK_CLASSES, type ModelRunObservation, type ModelTaskClass } from "../../src/domain/model-observation.ts";
+import { classifyTaskFromTools, modelRunMetrics, TASK_DOMAINS, TASK_TYPES, type ModelRunObservation, type ModelTaskDomain, type ModelTaskType } from "../../src/domain/model-observation.ts";
 import type { ModelCandidate } from "../../src/domain/model-ranking.ts";
 import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
@@ -440,13 +440,25 @@ export function registerJittorExtension(
 					ctx.ui.notify("No active Pi model is available for benchmark recommendations.", "warning");
 					return;
 				}
-				const requestedTask = action.split(/\s+/)[1] ?? "general";
-				if (!TASK_CLASSES.includes(requestedTask as ModelTaskClass)) {
-					ctx.ui.notify("Usage: /jittor benchmarks [coding|research|planning|general]", "warning");
+				// Domain (subject matter, e.g. coding) and type (activity, e.g. research/planning) are
+				// independent axes -- each positional word is classified against whichever axis it
+				// belongs to, in either order, so "/jittor benchmarks coding research" and
+				// "/jittor benchmarks research coding" both work; an unmatched word is a usage error.
+				const requested = action.split(/\s+/).slice(1);
+				let requestedDomain: ModelTaskDomain | undefined;
+				let requestedType: ModelTaskType | undefined;
+				let malformed = requested.length > 2;
+				for (const word of requested) {
+					if (TASK_DOMAINS.includes(word as ModelTaskDomain) && requestedDomain === undefined) requestedDomain = word as ModelTaskDomain;
+					else if (TASK_TYPES.includes(word as ModelTaskType) && requestedType === undefined) requestedType = word as ModelTaskType;
+					else malformed = true;
+				}
+				if (malformed) {
+					ctx.ui.notify("Usage: /jittor benchmarks [coding|general] [research|planning|general]", "warning");
 					return;
 				}
 				const candidates = benchmarkCandidatesFromPi(ctx.modelRegistry.getAvailable() as PiRouteModel[], pi.getThinkingLevel());
-				await showBenchmarkPanel(ctx, client, candidates, `${ctx.model.provider}/${ctx.model.id}`, requestedTask as ModelTaskClass);
+				await showBenchmarkPanel(ctx, client, candidates, `${ctx.model.provider}/${ctx.model.id}`, requestedDomain ?? "general", requestedType ?? "general");
 				return;
 			}
 			if (action === "outcome accepted" || action === "outcome rejected") {
@@ -741,7 +753,7 @@ export function registerJittorExtension(
 			provider: value["provider"],
 			model: value["model"],
 			thinking: pi.getThinkingLevel(),
-			taskClass: classifyTaskFromTools(active.toolNames),
+			...classifyTaskFromTools(active.toolNames),
 			startedAt: active.startedAt,
 			firstTokenAt: active.firstTokenAt,
 			completedAt,

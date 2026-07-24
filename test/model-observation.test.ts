@@ -14,7 +14,8 @@ function run(overrides: Partial<ModelRunObservation> = {}): ModelRunObservation 
     provider: "openai-codex",
     model: "gpt-5.4",
     thinking: "high",
-    taskClass: "coding",
+    domain: "coding",
+    type: "general",
     startedAt: 1_000,
     firstTokenAt: 1_250,
     completedAt: 2_000,
@@ -41,7 +42,7 @@ function stored(value: number, observedAt: number, metric = "wall-latency"): Sto
     value,
     unit: metric === "output-throughput" ? "tokens-per-second" : "milliseconds",
     observedAt,
-    attributes: { provider: "openai-codex", model: "gpt-5.4", thinking: "high", taskClass: "coding", runId: `run-${observedAt}` },
+    attributes: { provider: "openai-codex", model: "gpt-5.4", thinking: "high", domain: "coding", type: "general", runId: `run-${observedAt}` },
   }
 }
 
@@ -52,7 +53,7 @@ describe("local model observations", () => {
       expect(() => validateModelRunObservation({ ...run(), [forbidden]: "private" })).toThrow("unsupported field")
     }
     const metrics = modelRunMetrics(run())
-    expect(metrics.every((metric) => Object.keys(metric.attributes ?? {}).every((key) => ["provider", "model", "thinking", "taskClass", "runId"].includes(key)))).toBe(true)
+    expect(metrics.every((metric) => Object.keys(metric.attributes ?? {}).every((key) => ["provider", "model", "thinking", "domain", "type", "runId"].includes(key)))).toBe(true)
     expect(JSON.stringify(metrics)).not.toContain("private")
   })
 
@@ -63,14 +64,19 @@ describe("local model observations", () => {
       "cache-read-ratio", "cost", "provider-responses", "retry-count", "tool-calls", "tool-failures", "failure", "outcome-accepted",
     ])
     expect(metrics.every((metric) => metric.source === "local-model")).toBe(true)
-    expect(metrics.every((metric) => metric.attributes?.taskClass === "coding")).toBe(true)
+    expect(metrics.every((metric) => metric.attributes?.domain === "coding" && metric.attributes?.type === "general")).toBe(true)
   })
 
-  it("classifies task metadata from bounded tool names without inspecting payloads", () => {
-    expect(classifyTaskFromTools(["read", "edit", "bash"])).toBe("coding")
-    expect(classifyTaskFromTools(["web_fetch"])).toBe("research")
-    expect(classifyTaskFromTools(["tasks"])).toBe("planning")
-    expect(classifyTaskFromTools([])).toBe("general")
+  it("classifies domain and type from bounded tool names without inspecting payloads", () => {
+    expect(classifyTaskFromTools(["read", "edit", "bash"])).toEqual({ domain: "coding", type: "general" })
+    expect(classifyTaskFromTools(["web_fetch"])).toEqual({ domain: "general", type: "research" })
+    expect(classifyTaskFromTools(["tasks"])).toEqual({ domain: "general", type: "planning" })
+    expect(classifyTaskFromTools([])).toEqual({ domain: "general", type: "general" })
+  })
+
+  it("scores domain and type independently -- a run can be domain=coding and type=research at once", () => {
+    expect(classifyTaskFromTools(["read", "edit", "web_fetch"])).toEqual({ domain: "coding", type: "research" })
+    expect(classifyTaskFromTools(["bash", "tasks"])).toEqual({ domain: "coding", type: "planning" })
   })
 
   it("aggregates robustly with sample size dispersion recency and confidence", () => {

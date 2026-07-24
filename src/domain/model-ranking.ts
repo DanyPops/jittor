@@ -1,6 +1,6 @@
 import { BENCHMARK_MAX_OBSERVATIONS_PER_SNAPSHOT, MAX_DYNAMIC_ROUTES, MODEL_AGGREGATE_MAX_ROWS } from "../constants.ts";
 import { normalizeModelIdentity, type BenchmarkObservation } from "./benchmark.ts";
-import { TASK_CLASSES, type ModelMetricAggregate, type ModelTaskClass } from "./model-observation.ts";
+import { TASK_DOMAINS, TASK_TYPES, type ModelMetricAggregate, type ModelTaskDomain, type ModelTaskType } from "./model-observation.ts";
 
 export type ScopeAuthority = "exact-session" | "available-models";
 export type UtilityComponentName = "quality" | "cost" | "latency" | "context" | "reliability";
@@ -22,7 +22,8 @@ export interface UtilityWeights {
 export interface ModelRankingInput {
 	candidates: ModelCandidate[];
 	scopeAuthority: ScopeAuthority;
-	taskClass: ModelTaskClass;
+	domain: ModelTaskDomain;
+	type: ModelTaskType;
 	budgetPressure: number;
 	weights: UtilityWeights;
 	externalEvidence: BenchmarkObservation[];
@@ -60,7 +61,8 @@ export interface RankedModel {
 export interface ModelRankingResult {
 	scopeAuthority: ScopeAuthority;
 	scopeWarning: string | null;
-	taskClass: ModelTaskClass;
+	domain: ModelTaskDomain;
+	type: ModelTaskType;
 	completeness: "complete" | "partial" | "insufficient-evidence";
 	ranked: RankedModel[];
 	automaticSelection: ModelCandidate | null;
@@ -101,22 +103,37 @@ function externalValues(candidate: ModelCandidate, evidence: BenchmarkObservatio
 	};
 }
 
-function localValues(candidate: ModelCandidate, taskClass: ModelTaskClass, evidence: ModelMetricAggregate[], dimension: string): ModelMetricAggregate[] {
+function localValues(candidate: ModelCandidate, domain: ModelTaskDomain, type: ModelTaskType, evidence: ModelMetricAggregate[], dimension: string): ModelMetricAggregate[] {
 	const identity = normalizeModelIdentity(candidate.provider, candidate.model);
-	return evidence.filter((item) => item.provider === identity.provider && item.model === identity.model && item.thinking === candidate.thinking && item.taskClass === taskClass && item.dimension === dimension);
+	return evidence.filter((item) => item.provider === identity.provider && item.model === identity.model && item.thinking === candidate.thinking && item.domain === domain && item.type === type && item.dimension === dimension);
+}
+
+/**
+ * quality-{domain} is a subject-matter signal (e.g. quality-coding from a coding benchmark);
+ * quality-type-{type} is an activity signal (e.g. quality-type-planning from an agentic/tool-use
+ * benchmark). Both are optional and additive on top of the universal quality-general fallback --
+ * a candidate with no domain- or type-specific evidence still gets ranked on general quality
+ * rather than being treated as having zero evidence.
+ */
+function qualityDimensions(domain: ModelTaskDomain, type: ModelTaskType): string[] {
+	const dimensions: string[] = [];
+	if (domain !== "general") dimensions.push(`quality-${domain}`);
+	if (type !== "general") dimensions.push(`quality-type-${type}`);
+	dimensions.push("quality-general");
+	return dimensions;
 }
 
 function rawComponents(candidate: ModelCandidate, input: ModelRankingInput): { components: Record<UtilityComponentName, RawComponent>; provenance: RankingProvenance[] } {
-	const quality = externalValues(candidate, input.externalEvidence, [`quality-${input.taskClass}`, "quality-general"], input.now);
+	const quality = externalValues(candidate, input.externalEvidence, qualityDimensions(input.domain, input.type), input.now);
 	const priceInput = externalValues(candidate, input.externalEvidence, ["price-input"], input.now);
 	const priceOutput = externalValues(candidate, input.externalEvidence, ["price-output"], input.now);
 	const measuredLatency = externalValues(candidate, input.externalEvidence, ["latency"], input.now);
 	const rankedLatency = externalValues(candidate, input.externalEvidence, ["latency-rank", "throughput-rank"], input.now);
 	const latency = measuredLatency.values.length > 0 ? measuredLatency : rankedLatency;
 	const context = externalValues(candidate, input.externalEvidence, ["context-window"], input.now);
-	const localLatency = localValues(candidate, input.taskClass, input.localEvidence, "wall-latency");
-	const failures = localValues(candidate, input.taskClass, input.localEvidence, "failure");
-	const outcomes = localValues(candidate, input.taskClass, input.localEvidence, "outcome-accepted");
+	const localLatency = localValues(candidate, input.domain, input.type, input.localEvidence, "wall-latency");
+	const failures = localValues(candidate, input.domain, input.type, input.localEvidence, "failure");
+	const outcomes = localValues(candidate, input.domain, input.type, input.localEvidence, "outcome-accepted");
 	const qualityValues = quality.values;
 	const prices = [...priceInput.values, ...priceOutput.values];
 	const latencyValues = localLatency.length > 0 ? localLatency.map((item) => item.median) : latency.values;
@@ -154,7 +171,8 @@ export function rankModelCandidates(value: ModelRankingInput): ModelRankingResul
 	if (!Array.isArray(value.externalEvidence) || value.externalEvidence.length > BENCHMARK_MAX_OBSERVATIONS_PER_SNAPSHOT * 4) throw new Error("external evidence exceeds the supported bound");
 	if (!Array.isArray(value.localEvidence) || value.localEvidence.length > MODEL_AGGREGATE_MAX_ROWS) throw new Error("local evidence exceeds the supported bound");
 	if (value.scopeAuthority !== "exact-session" && value.scopeAuthority !== "available-models") throw new Error("scope authority is invalid");
-	if (!TASK_CLASSES.includes(value.taskClass)) throw new Error("task class is invalid");
+	if (!TASK_DOMAINS.includes(value.domain)) throw new Error("task domain is invalid");
+	if (!TASK_TYPES.includes(value.type)) throw new Error("task type is invalid");
 	if (!Number.isSafeInteger(value.now) || value.now <= 0) throw new Error("ranking time is invalid");
 	const budgetPressure = finiteBound(value.budgetPressure, "budget pressure", 0, 2);
 	const weights = Object.fromEntries(COMPONENTS.map((name) => [name, finiteBound(value.weights[name], `${name} weight`, 0, 10)])) as unknown as UtilityWeights;
@@ -195,7 +213,7 @@ export function rankModelCandidates(value: ModelRankingInput): ModelRankingResul
 			confidence,
 			components,
 			provenance,
-			trace: [`task class ${value.taskClass}`, `budget pressure ${budgetPressure.toFixed(3)} makes cost weight ${effectiveWeights.cost.toFixed(3)}`, `${known.length}/${components.length} utility components have evidence`, `scope authority ${value.scopeAuthority}`],
+			trace: [`domain ${value.domain}, type ${value.type}`, `budget pressure ${budgetPressure.toFixed(3)} makes cost weight ${effectiveWeights.cost.toFixed(3)}`, `${known.length}/${components.length} utility components have evidence`, `scope authority ${value.scopeAuthority}`],
 		};
 	}).sort((left, right) => (right.utility ?? -1) - (left.utility ?? -1) || right.confidence - left.confidence || left.identity.localeCompare(right.identity));
 	const knownComponents = ranked.reduce((sum, item) => sum + item.components.filter((component) => component.score !== null).length, 0);
@@ -205,7 +223,8 @@ export function rankModelCandidates(value: ModelRankingInput): ModelRankingResul
 	return {
 		scopeAuthority: value.scopeAuthority,
 		scopeWarning: exact ? null : "Pi available models are not the exact session scope; automatic selection is disabled",
-		taskClass: value.taskClass,
+		domain: value.domain,
+		type: value.type,
 		completeness,
 		ranked,
 		automaticSelection: exact && ranked[0]?.utility !== null ? ranked[0]!.candidate : null,

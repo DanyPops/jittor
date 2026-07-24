@@ -8,7 +8,8 @@ function ranking(count = 2): ModelRankingResult {
   return {
     scopeAuthority: "available-models",
     scopeWarning: "Pi available models are not the exact session scope; automatic selection is disabled",
-    taskClass: "coding",
+    domain: "coding",
+    type: "general",
     completeness: "partial",
     automaticSelection: null,
     ranked: Array.from({ length: count }, (_, index) => ({
@@ -17,7 +18,7 @@ function ranking(count = 2): ModelRankingResult {
       utility: 0.9 - (index / 100), confidence: 0.8,
       components: ["quality", "cost", "latency", "context", "reliability"].map((name) => ({ name: name as any, score: 0.75, confidence: 0.8, weight: 1, evidenceCount: name === "reliability" ? 10 : 2, reason: name === "reliability" ? "10 local reliability observations" : "2 external observations" })),
       provenance: [{ sourceId: "openrouter-models", publisher: "OpenRouter", url: "https://openrouter.ai/api/v1/models", revision: "r1", freshness: "fresh" }],
-      trace: ["task class coding", "budget pressure 0.500 makes cost weight 3.000"],
+      trace: ["domain coding, type general", "budget pressure 0.500 makes cost weight 3.000"],
     })),
   }
 }
@@ -60,7 +61,7 @@ describe("benchmark recommendation TUI", () => {
       },
     }
     const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return operation === "models.rank" ? ranking() : { observedAt: 1, sources: [] } } }
-    await showBenchmarkPanel(ctx as never, client, [{ provider: "openai", model: "model-0", thinking: "high" }], "openai/model-1", "coding")
+    await showBenchmarkPanel(ctx as never, client, [{ provider: "openai", model: "model-0", thinking: "high" }], "openai/model-1", "coding", "general")
     expect(calls[0]).toMatchObject({ operation: "models.rank", input: { scopeAuthority: "available-models" } })
     expect(component.render(80).join("\n")).not.toMatch(/(?:Enter|s|a) (?:select|apply|activate)/i)
   })
