@@ -16,7 +16,7 @@ import type { MetricObservation, MetricUnit, StoredMetricObservation } from "./m
  * usage carries no distinguishing signal for that axis; a run can score coding on domain and
  * research on type simultaneously (e.g. reading a file, then searching the web in one turn).
  */
-export const TASK_DOMAINS = ["coding", "general"] as const;
+export const TASK_DOMAINS = ["coding", "design", "general"] as const;
 export type ModelTaskDomain = typeof TASK_DOMAINS[number];
 export const TASK_TYPES = ["research", "planning", "general"] as const;
 export type ModelTaskType = typeof TASK_TYPES[number];
