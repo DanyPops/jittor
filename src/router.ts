@@ -1,3 +1,4 @@
+import { ROUTER_MAX_SESSION_SCOPES, ROUTER_SESSION_ID_MAX_CHARACTERS } from "./constants.ts";
 import type { MetricStore } from "./ports/metric-store.ts";
 import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult, TelemetrySourceStatus } from "./ports/router-controller.ts";
 import type { TelemetrySource } from "./ports/telemetry-source.ts";
@@ -22,22 +23,37 @@ function sameRoute(left: Route, right: Route): boolean {
 	return left.provider === right.provider && left.model === right.model && left.thinking === right.thinking;
 }
 
+const GLOBAL_ROUTER_SCOPE = "global";
+
+interface RouterSessionState {
+	currentRoute: Route;
+	availableRoutes: Route[];
+	lastDecision: PolicyDecision | null;
+	previousPolicyDecision: PolicyDecision | null;
+	paused: boolean;
+	override: RouteOverride | null;
+	lastAccess: number;
+}
+
+function routerScope(sessionId: string | undefined): string {
+	if (sessionId === undefined) return GLOBAL_ROUTER_SCOPE;
+	if (sessionId.length === 0 || sessionId.length > ROUTER_SESSION_ID_MAX_CHARACTERS) {
+		throw new Error(`session_id must contain 1-${ROUTER_SESSION_ID_MAX_CHARACTERS} characters`);
+	}
+	return sessionId;
+}
+
 export class JittorRouter implements RouterController {
 	private readonly clock: () => number;
 	private readonly windows = new Map<string, BudgetWindow[]>();
+	private readonly sessions = new Map<string, RouterSessionState>();
 	private sourceStatuses: TelemetrySourceStatus[] = [];
-	private lastDecision: PolicyDecision | null = null;
-	private previousPolicyDecision: PolicyDecision | null = null;
-	private paused = false;
-	private override: RouteOverride | null = null;
 	private inFlightPoll: Promise<TelemetryPollResult> | null = null;
-	private currentRoute: Route;
-	private availableRoutes: Route[];
+	private accessSequence = 0;
 
 	constructor(private readonly options: JittorRouterOptions) {
 		this.clock = options.clock ?? Date.now;
-		this.currentRoute = options.currentRoute;
-		this.availableRoutes = structuredClone(options.routes);
+		this.sessions.set(GLOBAL_ROUTER_SCOPE, this.newSessionState());
 	}
 
 	poll(): Promise<TelemetryPollResult> {
@@ -45,91 +61,102 @@ export class JittorRouter implements RouterController {
 		return this.inFlightPoll;
 	}
 
-	status(): RouterStatus {
-		this.expireOverride();
+	status(sessionId?: string): RouterStatus {
+		const state = this.sessionState(sessionId);
+		this.expireOverride(state);
 		return {
-			ready: this.isReady(),
-			paused: this.paused,
+			ready: this.isReady(state),
+			paused: state.paused,
 			sources: structuredClone(this.sourceStatuses),
-			lastDecision: this.lastDecision ? structuredClone(this.lastDecision) : null,
-			override: this.override ? structuredClone(this.override) : null,
-			currentRoute: structuredClone(this.currentRoute),
-			availableRoutes: structuredClone(this.availableRoutes),
+			lastDecision: state.lastDecision ? structuredClone(state.lastDecision) : null,
+			override: state.override ? structuredClone(state.override) : null,
+			currentRoute: structuredClone(state.currentRoute),
+			availableRoutes: structuredClone(state.availableRoutes),
 		};
 	}
 
-	decide(): PolicyDecision {
+	decide(sessionId?: string): PolicyDecision {
 		const now = this.clock();
-		this.expireOverride();
-		if (this.paused) return this.remember({ action: "halt", pressure: Number.POSITIVE_INFINITY, reason: "Jittor is paused", decidedAt: now, trace: ["manual pause"] });
-		if (this.override) {
-			const route = this.override.route;
-			const action = route.provider !== this.currentRoute.provider
+		const state = this.sessionState(sessionId);
+		this.expireOverride(state);
+		if (state.paused) return this.remember(state, { action: "halt", pressure: Number.POSITIVE_INFINITY, reason: "Jittor is paused", decidedAt: now, trace: ["manual pause"] });
+		if (state.override) {
+			const route = state.override.route;
+			const action = route.provider !== state.currentRoute.provider
 				? "switch-provider"
-				: route.model !== this.currentRoute.model
+				: route.model !== state.currentRoute.model
 					? "switch-model"
-					: route.thinking !== this.currentRoute.thinking ? "lower-thinking" : "continue";
-			return this.remember({ action, route, pressure: 0, reason: "manual route override", decidedAt: now, trace: ["manual override"] });
+					: route.thinking !== state.currentRoute.thinking ? "lower-thinking" : "continue";
+			return this.remember(state, { action, route, pressure: 0, reason: "manual route override", decidedAt: now, trace: ["manual override"] });
 		}
-		if (!this.isReady()) return this.remember({ action: "halt", pressure: Number.POSITIVE_INFINITY, reason: "required telemetry is not ready", decidedAt: now, trace: ["fail closed"] });
-		const activeSourceIds = new Set(this.options.sources.filter((source) => source.provider === this.currentRoute.provider).map((source) => source.id));
-		return this.rememberPolicy(evaluateRoutingPolicy({
+		if (!this.isReady(state)) return this.remember(state, { action: "halt", pressure: Number.POSITIVE_INFINITY, reason: "required telemetry is not ready", decidedAt: now, trace: ["fail closed"] });
+		const activeSources = this.options.sources.filter((source) => source.provider === state.currentRoute.provider);
+		const activeSourceIds = new Set(activeSources.map((source) => source.id));
+		const requiredSourceIds = new Set(activeSources.filter((source) => source.required).map((source) => source.id));
+		const activeWindows = [...this.windows.entries()].filter(([sourceId]) => activeSourceIds.has(sourceId));
+		const requiredWindows = activeWindows.filter(([sourceId]) => requiredSourceIds.has(sourceId)).flatMap(([, windows]) => windows);
+		if (requiredSourceIds.size === 0 && activeWindows.every(([, windows]) => windows.length === 0)) {
+			return this.rememberPolicy(state, { action: "continue", pressure: 0, reason: "provider has no enforceable budget window; monitor-only", decidedAt: now, trace: ["monitor-only"] });
+		}
+		return this.rememberPolicy(state, evaluateRoutingPolicy({
 			now,
-			windows: [...this.windows.entries()].filter(([sourceId]) => activeSourceIds.has(sourceId)).flatMap(([, windows]) => windows),
-			currentRoute: this.currentRoute,
-			routes: this.availableRoutes,
+			windows: requiredSourceIds.size > 0 && requiredWindows.length === 0 ? [] : activeWindows.flatMap(([, windows]) => windows),
+			currentRoute: state.currentRoute,
+			routes: state.availableRoutes,
 			config: this.options.policy,
-			previousDecision: this.previousPolicyDecision ?? undefined,
+			previousDecision: state.previousPolicyDecision ?? undefined,
 		}));
 	}
 
-	pause(): RouterStatus {
-		this.paused = true;
-		return this.status();
+	pause(sessionId?: string): RouterStatus {
+		this.sessionState(sessionId).paused = true;
+		return this.status(sessionId);
 	}
 
-	resume(): RouterStatus {
-		this.paused = false;
-		return this.status();
+	resume(sessionId?: string): RouterStatus {
+		this.sessionState(sessionId).paused = false;
+		return this.status(sessionId);
 	}
 
-	setOverride(override?: RouteOverride): RouterStatus {
-		if (!override || !this.availableRoutes.some((route) => sameRoute(route, override.route))) throw new Error("override route is not available in Pi");
+	setOverride(override: RouteOverride | undefined, sessionId?: string): RouterStatus {
+		const state = this.sessionState(sessionId);
+		if (!override || !state.availableRoutes.some((route) => sameRoute(route, override.route))) throw new Error("override route is not available in Pi");
 		if (override.expiresAt !== null && override.expiresAt <= this.clock()) throw new Error("override expiry must be in the future");
-		this.override = structuredClone(override);
-		return this.status();
+		state.override = structuredClone(override);
+		return this.status(sessionId);
 	}
 
-	clearOverride(): RouterStatus {
-		this.override = null;
-		return this.status();
+	clearOverride(sessionId?: string): RouterStatus {
+		this.sessionState(sessionId).override = null;
+		return this.status(sessionId);
 	}
 
-	setCurrentRoute(route: Route): RouterStatus {
+	setCurrentRoute(route: Route, sessionId?: string): RouterStatus {
 		if (!route.provider || !route.model || !route.thinking) throw new Error("current route is incomplete");
-		this.currentRoute = structuredClone(route);
-		return this.status();
+		this.sessionState(sessionId).currentRoute = structuredClone(route);
+		return this.status(sessionId);
 	}
 
-	setAvailableRoutes(routes: Route[]): RouterStatus {
+	setAvailableRoutes(routes: Route[], sessionId?: string): RouterStatus {
 		if (!Array.isArray(routes)) throw new Error("available routes must be an array");
 		const valid = routes.filter((route) => typeof route?.provider === "string" && route.provider.length > 0
 			&& typeof route.model === "string" && route.model.length > 0
 			&& typeof route.thinking === "string" && route.thinking.length > 0);
-		this.availableRoutes = valid.filter((route, index) => valid.findIndex((candidate) => sameRoute(candidate, route)) === index).map((route) => structuredClone(route));
-		return this.status();
+		this.sessionState(sessionId).availableRoutes = valid.filter((route, index) => valid.findIndex((candidate) => sameRoute(candidate, route)) === index).map((route) => structuredClone(route));
+		return this.status(sessionId);
 	}
 
-	applyModelRanking(candidates: Route[]): RouterStatus {
+	applyModelRanking(candidates: Route[], sessionId?: string): RouterStatus {
 		if (!Array.isArray(candidates) || candidates.length === 0) throw new Error("model ranking must contain candidates");
+		const state = this.sessionState(sessionId);
 		const ranked = candidates
 			.filter((candidate, index) => candidates.findIndex((other) => sameRoute(other, candidate)) === index)
-			.map((candidate) => this.availableRoutes.find((route) => sameRoute(route, candidate)))
+			.map((candidate) => state.availableRoutes.find((route) => sameRoute(route, candidate)))
 			.filter((route): route is Route => route !== undefined);
-		const current = ranked.find((route) => sameRoute(route, this.currentRoute));
+		const current = ranked.find((route) => sameRoute(route, state.currentRoute));
 		if (!current) throw new Error("model ranking does not contain the current available route");
-		this.availableRoutes = [structuredClone(current), ...ranked.filter((route) => !sameRoute(route, current)).map((route) => structuredClone(route))];
-		return this.status();
+		state.availableRoutes = [structuredClone(current), ...ranked.filter((route) => !sameRoute(route, current)).map((route) => structuredClone(route))];
+		return this.status(sessionId);
 	}
 
 	private async runPoll(): Promise<TelemetryPollResult> {
@@ -148,23 +175,53 @@ export class JittorRouter implements RouterController {
 		return { sources: structuredClone(statuses), observedAt: this.clock() };
 	}
 
-	private isReady(): boolean {
-		const active = this.options.sources.filter((source) => source.provider === this.currentRoute.provider);
-		if (active.length === 0) return false;
-		return active.every((source) => this.sourceStatuses.some((status) => status.id === source.id && status.ok));
+	private newSessionState(): RouterSessionState {
+		return {
+			currentRoute: structuredClone(this.options.currentRoute),
+			availableRoutes: structuredClone(this.options.routes),
+			lastDecision: null,
+			previousPolicyDecision: null,
+			paused: false,
+			override: null,
+			lastAccess: ++this.accessSequence,
+		};
 	}
 
-	private expireOverride(): void {
-		if (this.override?.expiresAt !== null && this.override && this.override.expiresAt <= this.clock()) this.override = null;
+	private sessionState(sessionId?: string): RouterSessionState {
+		const scope = routerScope(sessionId);
+		const existing = this.sessions.get(scope);
+		if (existing) {
+			existing.lastAccess = ++this.accessSequence;
+			return existing;
+		}
+		if (this.sessions.size >= ROUTER_MAX_SESSION_SCOPES) {
+			const oldest = [...this.sessions.entries()]
+				.filter(([key]) => key !== GLOBAL_ROUTER_SCOPE)
+				.sort((left, right) => left[1].lastAccess - right[1].lastAccess)[0];
+			if (oldest) this.sessions.delete(oldest[0]);
+		}
+		const created = this.newSessionState();
+		this.sessions.set(scope, created);
+		return created;
 	}
 
-	private remember(decision: PolicyDecision): PolicyDecision {
-		this.lastDecision = decision;
+	private isReady(state: RouterSessionState): boolean {
+		if (state.availableRoutes.length === 0) return false;
+		const required = this.options.sources.filter((source) => source.provider === state.currentRoute.provider && source.required);
+		return required.every((source) => this.sourceStatuses.some((status) => status.id === source.id && status.ok));
+	}
+
+	private expireOverride(state: RouterSessionState): void {
+		if (state.override?.expiresAt !== null && state.override && state.override.expiresAt <= this.clock()) state.override = null;
+	}
+
+	private remember(state: RouterSessionState, decision: PolicyDecision): PolicyDecision {
+		state.lastDecision = decision;
 		return structuredClone(decision);
 	}
 
-	private rememberPolicy(decision: PolicyDecision): PolicyDecision {
-		this.previousPolicyDecision = decision;
-		return this.remember(decision);
+	private rememberPolicy(state: RouterSessionState, decision: PolicyDecision): PolicyDecision {
+		state.previousPolicyDecision = decision;
+		return this.remember(state, decision);
 	}
 }

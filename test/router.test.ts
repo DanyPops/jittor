@@ -12,6 +12,9 @@ class MemoryMetrics implements MetricStore {
 		this.rows.push(row);
 		return row;
 	}
+	recordBatch(observations: MetricObservation[]): StoredMetricObservation[] {
+		return observations.map((observation) => this.record(observation));
+	}
 	query(_filter: MetricQuery = {}): StoredMetricObservation[] { return [...this.rows]; }
 	distinctScopes(filter: { source: string; since: number; until: number; limit: number }): string[] {
 		return [...new Set(this.rows.filter((row) => row.source === filter.source && row.observedAt >= filter.since && row.observedAt <= filter.until).map((row) => row.scope))].sort().slice(0, filter.limit);
@@ -34,10 +37,10 @@ const config: PolicyConfig = {
 	maxThrottleMs: 30_000, hardStopUsedFraction: 0.99,
 };
 
-function source(batch: TelemetryBatch | Error, required = true): TelemetrySource {
+function source(batch: TelemetryBatch | Error, required = true, provider = "openai-codex"): TelemetrySource {
 	return {
-		id: "codex",
-		provider: "openai-codex",
+		id: provider === "openai-codex" ? "codex" : `${provider}-telemetry`,
+		provider,
 		required,
 		async poll() { if (batch instanceof Error) throw batch; return batch; },
 	};
@@ -81,6 +84,39 @@ describe("Jittor router controller", () => {
 		expect(router.decide().action).toBe("halt");
 	});
 
+	it("continues explicitly monitor-only when a provider has no required budget source", async () => {
+		const currentRoute = routes[2]!;
+		for (const batch of [
+			{ observedAt: now, metrics: [], windows: [] } satisfies TelemetryBatch,
+			new Error("optional source unavailable"),
+		]) {
+			const router = new JittorRouter({
+				metrics: new MemoryMetrics(), sources: [source(batch, false, currentRoute.provider)],
+				policy: config, routes: [currentRoute], currentRoute, clock: () => now,
+			});
+			await router.poll();
+			expect(router.status().ready).toBe(true);
+			expect(router.decide()).toMatchObject({ action: "continue", pressure: 0, reason: "provider has no enforceable budget window; monitor-only" });
+		}
+	});
+
+	it("continues monitor-only when the provider has no telemetry source", () => {
+		const currentRoute = { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" };
+		const router = new JittorRouter({ metrics: new MemoryMetrics(), sources: [], policy: config, routes: [currentRoute], currentRoute, clock: () => now });
+		expect(router.status().ready).toBe(true);
+		expect(router.decide()).toMatchObject({ action: "continue", reason: "provider has no enforceable budget window; monitor-only" });
+	});
+
+	it("still fails closed when a configured required source returns no window", async () => {
+		const router = new JittorRouter({
+			metrics: new MemoryMetrics(), sources: [source({ observedAt: now, metrics: [], windows: [] })],
+			policy: config, routes, currentRoute: routes[0]!, clock: () => now,
+		});
+		await router.poll();
+		expect(router.status().ready).toBe(true);
+		expect(router.decide()).toMatchObject({ action: "halt", reason: "required budget telemetry is missing" });
+	});
+
 	it("never selects a configured model that Pi did not report available", async () => {
 		const router = new JittorRouter({
 			metrics: new MemoryMetrics(),
@@ -102,6 +138,34 @@ describe("Jittor router controller", () => {
 		expect(decision.action).toBe("halt");
 		expect(decision.route).toBeUndefined();
 		expect(decision.trace.join("\n")).toContain("switch-model route unavailable");
+	});
+
+	it("keeps mutable route state isolated across interleaved Pi sessions", async () => {
+		const router = new JittorRouter({
+			metrics: new MemoryMetrics(),
+			sources: [source({ observedAt: now, metrics: [], windows: [] })],
+			policy: config, routes, currentRoute: routes[0]!, clock: () => now,
+		});
+		await router.poll();
+
+		router.setCurrentRoute(routes[0]!, "session-a");
+		router.setAvailableRoutes([routes[0]!, routes[1]!], "session-a");
+		router.setCurrentRoute(routes[2]!, "session-b");
+		router.setAvailableRoutes([routes[2]!], "session-b");
+		router.pause("session-a");
+
+		expect(router.status("session-a")).toMatchObject({ paused: true, currentRoute: routes[0], availableRoutes: [routes[0], routes[1]] });
+		expect(router.status("session-b")).toMatchObject({ paused: false, currentRoute: routes[2], availableRoutes: [routes[2]] });
+		expect(router.decide("session-a").reason).toContain("paused");
+		expect(router.decide("session-b").reason).not.toContain("paused");
+	});
+
+	it("bounds retained session scopes and rejects oversized session identities", () => {
+		const router = new JittorRouter({ metrics: new MemoryMetrics(), sources: [], policy: config, routes, currentRoute: routes[0]!, clock: () => now });
+		router.setCurrentRoute(routes[2]!, "session-0");
+		for (let index = 1; index < 500; index += 1) router.status(`session-${index}`);
+		expect(router.status("session-0").currentRoute).toEqual(routes[0]!);
+		expect(() => router.status("x".repeat(129))).toThrow("session_id must contain 1-128 characters");
 	});
 
 	it("applies exact-scope model ranking only by reordering and narrowing existing routes", () => {

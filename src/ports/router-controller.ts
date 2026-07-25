@@ -31,13 +31,13 @@ export interface RouterStatus {
 
 export interface RouterController {
 	poll(): Promise<TelemetryPollResult>;
-	status(): RouterStatus;
-	decide(): PolicyDecision;
-	pause(): RouterStatus;
-	resume(): RouterStatus;
-	setOverride(override?: RouteOverride): RouterStatus;
-	clearOverride(): RouterStatus;
-	setCurrentRoute(route: Route): RouterStatus;
-	setAvailableRoutes(routes: Route[]): RouterStatus;
-	applyModelRanking?(candidates: Route[]): RouterStatus;
+	status(sessionId?: string): RouterStatus;
+	decide(sessionId?: string): PolicyDecision;
+	pause(sessionId?: string): RouterStatus;
+	resume(sessionId?: string): RouterStatus;
+	setOverride(override: RouteOverride | undefined, sessionId?: string): RouterStatus;
+	clearOverride(sessionId?: string): RouterStatus;
+	setCurrentRoute(route: Route, sessionId?: string): RouterStatus;
+	setAvailableRoutes(routes: Route[], sessionId?: string): RouterStatus;
+	applyModelRanking?(candidates: Route[], sessionId?: string): RouterStatus;
 }
