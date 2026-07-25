@@ -11,6 +11,7 @@ import {
 } from "../../src/constants.ts";
 import type { ModelTaskDomain, ModelTaskType } from "../../src/domain/model-observation.ts";
 import type { ModelCandidate, ModelRankingResult, RankedModel, UtilityComponentName } from "../../src/domain/model-ranking.ts";
+import { sessionSecretField } from "./session-identity.ts";
 
 export interface BenchmarkPanelClient {
 	call(operation: string, input: unknown): Promise<any>;
@@ -72,8 +73,11 @@ export async function showBenchmarkPanel(
 	type: ModelTaskType,
 ): Promise<void> {
 	for (;;) {
+		const session_id = ctx.sessionManager.getSessionId();
 		const result = await client.call("models.rank", {
 			candidates,
+			session_id,
+			...sessionSecretField(session_id),
 			scopeAuthority: "available-models",
 			domain,
 			type,

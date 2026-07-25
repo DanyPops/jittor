@@ -1,9 +1,10 @@
 import { errorResponse, healthResponse, readyResponse, requireBearerToken } from "@danypops/daemon-kit/http";
-import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES, CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS, CONTEXT_ASSESSMENT_QUERY_LIMIT, MAX_USAGE_BUCKETS, PRUNE_MIN_AGE_MS, SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES, TASK_COST_QUERY_LIMIT, USAGE_MAX_DISTINCT_SCOPES } from "./constants.ts";
+import { SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "./constants.ts";
+import { InvalidSessionSecretError, SessionIdentity, type RegisterSessionIdentityResult } from "./session-identity-service.ts";
 import { VERSION } from "./version.ts";
-import { validateMetricObservation, type MetricObservation, type MetricQuery, type StoredMetricObservation } from "./domain/metric.ts";
-import { assessContextTelemetry, estimateCompactionDuration, type CompactionDurationEstimate, type ContextAssessment } from "./domain/context-telemetry.ts";
-import { buildTaskCostSummary, type TaskCostSummary } from "./domain/task-cost.ts";
+import type { MetricObservation, MetricQuery, StoredMetricObservation } from "./domain/metric.ts";
+import type { CompactionDurationEstimate, ContextAssessment } from "./domain/context-telemetry.ts";
+import type { TaskCostSummary } from "./domain/task-cost.ts";
 import type { UsageAggregateRow } from "./domain/usage.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
 import type { ModelRanker, ModelRecommendationInput } from "./domain/model-ranking-service.ts";
@@ -12,9 +13,18 @@ import type { BenchmarkController } from "./ports/benchmark-controller.ts";
 import type { MetricStore } from "./ports/metric-store.ts";
 import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
 import type { PolicyDecision, Route } from "./policy.ts";
+import { metricsOperations } from "./operations/metrics-operations.ts";
+import { benchmarkOperations } from "./operations/benchmark-operations.ts";
+import { contextOperations } from "./operations/context-operations.ts";
+import { routerOperations } from "./operations/router-operations.ts";
+import { modelRankingOperations } from "./operations/model-ranking-operations.ts";
+import { sessionIdentityOperations } from "./operations/session-identity-operations.ts";
+import { routerMutationAuthorizer } from "./operations/session-scope.ts";
+import type { OperationHandlerMap } from "./operations/types.ts";
 
 export const EXPECTED_OPERATION_NAMES = [
 	"metrics.record",
+	"metrics.record_batch",
 	"metrics.query",
 	"metrics.distinct_scopes",
 	"metrics.usage_series",
@@ -23,6 +33,8 @@ export const EXPECTED_OPERATION_NAMES = [
 	"benchmark.refresh",
 	"benchmark.status",
 	"benchmark.query",
+	"session.register",
+	"session.release",
 	"models.rank",
 	"context.assess",
 	"compaction.estimate",
@@ -39,8 +51,12 @@ export const EXPECTED_OPERATION_NAMES = [
 ] as const;
 
 export type OperationName = typeof EXPECTED_OPERATION_NAMES[number];
+interface RouterScopeInput { session_id?: string; session_secret?: string }
 export interface OperationInputs {
+	"session.register": { session_id: string };
+	"session.release": { session_id: string; session_secret?: string };
 	"metrics.record": MetricObservation;
+	"metrics.record_batch": { observations: MetricObservation[] };
 	"metrics.query": MetricQuery;
 	"metrics.distinct_scopes": { source: string; since: number; until: number; limit?: number };
 	"metrics.usage_series": { source: string; since: number; until: number; bucketSizeMs: number; bucketCount: number; scopeLimit?: number };
@@ -49,22 +65,25 @@ export interface OperationInputs {
 	"benchmark.refresh": { force?: boolean };
 	"benchmark.status": Record<string, never>;
 	"benchmark.query": BenchmarkQuery;
-	"models.rank": ModelRecommendationInput;
+	"models.rank": ModelRecommendationInput & RouterScopeInput;
 	"context.assess": { since?: number; until?: number };
 	"compaction.estimate": Record<string, never>;
 	"service.checkpoint": Record<string, never>;
 	"telemetry.poll": Record<string, never>;
-	"router.status": Record<string, never>;
-	"router.decide": Record<string, never>;
-	"router.pause": Record<string, never>;
-	"router.resume": Record<string, never>;
-	"router.override": RouteOverride;
-	"router.clear_override": Record<string, never>;
-	"router.current_route": Route;
-	"router.available_routes": { routes: Route[] };
+	"router.status": RouterScopeInput;
+	"router.decide": RouterScopeInput;
+	"router.pause": RouterScopeInput;
+	"router.resume": RouterScopeInput;
+	"router.override": RouteOverride & RouterScopeInput;
+	"router.clear_override": RouterScopeInput;
+	"router.current_route": Route & RouterScopeInput;
+	"router.available_routes": { routes: Route[] } & RouterScopeInput;
 }
 export interface OperationOutputs {
+	"session.register": RegisterSessionIdentityResult;
+	"session.release": { released: boolean };
 	"metrics.record": StoredMetricObservation;
+	"metrics.record_batch": StoredMetricObservation[];
 	"metrics.query": StoredMetricObservation[];
 	"metrics.distinct_scopes": string[];
 	"metrics.usage_series": { rows: UsageAggregateRow[]; truncated: boolean };
@@ -89,6 +108,7 @@ export interface OperationOutputs {
 }
 
 export class UnknownOperationError extends Error {}
+export { InvalidSessionSecretError };
 
 class UnavailableModelRanker implements ModelRanker {
 	rank(): ModelRankingResult { throw new Error("model ranking is not configured"); }
@@ -114,12 +134,30 @@ class UnavailableRouter implements RouterController {
 }
 
 export class JittorService {
+	private readonly router: RouterController;
+	private readonly operations: OperationHandlerMap;
+
 	constructor(
 		private readonly metrics: MetricStore,
-		private readonly router: RouterController = new UnavailableRouter(),
-		private readonly benchmarks: BenchmarkController = new UnavailableBenchmarkController(),
-		private readonly modelRanker: ModelRanker = new UnavailableModelRanker(),
-	) {}
+		router: RouterController = new UnavailableRouter(),
+		benchmarks: BenchmarkController = new UnavailableBenchmarkController(),
+		modelRanker: ModelRanker = new UnavailableModelRanker(),
+		sessionIdentity?: SessionIdentity,
+	) {
+		this.router = router;
+		const authorize = routerMutationAuthorizer(sessionIdentity);
+		// Each capability module owns a disjoint, bounded slice of EXPECTED_OPERATION_NAMES and only
+		// the collaborators it needs -- adding a new operation domain means adding a new module here,
+		// not another switch case in a single responsibility magnet.
+		this.operations = {
+			...metricsOperations(metrics),
+			...benchmarkOperations(benchmarks),
+			...contextOperations(metrics),
+			...routerOperations(router, authorize),
+			...modelRankingOperations(modelRanker, router, authorize),
+			...sessionIdentityOperations(sessionIdentity),
+		};
+	}
 
 	operationNames(): OperationName[] {
 		return [...EXPECTED_OPERATION_NAMES];
@@ -128,110 +166,13 @@ export class JittorService {
 	async execute<Name extends OperationName>(operation: Name, input: OperationInputs[Name]): Promise<OperationOutputs[Name]>;
 	async execute(operation: string, input: Record<string, unknown>): Promise<unknown>;
 	async execute(operation: string, input: Record<string, unknown> = {}): Promise<unknown> {
-		switch (operation) {
-			case "metrics.record": return this.metrics.record(validateMetricObservation(input));
-			case "metrics.query": return this.metrics.query(input as MetricQuery);
-			case "metrics.distinct_scopes": {
-				const source = input["source"];
-				const since = input["since"];
-				const until = input["until"];
-				if (typeof source !== "string" || source.length === 0) throw new Error("source is required");
-				if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || (since as number) < 0 || (until as number) < (since as number)) {
-					throw new Error("distinct scopes requires non-negative ordered integer bounds");
-				}
-				const requestedLimit = input["limit"];
-				const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(USAGE_MAX_DISTINCT_SCOPES, Math.floor(requestedLimit as number))) : USAGE_MAX_DISTINCT_SCOPES;
-				return this.metrics.distinctScopes({ source, since: since as number, until: until as number, limit });
-			}
-			case "metrics.usage_series": {
-				const source = input["source"];
-				const since = input["since"];
-				const until = input["until"];
-				const bucketSizeMs = input["bucketSizeMs"];
-				const bucketCount = input["bucketCount"];
-				if (typeof source !== "string" || source.length === 0) throw new Error("source is required");
-				if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || (since as number) < 0 || (until as number) < (since as number)) {
-					throw new Error("usage series requires non-negative ordered integer bounds");
-				}
-				if (typeof bucketSizeMs !== "number" || !Number.isFinite(bucketSizeMs) || bucketSizeMs <= 0) throw new Error("bucketSizeMs must be a positive number");
-				if (!Number.isInteger(bucketCount) || (bucketCount as number) <= 0 || (bucketCount as number) > MAX_USAGE_BUCKETS) {
-					throw new Error(`bucketCount must be a positive integer up to ${MAX_USAGE_BUCKETS}`);
-				}
-				const requestedScopeLimit = input["scopeLimit"];
-				const scopeLimit = Number.isFinite(requestedScopeLimit) ? Math.max(1, Math.min(USAGE_MAX_DISTINCT_SCOPES, Math.floor(requestedScopeLimit as number))) : USAGE_MAX_DISTINCT_SCOPES;
-				const scopes = this.metrics.distinctScopes({ source, since: since as number, until: until as number, limit: scopeLimit });
-				// More distinct scopes may exist beyond this bounded list -- that is the only remaining
-				// truncation risk once aggregation replaces a per-scope raw-row fetch (see aggregateUsage's
-				// own doc comment for the incident this was built to stop repeating).
-				const truncated = scopes.length >= scopeLimit;
-				const rows = scopes.length === 0 ? [] : this.metrics.aggregateUsage({
-					source, scopes, since: since as number, until: until as number, bucketSizeMs, bucketCount: bucketCount as number,
-				});
-				return { rows, truncated };
-			}
-			case "metrics.cost_by_task": {
-				const since = input["since"];
-				const until = input["until"];
-				if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || (since as number) < 0 || (until as number) < (since as number)) {
-					throw new Error("cost by task requires non-negative ordered integer bounds");
-				}
-				const rows = this.metrics.query({ source: "pi", since: since as number, until: until as number, order: "desc", limit: TASK_COST_QUERY_LIMIT });
-				return buildTaskCostSummary(rows, { since: since as number, until: until as number, truncated: rows.length >= TASK_COST_QUERY_LIMIT });
-			}
-			case "metrics.prune": {
-				const before = input["before"];
-				if (typeof before !== "number") throw new Error("before is required");
-				const force = input["force"] === true;
-				const minCutoff = Date.now() - PRUNE_MIN_AGE_MS;
-				if (!force && before > minCutoff) {
-					throw new Error(`refusing to prune metrics newer than ${new Date(minCutoff).toISOString()} without force: true (this looked like it could delete recent or live data)`);
-				}
-				return { deleted: this.metrics.pruneBefore(before) };
-			}
-			case "benchmark.refresh": return this.benchmarks.refresh(input["force"] === true);
-			case "benchmark.status": return this.benchmarks.status();
-			case "benchmark.query": return this.benchmarks.query(input as unknown as BenchmarkQuery);
-			case "models.rank": {
-				const result = this.modelRanker.rank(input as unknown as ModelRecommendationInput);
-				if (result.automaticSelection && this.router.applyModelRanking) this.router.applyModelRanking(result.ranked.map((item) => item.candidate));
-				return result;
-			}
-			case "context.assess": {
-				const until = input["until"] === undefined ? Date.now() : input["until"];
-				const since = input["since"] === undefined && typeof until === "number" ? Math.max(0, until - CONTEXT_ASSESSMENT_DEFAULT_WINDOW_MS) : input["since"];
-				if (!Number.isSafeInteger(since) || !Number.isSafeInteger(until) || (since as number) < 0 || (until as number) < (since as number)) throw new Error("context assessment requires non-negative ordered integer bounds");
-				const query = { since: since as number, until: until as number, order: "asc" as const, limit: CONTEXT_ASSESSMENT_QUERY_LIMIT };
-				const injections = this.metrics.query({ ...query, source: "papyrus-context", metric: "injected-characters" });
-				const compactions = this.metrics.query({ ...query, source: "pi-context" });
-				return assessContextTelemetry(injections, compactions, {
-					since: since as number,
-					until: until as number,
-					truncated: injections.length >= CONTEXT_ASSESSMENT_QUERY_LIMIT || compactions.length >= CONTEXT_ASSESSMENT_QUERY_LIMIT,
-				});
-			}
-			case "compaction.estimate": {
-				const rows = this.metrics.query({
-					source: "pi-context", scope: "compaction", metric: "compaction-duration",
-					order: "desc", limit: COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES,
-				});
-				return estimateCompactionDuration(rows);
-			}
-			case "service.checkpoint": this.metrics.checkpoint(); return { ok: true };
-			case "telemetry.poll": return this.router.poll();
-			case "router.status": return this.router.status();
-			case "router.decide": return this.router.decide();
-			case "router.pause": return this.router.pause();
-			case "router.resume": return this.router.resume();
-			case "router.override": return this.router.setOverride(input as unknown as RouteOverride);
-			case "router.clear_override": return this.router.clearOverride();
-			case "router.current_route": return this.router.setCurrentRoute(input as unknown as Route);
-			case "router.available_routes": return this.router.setAvailableRoutes(Array.isArray(input["routes"]) ? input["routes"] as Route[] : []);
-			default: throw new UnknownOperationError(`unknown operation: ${operation}`);
-		}
+		const handler = this.operations[operation];
+		if (!handler) throw new UnknownOperationError(`unknown operation: ${operation}`);
+		return handler(input);
 	}
 
 	ready(): boolean {
-		return this.router.status().ready;
+		return this.router.status(undefined).ready;
 	}
 
 	close(): void {
@@ -284,6 +225,7 @@ export function createApp(options: JittorAppOptions): { fetch(request: Request):
 				return json({ result: await options.service.execute(body.op, input) });
 			} catch (error) {
 				if (error instanceof UnknownOperationError) return json({ error: error.message }, 404);
+				if (error instanceof InvalidSessionSecretError) return json({ error: error.message }, 403);
 				return json({ error: error instanceof Error ? error.message : String(error) }, 400);
 			}
 		},

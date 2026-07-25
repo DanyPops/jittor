@@ -1,13 +1,24 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { HUMAN_STATUS_MAX_SOURCES, HUMAN_TEXT_FIELD_MAX_CHARACTERS } from "../../src/constants.ts";
-import type { StoredMetricObservation } from "../../src/domain/metric.ts";
+import type { MetricQuery, StoredMetricObservation } from "../../src/domain/metric.ts";
 import type { PolicyAction, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
 import type { ProviderBudget } from "./footer.ts";
+import { sessionSecretField } from "./session-identity.ts";
 
 export interface JittorPanelClient {
 	call(operation: string, input: unknown): Promise<any>;
+}
+
+export function providerBudgetMetricQuery(status: RouterStatus): MetricQuery | null {
+	switch (status.currentRoute?.provider) {
+		case "openai-codex": return { source: "codex-subscription", metric: "used-fraction", order: "desc", limit: 100 };
+		case "openrouter": return { source: "openrouter", order: "desc", limit: 20 };
+		case "anthropic": return { source: "anthropic", metric: "used-fraction", order: "desc", limit: 20 };
+		case "anthropic-vertex": return { source: "anthropic-vertex", metric: "used-fraction", order: "desc", limit: 20 };
+		default: return null;
+	}
 }
 
 type PanelAction = "pause" | "resume" | "refresh" | "override" | "clear-override" | "close";
@@ -200,12 +211,9 @@ export function buildStatusView(status: RouterStatus, metrics: StoredMetricObser
 	return lines;
 }
 
-async function snapshot(client: JittorPanelClient): Promise<{ status: RouterStatus; metrics: StoredMetricObservation[] }> {
-	const status = await client.call("router.status", {}) as RouterStatus;
-	const provider = status.currentRoute?.provider;
-	const query = provider === "openai-codex"
-		? { source: "codex-subscription", metric: "used-fraction", order: "desc", limit: 100 }
-		: provider === "openrouter" ? { source: "openrouter", order: "desc", limit: 20 } : null;
+async function snapshot(client: JittorPanelClient, sessionId: string): Promise<{ status: RouterStatus; metrics: StoredMetricObservation[] }> {
+	const status = await client.call("router.status", { session_id: sessionId }) as RouterStatus;
+	const query = providerBudgetMetricQuery(status);
 	const metrics = query ? await client.call("metrics.query", query) as StoredMetricObservation[] : [];
 	return { status, metrics };
 }
@@ -219,8 +227,9 @@ async function chooseOverride(ctx: ExtensionCommandContext, routes: Route[]): Pr
 }
 
 export async function showJittorPanel(ctx: ExtensionCommandContext, client: JittorPanelClient): Promise<void> {
+	const session_id = ctx.sessionManager.getSessionId();
 	for (;;) {
-		const current = await snapshot(client);
+		const current = await snapshot(client, session_id);
 		if (ctx.mode !== "tui") {
 			ctx.ui.notify(buildStatusView(current.status, current.metrics).join("\n"), "info");
 			return;
@@ -254,17 +263,17 @@ export async function showJittorPanel(ctx: ExtensionCommandContext, client: Jitt
 		if (action === "refresh") { await client.call("telemetry.poll", {}); continue; }
 		if (action === "pause" || action === "resume") {
 			if (await ctx.ui.confirm(action === "pause" ? "Emergency-halt provider requests?" : "Release emergency halt?", "This changes provider-request enforcement. Use /jittor off to disable blocking entirely.")) {
-				await client.call(action === "pause" ? "router.pause" : "router.resume", {});
+				await client.call(action === "pause" ? "router.pause" : "router.resume", { session_id, ...sessionSecretField(session_id) });
 			}
 			continue;
 		}
 		if (action === "clear-override") {
-			if (await ctx.ui.confirm("Clear route override?", "Policy-controlled routing will resume.")) await client.call("router.clear_override", {});
+			if (await ctx.ui.confirm("Clear route override?", "Policy-controlled routing will resume.")) await client.call("router.clear_override", { session_id, ...sessionSecretField(session_id) });
 			continue;
 		}
 		const route = await chooseOverride(ctx, current.status.availableRoutes);
 		if (route && await ctx.ui.confirm("Apply route override?", `${routeText(route)} for one hour`)) {
-			await client.call("router.override", { route, expiresAt: Date.now() + 60 * 60 * 1_000 });
+			await client.call("router.override", { route, expiresAt: Date.now() + 60 * 60 * 1_000, session_id, ...sessionSecretField(session_id) });
 		}
 	}
 }

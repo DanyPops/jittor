@@ -190,6 +190,14 @@ describe("GoogleVertexBudgetTelemetrySource", () => {
 		expect(source.required).toBe(false);
 	});
 
+	it("uses the configured metric source as its route-provider identity", () => {
+		const source = new GoogleVertexBudgetTelemetrySource(
+			"projects/p/subscriptions/s", async () => "token", () => 1_000, async () => Response.json({}), "anthropic-vertex",
+		);
+		expect(source.provider).toBe("anthropic-vertex");
+		expect(source.id).toBe("google-vertex-budget:anthropic-vertex");
+	});
+
 	it("returns an empty batch, not an error, when nothing is pending", async () => {
 		const source = new GoogleVertexBudgetTelemetrySource("projects/p/subscriptions/s", async () => "token", () => 1_000, async () => Response.json({}));
 		const batch = await source.poll();

@@ -91,6 +91,13 @@ export const MAX_USAGE_BUCKETS = 120;
 /** Defense-in-depth cap on the SQL-side usage aggregation result: (scopes x metrics x buckets) is already small by construction, but this bounds it explicitly rather than trusting that alone. */
 export const USAGE_AGGREGATE_MAX_ROWS = 25_000;
 export const MAX_DYNAMIC_ROUTES = 100;
+/** Bounds concurrent in-memory Pi router scopes; the least recently used non-global scope is evicted. */
+export const ROUTER_MAX_SESSION_SCOPES = 500;
+export const ROUTER_SESSION_ID_MAX_CHARACTERS = 128;
+/** Hard cap on registered session_identities rows; oldest-seen identity is evicted beyond this. */
+export const SESSION_IDENTITY_MAX_ROWS = 2_000;
+/** Bounds one metrics.record_batch call; a real per-turn event batch (usage, headers, local-run metrics) is a handful of rows, never thousands. */
+export const METRIC_BATCH_MAX_OBSERVATIONS = 100;
 export const CODEX_ERROR_MESSAGE_LIMIT = 160;
 export const CODEX_RETRY_AFTER_MAX_MS = 5 * MILLISECONDS_PER_MINUTE;
 export const CODEX_RECOVERY_BASE_DELAY_MS = 2 * MILLISECONDS_PER_SECOND;

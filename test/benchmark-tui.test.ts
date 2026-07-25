@@ -52,6 +52,7 @@ describe("benchmark recommendation TUI", () => {
     const calls: Array<{ operation: string; input: unknown }> = []
     const ctx = {
       mode: "tui",
+      sessionManager: { getSessionId: () => "test-session" },
       ui: {
         async custom(factory: Function) {
           component = factory({}, theme, {}, () => undefined)
@@ -62,7 +63,7 @@ describe("benchmark recommendation TUI", () => {
     }
     const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return operation === "models.rank" ? ranking() : { observedAt: 1, sources: [] } } }
     await showBenchmarkPanel(ctx as never, client, [{ provider: "openai", model: "model-0", thinking: "high" }], "openai/model-1", "coding", "general")
-    expect(calls[0]).toMatchObject({ operation: "models.rank", input: { scopeAuthority: "available-models" } })
+    expect(calls[0]).toMatchObject({ operation: "models.rank", input: { scopeAuthority: "available-models", session_id: "test-session" } })
     expect(component.render(80).join("\n")).not.toMatch(/(?:Enter|s|a) (?:select|apply|activate)/i)
   })
 })

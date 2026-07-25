@@ -12,6 +12,8 @@ import { BenchmarkCatalog } from "./domain/benchmark.ts";
 import { EvidenceModelRanker } from "./domain/model-ranking-service.ts";
 import { createApp, JittorService } from "./service.ts";
 import { JittorRouter } from "./router.ts";
+import { SQLiteSessionIdentityStore } from "./adapters/sqlite-session-identity-store.ts";
+import { SessionIdentity } from "./session-identity-service.ts";
 import type { BenchmarkSource } from "./ports/benchmark-source.ts";
 import type { TelemetrySource } from "./ports/telemetry-source.ts";
 import { CodexTelemetrySource, GoogleVertexBudgetTelemetrySource, OpenRouterTelemetrySource } from "./providers/telemetry-sources.ts";
@@ -39,6 +41,12 @@ export function benchmarkSourcesFromEnvironment(env: Record<string, string | und
 	return sources;
 }
 
+function googleVertexMetricSource(value: string | undefined): GoogleVertexMetricSource {
+	if (value === undefined || value === "google-vertex") return "google-vertex";
+	if (value === "anthropic-vertex") return "anthropic-vertex";
+	throw new Error("JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE must be google-vertex or anthropic-vertex");
+}
+
 export function telemetrySourcesFromEnvironment(env: Record<string, string | undefined> = process.env): TelemetrySource[] {
 	const sources: TelemetrySource[] = [];
 	const codexAuthFile = env["JITTOR_CODEX_AUTH_FILE"];
@@ -49,7 +57,7 @@ export function telemetrySourcesFromEnvironment(env: Record<string, string | und
 	// docs/PROVIDER_RESEARCH.md), so its absence must never attempt ADC discovery or a network call.
 	const vertexBudgetSubscription = env["JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION"];
 	if (vertexBudgetSubscription) {
-		const source = (env["JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE"] ?? "google-vertex") as GoogleVertexMetricSource;
+		const source = googleVertexMetricSource(env["JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE"]);
 		const tokenProvider = createGoogleAdcTokenProvider([GOOGLE_PUBSUB_READONLY_SCOPE]);
 		sources.push(new GoogleVertexBudgetTelemetrySource(vertexBudgetSubscription, tokenProvider, Date.now, fetch, source));
 	}
@@ -71,7 +79,9 @@ export function startDaemon(
 	env: Record<string, string | undefined> = process.env,
 ): RunningDaemon {
 	const token = ensureAuthToken(paths);
-	const metrics = new SQLiteMetricStore(openJittorDb(paths.database));
+	const db = openJittorDb(paths.database);
+	const metrics = new SQLiteMetricStore(db);
+	const sessionIdentity = new SessionIdentity(new SQLiteSessionIdentityStore(db));
 	const sources = telemetrySourcesFromEnvironment(env);
 	const benchmarkSources = benchmarkSourcesFromEnvironment(env);
 	const benchmarkStore = new MetricBenchmarkStore(metrics);
@@ -84,7 +94,7 @@ export function startDaemon(
 		routes: [],
 		currentRoute: UNCONFIGURED_ROUTE,
 	});
-	const service = new JittorService(metrics, router, benchmarks, modelRanker);
+	const service = new JittorService(metrics, router, benchmarks, modelRanker, sessionIdentity);
 
 	const daemon = startDaemonKit({
 		daemonLabel: "Jittor",

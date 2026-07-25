@@ -13,6 +13,9 @@ class FakeMetricStore implements MetricStore {
 		this.rows.push(stored);
 		return structuredClone(stored);
 	}
+	recordBatch(observations: MetricObservation[]): StoredMetricObservation[] {
+		return observations.map((observation) => this.record(observation));
+	}
 	query(filter: MetricQuery = {}): StoredMetricObservation[] {
 		return this.rows.filter((row) => !filter.source || row.source === filter.source).map((row) => structuredClone(row));
 	}
@@ -68,6 +71,26 @@ describe("Jittor operation service", () => {
 			source: "openrouter", scope: "key:default", metric: "cost", value: 1,
 			unit: "credits" as never, observedAt: 1000,
 		})).rejects.toThrow("unit is not supported");
+	});
+
+	it("validates and records a metric batch as one atomic unit through the metric-store port", async () => {
+		const store = new FakeMetricStore();
+		const service = new JittorService(store);
+		const recorded = await service.execute("metrics.record_batch", { observations: [
+			{ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 100, unit: "tokens", observedAt: 1_000 },
+			{ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "output-tokens", value: 20, unit: "tokens", observedAt: 1_000 },
+		] }) as StoredMetricObservation[];
+		expect(recorded.map((row) => row.metric)).toEqual(["input-tokens", "output-tokens"]);
+		expect(store.rows).toHaveLength(2);
+
+		await expect(service.execute("metrics.record_batch", { observations: [] })).rejects.toThrow("non-empty array");
+		await expect(service.execute("metrics.record_batch", { observations: Array.from({ length: 101 }, () => ({ source: "pi", scope: "s", metric: "m", value: 1, unit: "count" as const, observedAt: 1_000 })) })).rejects.toThrow("at most");
+		await expect(service.execute("metrics.record_batch", { observations: [
+			{ source: "pi", scope: "s", metric: "m", value: 1, unit: "count", observedAt: 1_000 },
+			{ source: "pi", scope: "s", metric: "m", value: 1, unit: "credits" as never, observedAt: 1_000 },
+		] })).rejects.toThrow("unit is not supported");
+		// The batch above must not have partially landed before the second entry failed validation.
+		expect(store.rows).toHaveLength(2);
 	});
 
 	it("finds bounded distinct scopes for a source within a time window, fairly surfacing every series", async () => {

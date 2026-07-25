@@ -12,7 +12,6 @@ import {
 	MILLISECONDS_PER_DAY,
 	MILLISECONDS_PER_HOUR,
 	MILLISECONDS_PER_MINUTE,
-	MILLISECONDS_PER_SECOND,
 	TELEMETRY_STALE_AFTER_MS,
 } from "../../src/constants.ts";
 
@@ -102,7 +101,7 @@ function sanitize(value: string): string {
 }
 
 function usageTotals(context: FooterContext): UsageTotals {
-	let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0, cacheHit: number | undefined;
+	let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
 	for (const entry of context.sessionManager.getEntries()) {
 		if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
 		const usage = entry.message.usage;
@@ -111,10 +110,9 @@ function usageTotals(context: FooterContext): UsageTotals {
 		cacheRead += usage?.cacheRead ?? 0;
 		cacheWrite += usage?.cacheWrite ?? 0;
 		cost += usage?.cost?.total ?? 0;
-		const prompt = (usage?.input ?? 0) + (usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0);
-		if (prompt > 0) cacheHit = (usage.cacheRead ?? 0) / prompt * 100;
 	}
-	return { input, output, cacheRead, cacheWrite, cost, ...(cacheHit === undefined ? {} : { cacheHit }) };
+	const prompt = input + cacheRead + cacheWrite;
+	return { input, output, cacheRead, cacheWrite, cost, ...(prompt > 0 ? { cacheHit: cacheRead / prompt * 100 } : {}) };
 }
 
 function barWidth(width: number): number {
@@ -136,58 +134,21 @@ function fillColor(fraction: number | null): FooterColor {
 	return "dim";
 }
 
-/**
- * Once a learned median duration is available (see estimateCompactionDuration / the
- * `compaction.estimate` daemon operation), the bar drains against that real estimate: fraction
- * counts down linearly from 1 to 0 over estimatedMs, exactly in step with the countdown shown in
- * compactionStatusText — same elapsed/estimatedMs ratio drives both. Until then — cold start, or
- * the estimate fetch has not resolved yet — there is no real duration to drain against, so the
- * fill holds steady at the fraction observed when compaction started; the blink alone (see
- * compactionBarGlyph) communicates liveness without fabricating a rate.
- */
-function compactionFraction(progress: CompactionProgress, width: number, now: number): number {
-	if (progress.confidence === "learned" && typeof progress.estimatedMs === "number" && progress.estimatedMs > 0) {
-		const elapsed = Math.max(0, now - progress.startedAt);
-		return Math.max(0, Math.min(1, 1 - (elapsed / progress.estimatedMs)));
-	}
-	return Math.min(1, Math.max(0, progress.initialFraction));
+function compactionFraction(progress: CompactionProgress, now: number): number {
+	const initial = Math.min(1, Math.max(0, progress.initialFraction));
+	if (progress.confidence !== "learned" || typeof progress.estimatedMs !== "number" || progress.estimatedMs <= 0) return initial;
+	const elapsedFraction = Math.max(0, Math.min(1, (now - progress.startedAt) / progress.estimatedMs));
+	return initial * (1 - elapsedFraction);
 }
 
-/**
- * Liveness blink independent of whether the drain bar reflects a learned estimate or the
- * fixed-rate cold-start fallback: it does not claim to know how long compaction will take, only
- * that it has not stalled. It toggles once per render tick so a single owned interval (installed
- * in beginCompactionUi) drives both the drain and the blink — no extra timer is created here.
- */
 export function compactionBlinkOn(startedAt: number, now: number, halfPeriodMs = FOOTER_COMPACTION_BLINK_HALF_PERIOD_MS): boolean {
 	const elapsed = Math.max(0, now - startedAt);
 	return Math.floor(elapsed / halfPeriodMs) % 2 === 0;
 }
 
-/**
- * The compaction signal lives in the bar itself: it blinks between its normal draining fill and a
- * blank track of the same width, rather than a separate indicator glyph next to it. Off-phase
- * intentionally renders identically to the "no data" empty track (dim, all "░") so the bar reads
- * as a single blinking element, not a bar plus a decoration.
- */
 function compactionBarGlyph(progress: CompactionProgress, theme: FooterTheme, width: number, now: number): string {
 	if (!compactionBlinkOn(progress.startedAt, now)) return theme.fg("dim", "░".repeat(width));
-	const fraction = compactionFraction(progress, width, now);
-	return theme.fg("accent", progressBar(fraction, width));
-}
-
-/**
- * A countdown, never a count-up: once a learned estimate exists it reports seconds remaining,
- * ticking down toward zero in step with the draining bar. Before that (cold start, no estimate
- * yet) there is nothing true to count down from, so this reports nothing at all rather than a
- * fabricated elapsed count or a guessed total — the blinking, non-draining bar is the only signal.
- */
-function compactionStatusText(progress: CompactionProgress, now: number): string | undefined {
-	if (progress.confidence === "learned" && typeof progress.estimatedMs === "number" && progress.estimatedMs > 0) {
-		const remainingSeconds = Math.max(0, Math.ceil((progress.estimatedMs - (now - progress.startedAt)) / MILLISECONDS_PER_SECOND));
-		return `compact ~${remainingSeconds}s left`;
-	}
-	return undefined;
+	return theme.fg("accent", progressBar(compactionFraction(progress, now), width));
 }
 
 function contextSegment(
@@ -199,11 +160,7 @@ function contextSegment(
 	compaction?: CompactionProgress,
 ): string {
 	const w = barWidth(width);
-	if (compaction) {
-		const bar = compactionBarGlyph(compaction, theme, w, now);
-		const statusText = compactionStatusText(compaction, now);
-		return statusText === undefined ? `ctx ${bar}` : `ctx ${bar} ${statusText}`;
-	}
+	if (compaction) return `ctx ${compactionBarGlyph(compaction, theme, w, now)}`;
 	const usage = context.getContextUsage();
 	const window = usage?.contextWindow ?? context.model?.contextWindow ?? 0;
 	const fraction = usage?.percent === null || usage?.percent === undefined ? null : usage.percent / 100;

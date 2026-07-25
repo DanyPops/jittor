@@ -52,6 +52,7 @@ describe("Jittor status TUI", () => {
 		};
 		const ctx = {
 			mode: "tui", hasUI: true,
+			sessionManager: { getSessionId: () => "test-session" },
 			ui: {
 				async custom(factory: any) {
 					panels += 1;

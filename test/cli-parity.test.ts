@@ -10,7 +10,10 @@ interface Case {
 const routeArg = "openai/gpt-5.4@high";
 
 const cases: Case[] = [
+	{ args: ["session", "register", "--session-id", "s", "--json"], operation: "session.register" },
+	{ args: ["session", "release", "--session-id", "s", "--json"], operation: "session.release" },
 	{ args: ["metrics", "record", "--source", "s", "--scope", "sc", "--metric", "m", "--value", "1", "--unit", "count", "--observed-at", "1000", "--json"], operation: "metrics.record" },
+	{ args: ["metrics", "record-batch", "--observations", JSON.stringify([{ source: "s", scope: "sc", metric: "m", value: 1, unit: "count", observedAt: 1000 }]), "--json"], operation: "metrics.record_batch" },
 	{ args: ["metrics", "query", "--source", "s", "--json"], operation: "metrics.query" },
 	{ args: ["metrics", "prune", "--before", "1000", "--json"], operation: "metrics.prune" },
 	{ args: ["metrics", "distinct-scopes", "--source", "pi", "--since", "0", "--until", "1000", "--json"], operation: "metrics.distinct_scopes" },

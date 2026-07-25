@@ -1,39 +1,33 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-	CODEX_RECOVERY_ATTEMPT_WINDOW_MS,
-	CODEX_RECOVERY_BASE_DELAY_MS,
-	CODEX_RECOVERY_JITTER_RATIO,
-	CODEX_RECOVERY_MAX_ATTEMPTS,
-	CODEX_RECOVERY_MAX_DELAY_MS,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
 	MAX_DYNAMIC_ROUTES,
-	MILLISECONDS_PER_MINUTE,
-	MILLISECONDS_PER_SECOND,
 	PAPYRUS_CONTEXT_INJECTION_CHANNEL,
 	PAPYRUS_TASK_FOCUS_CHANNEL,
 	CONTEXT_EVENT_DEDUP_LIMIT,
 } from "../../src/constants.ts";
-import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureKind, type CodexFailureMetadata } from "../../src/domain/codex-recovery.ts";
 import { CompactionTelemetry, papyrusContextMetric, validatePapyrusContextInjection } from "../../src/domain/context-telemetry.ts";
 import { applyTaskFocusEvent, validateTaskFocusEvent } from "../../src/domain/task-focus.ts";
 import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
-import { classifyTaskFromTools, modelRunMetrics, TASK_DOMAINS, TASK_TYPES, type ModelRunObservation, type ModelTaskDomain, type ModelTaskType } from "../../src/domain/model-observation.ts";
+import { TASK_DOMAINS, TASK_TYPES, type ModelTaskDomain, type ModelTaskType } from "../../src/domain/model-observation.ts";
 import type { ModelCandidate } from "../../src/domain/model-ranking.ts";
 import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
 import type { PolicyDecision, Route } from "../../src/policy.ts";
 import type { RouterStatus } from "../../src/ports/router-controller.ts";
-import { hasAnthropicRateLimitHeaders, parseAnthropicRateLimitHeaders } from "../../src/providers/anthropic-contracts.ts";
-import { parseCodexRateLimitHeaders } from "../../src/providers/codex.ts";
-import { classifyGoogleVertexFailure, googleVertexFailureMetrics, type GoogleVertexFailureMetadata } from "../../src/providers/google-vertex-contracts.ts";
 import { showBenchmarkPanel } from "./benchmark-tui.ts";
 import { installIntegratedFooter, type CompactionProgress, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
 import { persistentEnforcementControl, type CodexRecoveryControl, type EnforcementControl, type UsageBudgetControl } from "./settings.ts";
 import { showSettingsPanel } from "./settings-tui.ts";
-import { buildFooterBudget, formatFooterStatus, showJittorPanel } from "./tui.ts";
+import { buildFooterBudget, formatFooterStatus, providerBudgetMetricQuery, showJittorPanel } from "./tui.ts";
+import { cacheSessionSecret, forgetSessionSecret, sessionSecretField } from "./session-identity.ts";
 import { showUsagePanel } from "./usage.ts";
+import { CodexRecoveryCapability, SYSTEM_RECOVERY_RUNTIME, type CodexRecoveryRuntime } from "./capabilities/codex-recovery.ts";
+import { ProviderResponseTelemetry } from "./capabilities/provider-response-telemetry.ts";
+import { LocalRunTelemetry } from "./capabilities/local-run-telemetry.ts";
 
 export { formatFooterStatus } from "./tui.ts";
+export type { CodexRecoveryRuntime } from "./capabilities/codex-recovery.ts";
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const RECOVERY_GUIDANCE = "Run /jittor off to disable blocking, or restart the daemon with: systemctl --user restart jittor.service";
@@ -44,20 +38,6 @@ export interface JittorExtensionClient {
 
 const daemonClient: JittorExtensionClient = {
 	call: (operation, input) => callJittor(operation as Parameters<typeof callJittor>[0], input as never),
-};
-
-export interface CodexRecoveryRuntime {
-	now(): number;
-	random(): number;
-	setTimeout(callback: () => void | Promise<void>, delayMs: number): unknown;
-	clearTimeout(handle: unknown): void;
-}
-
-const SYSTEM_RECOVERY_RUNTIME: CodexRecoveryRuntime = {
-	now: Date.now,
-	random: Math.random,
-	setTimeout(callback, delayMs) { return setTimeout(() => { void callback(); }, delayMs); },
-	clearTimeout(handle) { clearTimeout(handle as ReturnType<typeof setTimeout>); },
 };
 
 function usageBudgetControl(enforcement: EnforcementControl): UsageBudgetControl {
@@ -81,31 +61,17 @@ function recoveryControl(enforcement: EnforcementControl): CodexRecoveryControl 
 		: { isCodexRecoveryEnabled: () => false, setCodexRecoveryEnabled() {} };
 }
 
-function header(headers: Record<string, string>, name: string): string | undefined {
-	const expected = name.toLowerCase();
-	return Object.entries(headers).find(([key]) => key.toLowerCase() === expected)?.[1];
-}
-
 async function recordMetrics(client: JittorExtensionClient, metrics: MetricObservation[]): Promise<void> {
-	for (const metric of metrics) await client.call("metrics.record", metric);
+	if (metrics.length === 0) return;
+	// One atomic transaction rather than a per-metric RPC loop: a later observation in the same
+	// event failing validation, or the connection dropping mid-loop, must not leave this event's
+	// metrics partially persisted.
+	await client.call("metrics.record_batch", { observations: metrics });
 }
 
-interface ActiveLocalModelRun {
-	runId: string;
-	startedAt: number;
-	firstTokenAt: number | null;
-	providerResponses: number;
-	toolNames: string[];
-	toolCalls: number;
-	toolFailures: number;
-}
-
-async function refreshFooter(client: JittorExtensionClient, state: IntegratedFooterState): Promise<void> {
-	const status = await client.call("router.status", {}) as RouterStatus;
-	const provider = status.currentRoute?.provider;
-	const query = provider === "openai-codex"
-		? { source: "codex-subscription", metric: "used-fraction", limit: 100, order: "desc" }
-		: provider === "openrouter" ? { source: "openrouter", limit: 20, order: "desc" } : null;
+async function refreshFooter(client: JittorExtensionClient, state: IntegratedFooterState, sessionId: string): Promise<void> {
+	const status = await client.call("router.status", { session_id: sessionId }) as RouterStatus;
+	const query = providerBudgetMetricQuery(status);
 	const metrics = query ? await client.call("metrics.query", query) as StoredMetricObservation[] : [];
 	state.providerBudget = buildFooterBudget(status, metrics);
 	state.requestRender?.();
@@ -168,32 +134,41 @@ export function benchmarkCandidatesFromPi(models: PiRouteModel[], thinking: stri
 }
 
 export function routesFromPi(models: PiRouteModel[], current: PiRouteModel, thinking: string): Route[] {
-	const sameProvider = models
-		.filter((model) => model.provider === current.provider)
-		.filter((model, index, rows) => rows.findIndex((candidate) => candidate.id === model.id) === index);
-	if (!sameProvider.some((model) => model.id === current.id)) sameProvider.push(current);
-	const routes: Route[] = [{ provider: current.provider, model: current.id, thinking }];
+	const catalog = models
+		.filter((model) => model.provider.length > 0 && model.id.length > 0)
+		.filter((model, index, rows) => rows.findIndex((candidate) => candidate.provider === model.provider && candidate.id === model.id) === index);
+	if (!catalog.some((model) => model.provider === current.provider && model.id === current.id)) catalog.push(current);
 	const currentLevel = THINKING_DESCENDING.indexOf(thinking as typeof THINKING_DESCENDING[number]);
 	const lowerLevels = THINKING_DESCENDING.slice(currentLevel >= 0 ? currentLevel + 1 : 0);
+	const routes: Route[] = [];
+	const add = (route: Route): void => {
+		if (routes.length >= MAX_DYNAMIC_ROUTES || routes.some((candidate) => candidate.provider === route.provider && candidate.model === route.model && candidate.thinking === route.thinking)) return;
+		routes.push(route);
+	};
+	add({ provider: current.provider, model: current.id, thinking });
 	for (const level of lowerLevels) {
-		if (supportsThinking(current, level)) routes.push({ provider: current.provider, model: current.id, thinking: level });
+		if (supportsThinking(current, level)) add({ provider: current.provider, model: current.id, thinking: level });
 	}
-	const alternatives = sameProvider
-		.filter((model) => model.id !== current.id)
-		.sort((left, right) => modelCost(left) - modelCost(right) || left.id.localeCompare(right.id));
+	const alternatives = catalog
+		.filter((model) => model.provider !== current.provider || model.id !== current.id)
+		.sort((left, right) => {
+			const providerPriority = Number(left.provider !== current.provider) - Number(right.provider !== current.provider);
+			return providerPriority || modelCost(left) - modelCost(right) || left.provider.localeCompare(right.provider) || left.id.localeCompare(right.id);
+		});
 	for (const model of alternatives) {
 		const level = [thinking, ...lowerLevels].find((candidate) => supportsThinking(model, candidate)) ?? "off";
-		routes.push({ provider: model.provider, model: model.id, thinking: level });
-		if (routes.length >= MAX_DYNAMIC_ROUTES) break;
+		add({ provider: model.provider, model: model.id, thinking: level });
 	}
 	return routes;
 }
 
 async function syncAvailableRoutes(pi: ExtensionAPI, client: JittorExtensionClient, ctx: ExtensionContext): Promise<void> {
-	if (!ctx.model) { await client.call("router.available_routes", { routes: [] }); return; }
+	const session_id = ctx.sessionManager.getSessionId();
+	const secret = sessionSecretField(session_id);
+	if (!ctx.model) { await client.call("router.available_routes", { routes: [], session_id, ...secret }); return; }
 	const models = ctx.modelRegistry.getAvailable() as PiRouteModel[];
 	const routes = routesFromPi(models, ctx.model as PiRouteModel, pi.getThinkingLevel());
-	await client.call("router.available_routes", { routes });
+	await client.call("router.available_routes", { routes, session_id, ...secret });
 }
 
 async function syncCurrentRoute(
@@ -204,7 +179,8 @@ async function syncCurrentRoute(
 	thinking = pi.getThinkingLevel(),
 ): Promise<void> {
 	if (!model) return;
-	await client.call("router.current_route", { provider: model.provider, model: model.id, thinking });
+	const session_id = ctx.sessionManager.getSessionId();
+	await client.call("router.current_route", { provider: model.provider, model: model.id, thinking, session_id, ...sessionSecretField(session_id) });
 }
 
 function halt(ctx: ExtensionContext, reason: string): false {
@@ -225,7 +201,7 @@ async function applyDecision(
 	if (!decision.route || await applyRoute(pi, ctx, decision.route)) return true;
 	if (allowResync) {
 		await syncAvailableRoutes(pi, client, ctx);
-		return applyDecision(pi, client, ctx, await client.call("router.decide", {}) as PolicyDecision, false);
+		return applyDecision(pi, client, ctx, await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() }) as PolicyDecision, false);
 	}
 	return halt(ctx, `Jittor could not apply any authenticated Pi route after ${decision.route.provider}/${decision.route.model} became unavailable`);
 }
@@ -264,9 +240,9 @@ export function registerJittorExtension(
 	const footerState: IntegratedFooterState = { providerBudget: null };
 	const usageBudgets = usageBudgetControl(enforcement);
 	let compactionTelemetry = new CompactionTelemetry();
-	let localRunSequence = 0;
-	let activeLocalRun: ActiveLocalModelRun | undefined;
-	let lastCompletedLocalRun: ModelRunObservation | undefined;
+	const localRunTelemetry = new LocalRunTelemetry();
+	const providerResponseTelemetry = new ProviderResponseTelemetry();
+	const codexRecoveryCapability = new CodexRecoveryCapability(pi, codexRecovery, recoveryRuntime);
 	const contextObservations = new Set<string>();
 	const stopPapyrusContext = pi.events?.on?.(PAPYRUS_CONTEXT_INJECTION_CHANNEL, (payload) => {
 		try {
@@ -296,71 +272,9 @@ export function registerJittorExtension(
 			// Reject malformed or stale cross-extension events without retaining payloads or crashing the extension.
 		}
 	});
-	const recoveryPolicy = new CodexRecoveryPolicy({
-		baseDelayMs: CODEX_RECOVERY_BASE_DELAY_MS,
-		maxDelayMs: CODEX_RECOVERY_MAX_DELAY_MS,
-		maxAttempts: CODEX_RECOVERY_MAX_ATTEMPTS,
-		attemptWindowMs: CODEX_RECOVERY_ATTEMPT_WINDOW_MS,
-		jitterRatio: CODEX_RECOVERY_JITTER_RATIO,
-	}, recoveryRuntime.random);
-	let recoveryTimer: unknown;
-	let recoveryCooldown: { until: number; attempt: number; failureKind: CodexFailureKind } | undefined;
-	let lastCodexResponse: CodexFailureMetadata = {};
-	let lastGoogleVertexResponse: GoogleVertexFailureMetadata = {};
-	// The third-party "anthropic-vertex" provider (Anthropic Claude via Google Vertex) is tracked
-	// separately from "google-vertex" (Pi's own, unrelated native Vertex provider): different code
-	// path, different account/quota pool, and its metrics must stay distinguishable -- see
-	// google-vertex-contracts.ts and anthropic-contracts.ts.
-	let lastAnthropicVertexResponse: GoogleVertexFailureMetadata = {};
-	const cancelRecovery = (resetPolicy: boolean): void => {
-		if (recoveryTimer !== undefined) recoveryRuntime.clearTimeout(recoveryTimer);
-		recoveryTimer = undefined;
-		recoveryCooldown = undefined;
-		if (resetPolicy) recoveryPolicy.cancel();
-	};
-	const recoveryStatusText = (): string => {
-		const now = recoveryRuntime.now();
-		const state = recoveryPolicy.state(now);
-		const enabled = codexRecovery.isCodexRecoveryEnabled();
-		const attempt = recoveryCooldown?.attempt ?? (state.pending ? state.attempts + 1 : state.attempts);
-		const phase = recoveryCooldown
-			? `cooldown ${Math.ceil(Math.max(0, recoveryCooldown.until - now) / MILLISECONDS_PER_SECOND)}s`
-			: state.pending ? "pending"
-				: state.attempts >= CODEX_RECOVERY_MAX_ATTEMPTS ? "exhausted"
-					: state.attempts > 0 ? "waiting" : "idle";
-		const failureKind = recoveryCooldown?.failureKind ?? state.lastFailureKind;
-		return [
-			`Codex recovery: ${enabled ? "on" : "off"}`,
-			phase,
-			`attempt ${attempt}/${CODEX_RECOVERY_MAX_ATTEMPTS}`,
-			`window ${CODEX_RECOVERY_ATTEMPT_WINDOW_MS / MILLISECONDS_PER_MINUTE}m`,
-			...(failureKind ? [failureKind] : []),
-		].join(" · ");
-	};
-	const scheduleCodexRecovery = (ctx: ExtensionContext): void => {
-		if (!codexRecovery.isCodexRecoveryEnabled() || recoveryTimer !== undefined || !ctx.isIdle() || ctx.hasPendingMessages()) return;
-		const plan = recoveryPolicy.plan(recoveryRuntime.now());
-		if (plan.action === "exhausted") {
-			recoveryPolicy.abandonFailure();
-			if (ctx.hasUI) ctx.ui.notify(`Jittor Codex recovery stopped: ${plan.reason}.`, "warning");
-			return;
-		}
-		if (plan.action !== "schedule") return;
-		recoveryCooldown = { until: recoveryRuntime.now() + plan.delayMs, attempt: plan.attempt, failureKind: plan.failureKind };
-		recoveryTimer = recoveryRuntime.setTimeout(async () => {
-			recoveryTimer = undefined;
-			recoveryCooldown = undefined;
-			if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
-			const attempt = recoveryPolicy.recordAttempt(recoveryRuntime.now());
-			if (!attempt) return;
-			pi.sendMessage({
-				customType: "jittor-codex-recovery",
-				content: `Retry the previous Codex request after a transient ${attempt.failureKind} failure. Automatic recovery attempt ${attempt.attempt} of ${CODEX_RECOVERY_MAX_ATTEMPTS}.`,
-				display: false,
-				details: { attempt: attempt.attempt, failureKind: attempt.failureKind },
-			}, { triggerTurn: true, deliverAs: "followUp" });
-		}, plan.delayMs);
-	};
+	const cancelRecovery = (resetPolicy: boolean): void => codexRecoveryCapability.cancel(resetPolicy);
+	const recoveryStatusText = (): string => codexRecoveryCapability.statusText();
+	const scheduleCodexRecovery = (ctx: ExtensionContext): void => codexRecoveryCapability.scheduleIfIdle(ctx);
 	let compactionTimer: ReturnType<typeof setInterval> | undefined;
 	const finishCompactionUi = (): void => {
 		if (compactionTimer) clearInterval(compactionTimer);
@@ -406,11 +320,11 @@ export function registerJittorExtension(
 			await syncCurrentRoute(pi, client, ctx);
 			await syncAvailableRoutes(pi, client, ctx);
 			await client.call("telemetry.poll", {});
-			const readinessDecision = await client.call("router.decide", {}) as PolicyDecision;
+			const readinessDecision = await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() }) as PolicyDecision;
 			if (readinessDecision.action === "halt") throw new Error(readinessDecision.reason);
 			enforcement.setEnabled(true);
 			showFooter(ctx);
-			await refreshFooter(client, footerState);
+			await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
 			ctx.ui.notify("Jittor enforcement enabled.", "info");
 		} catch (error) {
 			enforcement.setEnabled(false);
@@ -430,7 +344,7 @@ export function registerJittorExtension(
 					setFooter: async (enabled) => {
 						enforcement.setFooterEnabled(enabled);
 						showFooter(ctx);
-						if (enabled) await refreshFooter(client, footerState).catch(() => undefined);
+						if (enabled) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 					},
 					setRecovery: (enabled) => {
 						if (!enabled) cancelRecovery(true);
@@ -466,12 +380,12 @@ export function registerJittorExtension(
 				return;
 			}
 			if (action === "outcome accepted" || action === "outcome rejected") {
-				if (!lastCompletedLocalRun) {
+				const explicitOutcome = action.endsWith("accepted") ? "accepted" as const : "rejected" as const;
+				const outcomeMetric = localRunTelemetry.explicitOutcomeMetric(explicitOutcome);
+				if (!outcomeMetric) {
 					ctx.ui.notify("No completed local model run is available for an explicit outcome.", "warning");
 					return;
 				}
-				const explicitOutcome = action.endsWith("accepted") ? "accepted" as const : "rejected" as const;
-				const outcomeMetric = modelRunMetrics({ ...lastCompletedLocalRun, explicitOutcome }).find((metric) => metric.metric === "outcome-accepted")!;
 				outcomeMetric.observedAt = Date.now();
 				await recordMetrics(client, [outcomeMetric]);
 				ctx.ui.notify(`Recorded explicit ${explicitOutcome} outcome for the latest local model run.`, "info");
@@ -508,7 +422,7 @@ export function registerJittorExtension(
 			if (action === "footer on" || action === "footer enable") {
 				enforcement.setFooterEnabled(true);
 				showFooter(ctx);
-				await refreshFooter(client, footerState).catch(() => undefined);
+				await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 				ctx.ui.notify("Jittor informational footer enabled; routing enforcement is unchanged.", "info");
 				return;
 			}
@@ -577,19 +491,25 @@ export function registerJittorExtension(
 		focusedTaskId = null;
 		finishCompactionUi();
 		compactionTelemetry = new CompactionTelemetry();
-		activeLocalRun = undefined;
-		lastCompletedLocalRun = undefined;
+		localRunTelemetry.reset();
 		cancelRecovery(true);
-		lastCodexResponse = {};
-		lastGoogleVertexResponse = {};
-		lastAnthropicVertexResponse = {};
+		providerResponseTelemetry.resetTurn();
 		ctx.ui.setStatus("jittor", undefined);
 		showFooter(ctx);
+		// Registered before any router-mutating call could plausibly happen, closing most of the
+		// first-touch registration window; best-effort -- a registration failure leaves this session
+		// unarmored (opt-in armor), never blocked.
+		try {
+			const { secret } = await client.call("session.register", { session_id: currentSessionId });
+			cacheSessionSecret(currentSessionId, secret);
+		} catch {
+			// Unarmored for this session; every router.* call still works exactly as before.
+		}
 		try {
 			await syncCurrentRoute(pi, client, ctx);
 			await syncAvailableRoutes(pi, client, ctx);
 			await client.call("telemetry.poll", {});
-			await refreshFooter(client, footerState);
+			await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
 		} catch {
 			footerState.providerBudget = null;
 			footerState.requestRender?.();
@@ -623,7 +543,7 @@ export function registerJittorExtension(
 		try {
 			await syncCurrentRoute(pi, client, ctx);
 			await syncAvailableRoutes(pi, client, ctx);
-			await refreshFooter(client, footerState);
+			await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
 		} catch {
 			footerState.providerBudget = null;
 			footerState.requestRender?.();
@@ -634,7 +554,7 @@ export function registerJittorExtension(
 		if (event.source !== "extension") cancelRecovery(true);
 		if (event.source === "extension" || !enforcement.isEnabled()) return { action: "continue" as const };
 		try {
-			const next = await client.call("router.decide", {}) as PolicyDecision;
+			const next = await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() }) as PolicyDecision;
 			if (next.action === "halt") {
 				ctx.ui.notify(`Jittor blocked input: ${next.reason}. ${RECOVERY_GUIDANCE}.`, "warning");
 				return { action: "handled" as const };
@@ -648,7 +568,7 @@ export function registerJittorExtension(
 
 	pi.on("model_select", async (event, ctx) => {
 		await syncCurrentRoute(pi, client, ctx, event.model).then(() => syncAvailableRoutes(pi, client, ctx)).catch(() => undefined);
-		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
+		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 	});
 
 	pi.on("thinking_level_select", async (event, ctx) => {
@@ -658,147 +578,45 @@ export function registerJittorExtension(
 	pi.on("turn_start", async (event, ctx) => {
 		currentSessionId = ctx.sessionManager.getSessionId();
 		compactionTelemetry.observeTurn();
-		lastCodexResponse = {};
-		lastGoogleVertexResponse = {};
-		lastAnthropicVertexResponse = {};
-		activeLocalRun = {
-			runId: `local-${event.timestamp}-${++localRunSequence}`,
-			startedAt: event.timestamp,
-			firstTokenAt: null,
-			providerResponses: 0,
-			toolNames: [],
-			toolCalls: 0,
-			toolFailures: 0,
-		};
+		codexRecoveryCapability.resetTurn();
+		providerResponseTelemetry.resetTurn();
+		localRunTelemetry.beginTurn(event.timestamp);
 		if (!enforcement.isEnabled()) return;
 		try {
 			await syncCurrentRoute(pi, client, ctx);
 			await syncAvailableRoutes(pi, client, ctx);
-			await applyDecision(pi, client, ctx, await client.call("router.decide", {}) as PolicyDecision);
-			await refreshFooter(client, footerState);
+			await applyDecision(pi, client, ctx, await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() }) as PolicyDecision);
+			await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
 		} catch {
 			halt(ctx, "Jittor could not verify or apply a safe route");
 		}
 	});
 
 	pi.on("message_update", async (event) => {
-		if (!activeLocalRun || activeLocalRun.firstTokenAt !== null) return;
-		if (["text_delta", "thinking_delta", "toolcall_delta"].includes(event.assistantMessageEvent.type)) activeLocalRun.firstTokenAt = Date.now();
+		localRunTelemetry.onMessageUpdate(event.assistantMessageEvent.type);
 	});
 
 	pi.on("tool_execution_end", async (event) => {
-		if (!activeLocalRun) return;
-		activeLocalRun.toolCalls += 1;
-		if (event.isError) activeLocalRun.toolFailures += 1;
-		if (activeLocalRun.toolNames.length < 100) activeLocalRun.toolNames.push(event.toolName);
+		localRunTelemetry.onToolExecutionEnd(event.toolName, event.isError);
 	});
 
 	pi.on("after_provider_response", async (event, ctx) => {
-		if (activeLocalRun) activeLocalRun.providerResponses += 1;
-		if (ctx.model?.provider === "openai-codex") {
-			lastCodexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
-		}
-		if (ctx.model?.provider === "anthropic") {
-			const headers = new Headers(event.headers);
-			if (hasAnthropicRateLimitHeaders(headers)) {
-				try {
-					await recordMetrics(client, parseAnthropicRateLimitHeaders(headers, Date.now()).metrics);
-				} catch {
-					if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Anthropic telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
-				}
-			}
-		}
-		if (ctx.model?.provider === "anthropic-vertex") {
-			// Best-effort only: unverified whether this passthrough ever forwards Anthropic's own
-			// rate-limit headers. If it doesn't, hasAnthropicRateLimitHeaders is false and nothing is
-			// recorded -- the same honest default as every other unconfirmed signal in this file.
-			const headers = new Headers(event.headers);
-			if (hasAnthropicRateLimitHeaders(headers)) {
-				try {
-					await recordMetrics(client, parseAnthropicRateLimitHeaders(headers, Date.now(), "anthropic-vertex").metrics);
-				} catch {
-					if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Anthropic-on-Vertex telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
-				}
-			}
-			// Well-evidenced regardless of headers: GCP's own quota system fronts this transport, so the
-			// same failure classification as google-vertex applies -- see google-vertex-contracts.ts.
-			lastAnthropicVertexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
-		}
-		if (ctx.model?.provider === "google-vertex") {
-			lastGoogleVertexResponse = { status: event.status, ...(header(event.headers, "retry-after") ? { retryAfter: header(event.headers, "retry-after") } : {}) };
-		}
-		if (Object.keys(event.headers).some((name) => name.toLowerCase().startsWith("x-codex-"))) {
-			try {
-				const updates = parseCodexRateLimitHeaders(new Headers(event.headers), Date.now());
-				await recordMetrics(client, updates.flatMap((update) => update.metrics));
-			} catch {
-				if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected Codex telemetry schema drift. ${RECOVERY_GUIDANCE}.`, "error");
-			}
-		}
-		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
+		localRunTelemetry.onProviderResponse();
+		if (ctx.model?.provider === "openai-codex") codexRecoveryCapability.notifyResponse(event.status, event.headers);
+		const notifySchemaDrift = (message: string) => { if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected ${message}. ${RECOVERY_GUIDANCE}.`, "error"); };
+		await providerResponseTelemetry.handleProviderResponse(client, ctx.model?.provider, event.status, event.headers, notifySchemaDrift);
+		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 	});
 
 	pi.on("turn_end", async (event) => {
-		const active = activeLocalRun;
-		activeLocalRun = undefined;
-		const message = event.message as unknown;
-		if (!active || typeof message !== "object" || message === null || Array.isArray(message)) return;
-		const value = message as Record<string, unknown>;
-		if (value["role"] !== "assistant" || typeof value["provider"] !== "string" || typeof value["model"] !== "string") return;
-		const usage = typeof value["usage"] === "object" && value["usage"] !== null ? value["usage"] as Record<string, unknown> : {};
-		const amount = (name: string): number => typeof usage[name] === "number" && Number.isFinite(usage[name]) ? usage[name] as number : 0;
-		const cost = typeof usage["cost"] === "object" && usage["cost"] !== null && typeof (usage["cost"] as Record<string, unknown>)["total"] === "number"
-			? (usage["cost"] as Record<string, number>)["total"] ?? 0 : 0;
-		const stopReason = ["stop", "length", "toolUse", "error", "aborted"].includes(String(value["stopReason"]))
-			? value["stopReason"] as ModelRunObservation["stopReason"] : "unknown";
-		const completedAt = Math.max(Date.now(), active.firstTokenAt ?? active.startedAt, active.startedAt);
-		lastCompletedLocalRun = {
-			runId: active.runId,
-			provider: value["provider"],
-			model: value["model"],
-			thinking: pi.getThinkingLevel(),
-			...classifyTaskFromTools(active.toolNames),
-			startedAt: active.startedAt,
-			firstTokenAt: active.firstTokenAt,
-			completedAt,
-			inputTokens: amount("input"),
-			outputTokens: amount("output"),
-			cacheReadTokens: amount("cacheRead"),
-			cacheWriteTokens: amount("cacheWrite"),
-			costUsd: Number.isFinite(cost) && cost >= 0 ? cost : 0,
-			providerResponses: Math.max(1, active.providerResponses),
-			toolCalls: active.toolCalls,
-			toolFailures: active.toolFailures,
-			stopReason,
-			explicitOutcome: "unknown",
-		};
-		await recordMetrics(client, modelRunMetrics(lastCompletedLocalRun)).catch(() => undefined);
+		const metrics = localRunTelemetry.completeTurn(event.message, pi.getThinkingLevel());
+		await recordMetrics(client, metrics).catch(() => undefined);
 	});
 
-	pi.on("message_end", async (event, _ctx) => {
-		if (event.message.role === "assistant" && event.message.provider === "openai-codex") {
-			if (event.message.stopReason === "error") {
-				const failure = classifyCodexFailure(event.message.errorMessage, lastCodexResponse);
-				if (codexRecovery.isCodexRecoveryEnabled() && failure.transient) recoveryPolicy.observeFailure(failure, recoveryRuntime.now());
-				else cancelRecovery(true);
-			} else if (event.message.stopReason !== "aborted") {
-				cancelRecovery(true);
-			}
-			lastCodexResponse = {};
-		}
-		if (event.message.role === "assistant" && event.message.provider === "google-vertex") {
-			if (event.message.stopReason === "error") {
-				const failure = classifyGoogleVertexFailure(event.message.errorMessage, lastGoogleVertexResponse);
-				await recordMetrics(client, googleVertexFailureMetrics(failure, Date.now())).catch(() => undefined);
-			}
-			lastGoogleVertexResponse = {};
-		}
-		if (event.message.role === "assistant" && event.message.provider === "anthropic-vertex") {
-			if (event.message.stopReason === "error") {
-				const failure = classifyGoogleVertexFailure(event.message.errorMessage, lastAnthropicVertexResponse);
-				await recordMetrics(client, googleVertexFailureMetrics(failure, Date.now(), "anthropic-vertex")).catch(() => undefined);
-			}
-			lastAnthropicVertexResponse = {};
+	pi.on("message_end", async (event, ctx) => {
+		if (event.message.role === "assistant") {
+			if (event.message.provider === "openai-codex") codexRecoveryCapability.notifyMessageEnd(event.message.stopReason, event.message.errorMessage);
+			await providerResponseTelemetry.handleMessageEnd(client, event.message.provider, event.message.stopReason, event.message.errorMessage);
 		}
 		const metrics = assistantUsageMetrics(event.message, Date.now(), focusedTaskId, pi.getThinkingLevel());
 		if (metrics.length > 0) {
@@ -806,7 +624,7 @@ export function registerJittorExtension(
 			compactionTelemetry.observeProviderUsage({ input: amount("input-tokens"), output: amount("output-tokens"), cacheRead: amount("cache-read-tokens"), cacheWrite: amount("cache-write-tokens") });
 			await recordMetrics(client, metrics).catch(() => undefined);
 		}
-		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState).catch(() => undefined);
+		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -815,9 +633,11 @@ export function registerJittorExtension(
 		stopPapyrusContext?.();
 		stopPapyrusTaskFocus?.();
 		cancelRecovery(true);
-		lastCodexResponse = {};
-		activeLocalRun = undefined;
-		lastCompletedLocalRun = undefined;
+		localRunTelemetry.reset();
+		const session_id = ctx.sessionManager.getSessionId();
+		const secret = sessionSecretField(session_id);
+		if (secret.session_secret) await client.call("session.release", { session_id, ...secret }).catch(() => undefined);
+		forgetSessionSecret(session_id);
 		ctx.ui.setStatus("jittor", undefined);
 		ctx.ui.setFooter(undefined);
 	});

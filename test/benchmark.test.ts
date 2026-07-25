@@ -24,6 +24,10 @@ class MemoryMetricStore implements MetricStore {
     return row
   }
 
+  recordBatch(inputs: MetricObservation[]): StoredMetricObservation[] {
+    return inputs.map((input) => this.record(input))
+  }
+
   query(filter: MetricQuery = {}): StoredMetricObservation[] {
     const rows = this.rows.filter((row) =>
       (filter.source === undefined || row.source === filter.source)

@@ -94,6 +94,13 @@ describe("Jittor CLI context telemetry parity", () => {
 			operation: "router.available_routes",
 			input: { routes: [{ provider: "openai", model: "gpt-5.4", thinking: "high" }, { provider: "openrouter", model: "x/y", thinking: "medium" }] },
 		});
+		expect(await runCli(["router", "status", "--session-id", "session-a", "--json"], deps)).toBe(0);
+		expect(calls.at(-1)).toEqual({ operation: "router.status", input: { session_id: "session-a" } });
+		expect(await runCli(["router", "current-route", "--route", "openai/gpt-5.4@high", "--session-id", "session-a", "--json"], deps)).toBe(0);
+		expect(calls.at(-1)).toEqual({
+			operation: "router.current_route",
+			input: { provider: "openai", model: "gpt-5.4", thinking: "high", session_id: "session-a" },
+		});
 	});
 
 	it("never prints the daemon bearer token or a provider credential in status, error, or human output", async () => {

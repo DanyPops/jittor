@@ -20,6 +20,8 @@ export interface UsageAggregateFilter {
 
 export interface MetricStore {
 	record(observation: MetricObservation): StoredMetricObservation;
+	/** Validates and writes every observation in one atomic transaction: either all rows land, or none do -- a single-event RPC loop can otherwise leave a partially-persisted event when a later observation in the same event fails validation or the connection drops mid-loop. */
+	recordBatch(observations: MetricObservation[]): StoredMetricObservation[];
 	query(filter?: MetricQuery): StoredMetricObservation[];
 	/** Bounded distinct scope values for a source within a time window, so callers can fetch a fair share per scope instead of one flat query a single heavy scope could monopolize. */
 	distinctScopes(filter: DistinctScopesFilter): string[];

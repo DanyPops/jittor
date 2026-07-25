@@ -19,6 +19,17 @@ CREATE INDEX metric_observations_time_idx
 	ON metric_observations(observed_at);
 `;
 
+const SESSION_IDENTITY_SCHEMA = `
+CREATE TABLE session_identities (
+	session_id    TEXT PRIMARY KEY,
+	secret_hash   TEXT NOT NULL,
+	registered_at TEXT NOT NULL,
+	last_seen_at  TEXT NOT NULL
+);
+CREATE INDEX session_identities_last_seen_idx
+	ON session_identities(last_seen_at);
+`;
+
 /**
  * Delegates bootstrap (pragmas, migration engine) to `@danypops/daemon-kit/storage`, which
  * generalizes the byte-identical pragma/PRAGMA-user_version skeleton jittor's own db.ts used to
@@ -28,6 +39,9 @@ export function openJittorDb(path: string): Database {
 	return openSqliteWithPragmas(path, {
 		databaseOptions: { create: true, strict: true },
 		busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS,
-		migrations: [{ version: 1, up: (db) => db.exec(INITIAL_SCHEMA) }],
+		migrations: [
+			{ version: 1, up: (db) => db.exec(INITIAL_SCHEMA) },
+			{ version: 2, up: (db) => db.exec(SESSION_IDENTITY_SCHEMA) },
+		],
 	});
 }

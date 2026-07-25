@@ -10,6 +10,11 @@ function decision(overrides: Partial<PolicyDecision> = {}): PolicyDecision {
 	return { action: "continue", pressure: 0.5, reason: "ok", decidedAt: 1000, trace: [], ...overrides };
 }
 
+/** recordMetrics() always batches through metrics.record_batch now, even for a single metric -- flatten every batch call's observations to inspect them the same way tests used to inspect individual metrics.record calls. */
+function recordedMetrics(client: FakeClient): Array<Record<string, unknown>> {
+	return client.calls.filter((call) => call.operation === "metrics.record_batch").flatMap((call) => (call.input as { observations: Record<string, unknown>[] }).observations);
+}
+
 class FakeClient implements JittorExtensionClient {
 	calls: Array<{ operation: string; input: unknown }> = [];
 	decision = decision();
@@ -22,7 +27,8 @@ class FakeClient implements JittorExtensionClient {
 		if (operation === "compaction.estimate") return this.compactionEstimate;
 		if (operation === "router.decide") return this.decisionQueue.shift() ?? this.decision;
 		if (operation === "router.current_route") {
-			this.status = { ...this.status, currentRoute: input as RouterStatus["currentRoute"] };
+			const { provider, model, thinking } = input as { provider: string; model: string; thinking: string };
+			this.status = { ...this.status, currentRoute: { provider, model, thinking } };
 			return this.status;
 		}
 		if (operation === "router.available_routes") {
@@ -32,7 +38,10 @@ class FakeClient implements JittorExtensionClient {
 		if (operation === "router.status") return this.status;
 		if (operation === "metrics.query") return this.metrics;
 		if (operation === "metrics.record") return { id: this.calls.length, ...(input as object) };
+		if (operation === "metrics.record_batch") return (input as { observations: object[] }).observations.map((observation) => ({ id: this.calls.length, ...observation }));
 		if (operation === "models.rank") return { scopeAuthority: "available-models", scopeWarning: "exact session scope unavailable", domain: "coding", type: "general", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
+		if (operation === "session.register") return { sessionId: (input as { session_id: string }).session_id, secret: `secret-for-${(input as { session_id: string }).session_id}` };
+		if (operation === "session.release") return { released: true };
 		return {};
 	}
 }
@@ -164,7 +173,7 @@ describe("Jittor Pi actuator", () => {
 		const signal = new AbortController().signal;
 		await app.handlers.get("session_before_compact")![0]!({ reason: "threshold", willRetry: false, signal }, app.ctx);
 		await app.handlers.get("session_compact")![0]!({ reason: "threshold", willRetry: false }, app.ctx);
-		const recorded = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as { source: string; metric: string; attributes?: Record<string, unknown> });
+		const recorded = recordedMetrics(client) as Array<{ source: string; metric: string; attributes?: Record<string, unknown> }>;
 		expect(recorded.some((metric) => metric.source === "papyrus-context" && metric.metric === "injected-characters")).toBe(true);
 		expect(recorded.some((metric) => metric.source === "pi-context" && metric.metric === "compaction-duration" && metric.attributes?.reason === "threshold")).toBe(true);
 	});
@@ -217,9 +226,9 @@ describe("Jittor Pi actuator", () => {
 				usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
 			} }, app.ctx);
 		};
-		const recordedTaskIds = () => client.calls
-			.filter((call) => call.operation === "metrics.record" && (call.input as any).metric === "cost")
-			.map((call) => ((call.input as any).attributes as Record<string, unknown> | undefined)?.["taskId"]);
+		const recordedTaskIds = () => recordedMetrics(client)
+			.filter((metric) => metric["metric"] === "cost")
+			.map((metric) => (metric["attributes"] as Record<string, unknown> | undefined)?.["taskId"]);
 
 		// Nothing focused yet: no taskId attribute at all (not null, not empty string).
 		await endTurnWithUsage();
@@ -253,7 +262,7 @@ describe("Jittor Pi actuator", () => {
 			role: "assistant", provider: "anthropic", model: "claude-sonnet-5",
 			usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
 		} }, app.ctx);
-		const recorded = client.calls.filter((call) => call.operation === "metrics.record" && (call.input as any).metric === "cost").map((call) => call.input as any);
+		const recorded = recordedMetrics(client).filter((metric) => metric["metric"] === "cost") as any[];
 		expect(recorded[0]?.attributes?.thinking).toBe("high");
 	});
 
@@ -268,11 +277,11 @@ describe("Jittor Pi actuator", () => {
 			role: "assistant", provider: "anthropic", model: "claude-sonnet-5",
 			usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
 		} }, app.ctx);
-		const recorded = client.calls.filter((call) => call.operation === "metrics.record" && (call.input as any).metric === "cost").map((call) => call.input as any);
+		const recorded = recordedMetrics(client).filter((metric) => metric["metric"] === "cost") as any[];
 		expect(recorded[0]?.attributes?.taskId).toBeUndefined();
 	});
 
-	it("derives routes from Pi's current provider and authenticated model catalog without model IDs", () => {
+	it("derives deterministic fallback routes from Pi's full authenticated model catalog", () => {
 		const current = { provider: "provider-a", id: "current-model", reasoning: true, cost: { input: 4, output: 8 } };
 		const routes = routesFromPi([
 			current,
@@ -282,7 +291,18 @@ describe("Jittor Pi actuator", () => {
 		expect(routes[0]).toEqual({ provider: "provider-a", model: "current-model", thinking: "high" });
 		expect(routes.some((route) => route.model === "current-model" && route.thinking === "medium")).toBe(true);
 		expect(routes.some((route) => route.model === "cheaper-model")).toBe(true);
-		expect(new Set(routes.map((route) => route.provider))).toEqual(new Set(["provider-a"]));
+		expect(new Set(routes.map((route) => route.provider))).toEqual(new Set(["provider-a", "provider-b"]));
+		expect(routes.findIndex((route) => route.provider === "provider-b")).toBeGreaterThan(routes.findIndex((route) => route.model === "cheaper-model"));
+	});
+
+	it("allows Codex, OpenRouter, Anthropic, and Vertex when the daemon returns an intentional continue decision", async () => {
+		for (const provider of ["openai-codex", "openrouter", "anthropic", "google-vertex"]) {
+			const client = new FakeClient();
+			client.decision = decision({ reason: provider === "openai-codex" ? "budget sustainable" : "provider has no enforceable budget window; monitor-only" });
+			const app = harness(client, undefined, undefined, { provider, id: `${provider}-model` });
+			expect(await app.handlers.get("input")![0]!({ source: "interactive", text: "go" }, app.ctx)).toEqual({ action: "continue" });
+			expect(app.aborted()).toBe(false);
+		}
 	});
 
 	it("blocks input before a forbidden provider request with actionable recovery guidance", async () => {
@@ -403,6 +423,34 @@ describe("Jittor Pi actuator", () => {
 		expect(enabled).toBe(false);
 	});
 
+	it("scopes every daemon-backed router read and mutation to the active Pi session", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+
+		await app.handlers.get("session_start")![0]!({}, app.ctx);
+		await app.handlers.get("input")![0]!({ source: "interactive", text: "work" }, app.ctx);
+
+		const routerCalls = client.calls.filter((call) => call.operation.startsWith("router."));
+		expect(routerCalls.map((call) => call.operation)).toEqual(expect.arrayContaining([
+			"router.current_route", "router.available_routes", "router.status", "router.decide",
+		]));
+		expect(routerCalls.every((call) => (call.input as Record<string, unknown>).session_id === "test-session")).toBe(true);
+	});
+
+	it("registers this Pi session's identity at session_start, forwards its secret on router mutations, and releases it at shutdown", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+
+		await app.handlers.get("session_start")![0]!({}, app.ctx);
+		expect(client.calls).toContainEqual({ operation: "session.register", input: { session_id: "test-session" } });
+		const mutations = client.calls.filter((call) => call.operation === "router.current_route" || call.operation === "router.available_routes");
+		expect(mutations.length).toBeGreaterThan(0);
+		expect(mutations.every((call) => (call.input as Record<string, unknown>).session_secret === "secret-for-test-session")).toBe(true);
+
+		await app.handlers.get("session_shutdown")![0]!({}, app.ctx);
+		expect(client.calls).toContainEqual({ operation: "session.release", input: { session_id: "test-session", session_secret: "secret-for-test-session" } });
+	});
+
 	it("resynchronizes the route and footer after a daemon restart while monitor-only", async () => {
 		const client = new FakeClient();
 		const enforcement: EnforcementControl = {
@@ -434,6 +482,18 @@ describe("Jittor Pi actuator", () => {
 		expect(app.aborted()).toBe(false);
 	});
 
+	it("applies a cross-provider fallback selected from Pi's authenticated routes", async () => {
+		const client = new FakeClient();
+		client.decision = decision({
+			action: "switch-provider",
+			route: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "off" },
+		});
+		const app = harness(client);
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		expect(app.modelChanges).toEqual([{ provider: "openrouter", id: "openai/gpt-4.1-mini" }]);
+		expect(app.aborted()).toBe(false);
+	});
+
 	it("resynchronizes stale unavailable routes and applies a valid fallback", async () => {
 		const client = new FakeClient();
 		client.decisionQueue = [
@@ -461,7 +521,7 @@ describe("Jittor Pi actuator", () => {
 			usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 0, cost: { total: 0.004 } },
 		}, toolResults: [{ content: "private tool output" }] }, app.ctx);
 		await app.commands.get("jittor").handler("outcome accepted", app.ctx);
-		const local = client.calls.filter((call) => call.operation === "metrics.record" && (call.input as any).source === "local-model").map((call) => call.input as any);
+		const local = recordedMetrics(client).filter((metric) => metric["source"] === "local-model") as any[];
 		expect(local.map((metric) => metric.metric)).toContain("ttft");
 		expect(local.map((metric) => metric.metric)).toContain("tool-calls");
 		expect(local.some((metric) => metric.metric === "outcome-accepted" && metric.value === 1)).toBe(true);
@@ -479,21 +539,24 @@ describe("Jittor Pi actuator", () => {
 			role: "assistant", provider: "openrouter", model: "openai/gpt-4.1-mini",
 			usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 0, cost: { total: 0.004 } },
 		} }, app.ctx);
-		const records = client.calls.filter((call) => call.operation === "metrics.record");
-		expect(records.some((call) => (call.input as any).source === "codex-subscription")).toBe(true);
-		expect(records.some((call) => (call.input as any).metric === "cost" && (call.input as any).value === 0.004)).toBe(true);
+		const records = recordedMetrics(client);
+		expect(records.some((record) => record["source"] === "codex-subscription")).toBe(true);
+		expect(records.some((record) => record["metric"] === "cost" && record["value"] === 0.004)).toBe(true);
 	});
 
-	it("records official Anthropic rate-limit response headers only for the active Anthropic route", async () => {
+	it("records and reloads official Anthropic rate-limit response headers for the active route", async () => {
 		const client = new FakeClient();
 		const app = harness(client, undefined, undefined, { provider: "anthropic", id: "claude-sonnet-5" });
+		await app.handlers.get("session_start")![0]!({}, app.ctx);
+		client.calls.length = 0;
 		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {
 			"anthropic-ratelimit-tokens-limit": "2000000",
 			"anthropic-ratelimit-tokens-remaining": "1500000",
 			"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
 		} }, app.ctx);
-		const records = client.calls.filter((call) => call.operation === "metrics.record");
-		expect(records.some((call) => (call.input as any).source === "anthropic" && (call.input as any).scope === "tokens" && (call.input as any).metric === "used-fraction" && (call.input as any).value === 0.25)).toBe(true);
+		const records = recordedMetrics(client);
+		expect(records.some((record) => record["source"] === "anthropic" && record["scope"] === "tokens" && record["metric"] === "used-fraction" && record["value"] === 0.25)).toBe(true);
+		expect(client.calls).toContainEqual({ operation: "metrics.query", input: { source: "anthropic", metric: "used-fraction", limit: 20, order: "desc" } });
 	});
 
 	it("notifies instead of silently dropping telemetry on Anthropic header schema drift", async () => {
@@ -501,7 +564,7 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client, undefined, undefined, { provider: "anthropic", id: "claude-sonnet-5" });
 		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: { "anthropic-ratelimit-requests-limit": "not-a-number" } }, app.ctx);
 		expect(app.notifications.at(-1)).toContain("Anthropic telemetry schema drift");
-		expect(client.calls.some((call) => call.operation === "metrics.record" && (call.input as any).source === "anthropic")).toBe(false);
+		expect(recordedMetrics(client).some((metric) => metric["source"] === "anthropic")).toBe(false);
 	});
 
 	it("classifies a failed Google Vertex response as a bounded failure-count metric, never a fabricated budget", async () => {
@@ -511,7 +574,7 @@ describe("Jittor Pi actuator", () => {
 		await app.handlers.get("message_end")![0]!({ message: {
 			role: "assistant", provider: "google-vertex", stopReason: "error", errorMessage: "429 RESOURCE_EXHAUSTED. Quota exceeded",
 		} }, app.ctx);
-		const records = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as any);
+		const records = recordedMetrics(client) as any[];
 		expect(records).toContainEqual(expect.objectContaining({ source: "google-vertex", scope: "failure", metric: "quota", value: 1, unit: "count" }));
 		expect(records.some((record) => record.unit === "ratio")).toBe(false);
 		expect(JSON.stringify(records)).not.toContain("Quota exceeded");
@@ -528,22 +591,25 @@ describe("Jittor Pi actuator", () => {
 			role: "assistant", provider: "anthropic-vertex", stopReason: "error",
 			errorMessage: "429 - Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model",
 		} }, app.ctx);
-		const records = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as any);
+		const records = recordedMetrics(client) as any[];
 		expect(records).toContainEqual(expect.objectContaining({ source: "anthropic-vertex", scope: "failure", metric: "quota", value: 1, unit: "count" }));
 		expect(records.some((record) => record.source === "google-vertex")).toBe(false);
 	});
 
-	it("tags Anthropic-style rate-limit headers on anthropic-vertex distinctly from direct Anthropic, best-effort, if they are ever observed", async () => {
+	it("records and reloads Anthropic-style rate-limit headers on anthropic-vertex under its distinct source", async () => {
 		const client = new FakeClient();
 		const app = harness(client, undefined, undefined, { provider: "anthropic-vertex", id: "claude-sonnet-5" });
+		await app.handlers.get("session_start")![0]!({}, app.ctx);
+		client.calls.length = 0;
 		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {
 			"anthropic-ratelimit-tokens-limit": "2000000",
 			"anthropic-ratelimit-tokens-remaining": "800000",
 			"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
 		} }, app.ctx);
-		const records = client.calls.filter((call) => call.operation === "metrics.record").map((call) => call.input as any);
+		const records = recordedMetrics(client) as any[];
 		expect(records).toContainEqual(expect.objectContaining({ source: "anthropic-vertex", scope: "tokens", metric: "used-fraction", value: 0.6 }));
 		expect(records.some((record) => record.source === "anthropic")).toBe(false);
+		expect(client.calls).toContainEqual({ operation: "metrics.query", input: { source: "anthropic-vertex", metric: "used-fraction", limit: 20, order: "desc" } });
 	});
 
 	it("notifies instead of silently dropping telemetry on anthropic-vertex header schema drift", async () => {
@@ -551,7 +617,7 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client, undefined, undefined, { provider: "anthropic-vertex", id: "claude-sonnet-5" });
 		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: { "anthropic-ratelimit-requests-limit": "not-a-number" } }, app.ctx);
 		expect(app.notifications.at(-1)).toContain("Anthropic-on-Vertex telemetry schema drift");
-		expect(client.calls.some((call) => call.operation === "metrics.record" && (call.input as any).source === "anthropic-vertex")).toBe(false);
+		expect(recordedMetrics(client).some((metric) => metric["source"] === "anthropic-vertex")).toBe(false);
 	});
 });
 

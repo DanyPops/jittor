@@ -34,7 +34,17 @@ export class SQLiteMetricStore implements MetricStore {
 
 	record(input: MetricObservation): StoredMetricObservation {
 		const observation = validateMetricObservation(input);
-		const result = this.db.query(`
+		const result = this.insert(observation);
+		return this.get(Number(result.lastInsertRowid));
+	}
+
+	recordBatch(inputs: MetricObservation[]): StoredMetricObservation[] {
+		const observations = inputs.map((input) => validateMetricObservation(input));
+		return this.db.transaction((rows: typeof observations) => rows.map((observation) => this.get(Number(this.insert(observation).lastInsertRowid))))(observations);
+	}
+
+	private insert(observation: MetricObservation): { lastInsertRowid: number | bigint } {
+		return this.db.query(`
 			INSERT INTO metric_observations (source, scope, metric, value, unit, observed_at, attributes)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 		`).run(
@@ -46,7 +56,6 @@ export class SQLiteMetricStore implements MetricStore {
 			observation.observedAt,
 			JSON.stringify(observation.attributes ?? {}),
 		);
-		return this.get(Number(result.lastInsertRowid));
 	}
 
 	query(filter: MetricQuery = {}): StoredMetricObservation[] {

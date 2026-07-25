@@ -51,6 +51,16 @@ describe("Jittor integrated footer", () => {
 		expect(lines[0]).not.toMatch(/\b(?:Repo|AI|LLM|Jittor)\b/);
 	});
 
+	it("computes cache hit from the same cumulative usage as the token totals", () => {
+		const aggregate = context();
+		aggregate.sessionManager.getEntries = () => [
+			{ type: "message", message: { role: "assistant", usage: { input: 100, output: 0, cacheRead: 100, cacheWrite: 0, cost: { total: 0 } } } },
+			{ type: "message", message: { role: "assistant", usage: { input: 900, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } },
+		];
+		const line = renderFooterLines(aggregate, footerData, theme, weekly, "high", 220, 2_000)[0]!;
+		expect(line).toContain("↑1.0k R100 CH9.1%");
+	});
+
 	it("keeps context filling while the bounded provider budget drains", () => {
 		const empty = renderFooterLines(context(75, 150_000), footerData, theme, { ...weekly, remainingFraction: 0.1 }, "high", 180, 2_000)[0]!;
 		const full = renderFooterLines(context(25, 50_000), footerData, theme, { ...weekly, remainingFraction: 1 }, "high", 180, 2_000)[0]!;
@@ -93,15 +103,14 @@ describe("Jittor integrated footer", () => {
 		expect(lines[0]).not.toContain("150k/200k");
 	});
 
-	it("drains against a learned duration estimate and shows only a countdown, in sync with the drain, once one is available", () => {
-		const lines = renderFooterLines(
-			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
-			{ startedAt: 2_000, initialFraction: 0.75, estimatedMs: 12_000, confidence: "learned" },
-		);
-		// elapsed 6s of a 12s estimate => half drained => fraction 0.5 over an 8-wide bar => 4 filled, on-phase only,
-		// and the countdown (~6s left) reflects the exact same elapsed/estimatedMs ratio as the bar.
-		expect(lines[0]).toMatch(/ctx [█░]{8} compact ~6s left/);
-		expect(lines[0]).not.toContain("estimating");
+	it("drains a learned compaction from its captured fill without rendering a timer", () => {
+		const progress = { startedAt: 2_000, initialFraction: 0.75, estimatedMs: 12_000, confidence: "learned" as const };
+		const initial = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 2_000, progress)[0]!;
+		const halfway = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000, progress)[0]!;
+		expect(initial).toMatch(/ctx ██████░░/);
+		expect(halfway).toMatch(/ctx ███░░░░░/);
+		expect(halfway).not.toContain("compact");
+		expect(halfway).not.toMatch(/\d+s left/);
 	});
 
 	it("blinks the bar without draining it while there is no learned estimate to drain against", () => {

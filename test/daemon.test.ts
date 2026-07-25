@@ -77,6 +77,15 @@ describe("Jittor daemon state", () => {
 		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "openrouter-design-arena"]);
 		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", ARTIFICIAL_ANALYSIS_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "artificial-analysis-direct"]);
 		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret", ARTIFICIAL_ANALYSIS_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "openrouter-design-arena", "artificial-analysis-direct"]);
+		const anthropicVertex = telemetrySourcesFromEnvironment({
+			JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION: "projects/p/subscriptions/s",
+			JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE: "anthropic-vertex",
+		});
+		expect(anthropicVertex.map((source) => source.provider)).toEqual(["anthropic-vertex"]);
+		expect(() => telemetrySourcesFromEnvironment({
+			JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION: "projects/p/subscriptions/s",
+			JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE: "other-provider",
+		})).toThrow("JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE must be google-vertex or anthropic-vertex");
 	});
 
 	it("starting with a configured (but unreachable) telemetry source never crashes or hangs the daemon", async () => {
@@ -114,6 +123,9 @@ describe("Jittor daemon state", () => {
 				source: "jittor", scope: "daemon", metric: "requests", value: 1, unit: "count", observedAt: 1000,
 			});
 			expect(await client.call("metrics.query", { source: "jittor" })).toHaveLength(1);
+		const { secret } = await client.call("session.register", { session_id: "session-a" });
+		await expect(client.call("router.pause", { session_id: "session-a" })).rejects.toThrow();
+		expect(await client.call("router.pause", { session_id: "session-a", session_secret: secret })).toMatchObject({ paused: true });
 		} finally {
 			await daemon.stop();
 		}

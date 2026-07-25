@@ -79,7 +79,7 @@ export class OpenRouterTelemetrySource implements TelemetrySource {
  */
 export class GoogleVertexBudgetTelemetrySource implements TelemetrySource {
 	readonly id: string;
-	readonly provider = "google-vertex";
+	readonly provider: GoogleVertexMetricSource;
 	readonly required = false;
 
 	private readonly adapter: GoogleVertexBudgetTelemetryAdapter;
@@ -92,6 +92,7 @@ export class GoogleVertexBudgetTelemetrySource implements TelemetrySource {
 		source: GoogleVertexMetricSource = "google-vertex",
 	) {
 		this.id = `google-vertex-budget:${source}`;
+		this.provider = source;
 		this.adapter = new GoogleVertexBudgetTelemetryAdapter(subscription, tokenProvider, transport, source);
 	}
 

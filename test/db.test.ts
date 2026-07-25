@@ -22,7 +22,7 @@ describe("SQLite metric store", () => {
 	it("migrates an indexed WAL time-series schema", () => {
 		const { db } = fixture();
 		expect((db.query("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");
-		expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(1);
+		expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
 		const indexes = db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'metric_observations'").all() as Array<{ name: string }>;
 		expect(indexes.map((row) => row.name)).toContain("metric_observations_series_time_idx");
 	});
@@ -42,6 +42,25 @@ describe("SQLite metric store", () => {
 		expect(observations.map((observation) => observation.value)).toEqual([0.1, 0.2]);
 		expect(observations[0]?.attributes).toEqual({ model: "openai/gpt-4.1-mini" });
 		expect(observations.every((observation) => typeof observation.id === "number")).toBe(true);
+	});
+
+	it("records a whole batch as one committed unit", () => {
+		const { store } = fixture();
+		const stored = store.recordBatch([
+			{ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 100, unit: "tokens", observedAt: 1_000 },
+			{ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "output-tokens", value: 20, unit: "tokens", observedAt: 1_000 },
+		]);
+		expect(stored.map((row) => row.metric)).toEqual(["input-tokens", "output-tokens"]);
+		expect(store.query({ source: "pi" })).toHaveLength(2);
+	});
+
+	it("rolls back the entire batch when one observation fails validation, leaving no partial write", () => {
+		const { store } = fixture();
+		expect(() => store.recordBatch([
+			{ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 100, unit: "tokens", observedAt: 1_000 },
+			{ source: "pi", scope: "openai-codex:gpt-5.6-sol", metric: "output-tokens", value: 20, unit: "tokens" as never, observedAt: -1 },
+		])).toThrow();
+		expect(store.query({ source: "pi" })).toHaveLength(0);
 	});
 
 	it("finds distinct scopes for a source within a time window, bounded and alphabetically ordered", () => {
