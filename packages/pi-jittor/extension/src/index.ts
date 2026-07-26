@@ -5,15 +5,25 @@ import {
 	PAPYRUS_CONTEXT_INJECTION_CHANNEL,
 	PAPYRUS_TASK_FOCUS_CHANNEL,
 	CONTEXT_EVENT_DEDUP_LIMIT,
-} from "../../src/constants.ts";
-import { CompactionTelemetry, papyrusContextMetric, validatePapyrusContextInjection } from "../../src/domain/context-telemetry.ts";
-import { applyTaskFocusEvent, validateTaskFocusEvent } from "../../src/domain/task-focus.ts";
-import type { MetricObservation, StoredMetricObservation } from "../../src/domain/metric.ts";
-import { TASK_DOMAINS, TASK_TYPES, type ModelTaskDomain, type ModelTaskType } from "../../src/domain/model-observation.ts";
-import type { ModelCandidate } from "../../src/domain/model-ranking.ts";
-import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
-import type { PolicyDecision, Route } from "../../src/policy.ts";
-import type { RouterStatus } from "../../src/ports/router-controller.ts";
+	CompactionTelemetry,
+	papyrusContextMetric,
+	validatePapyrusContextInjection,
+	applyTaskFocusEvent,
+	validateTaskFocusEvent,
+	TASK_DOMAINS,
+	TASK_TYPES,
+	USAGE_PERIODS,
+	type ContextAssessment,
+	type MetricObservation,
+	type ModelCandidate,
+	type ModelTaskDomain,
+	type ModelTaskType,
+	type PolicyDecision,
+	type Route,
+	type RouterStatus,
+	type StoredMetricObservation,
+	type UsagePeriod,
+} from "@danypops/jittor";
 import { showBenchmarkPanel } from "./benchmark-tui.ts";
 import { installIntegratedFooter, type CompactionProgress, type IntegratedFooterState } from "./footer.ts";
 import { callJittor } from "./service-client.ts";
@@ -427,7 +437,7 @@ export function registerJittorExtension(
 				return;
 			}
 			if (action === "context") {
-				const summary = await client.call("context.assess", {}) as import("../../src/domain/context-telemetry.ts").ContextAssessment;
+				const summary = await client.call("context.assess", {}) as ContextAssessment;
 				const average = summary.injection.averageCharacters === null ? "unknown" : Math.round(summary.injection.averageCharacters).toLocaleString();
 				const p95 = summary.injection.p95Characters === null ? "unknown" : Math.round(summary.injection.p95Characters).toLocaleString();
 				ctx.ui.notify([

@@ -3,8 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { formatFooterStatus, registerJittorExtension, routesFromPi, type CodexRecoveryRuntime, type JittorExtensionClient } from "../extension/src/index.ts";
 import { buildFooterBudget } from "../extension/src/tui.ts";
 import type { EnforcementControl } from "../extension/src/settings.ts";
-import type { PolicyDecision } from "../src/policy.ts";
-import type { RouterStatus } from "../src/ports/router-controller.ts";
+import type { PolicyDecision, RouterStatus } from "@danypops/jittor";
 
 function decision(overrides: Partial<PolicyDecision> = {}): PolicyDecision {
 	return { action: "continue", pressure: 0.5, reason: "ok", decidedAt: 1000, trace: [], ...overrides };

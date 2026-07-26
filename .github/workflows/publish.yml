@@ -1,9 +1,10 @@
-name: Publish Package
+name: Publish packages
 
 on:
   push:
     tags:
-      - "v*"
+      - "jittor-v*"
+      - "pi-jittor-v*"
 
 permissions:
   id-token: write
@@ -14,16 +15,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - id: package
+        name: Match tag to package version
+        shell: bash
+        run: |
+          case "$GITHUB_REF_NAME" in
+            jittor-v*)
+              package_dir="packages/jittor"
+              tag_version="${GITHUB_REF_NAME#jittor-v}"
+              ;;
+            pi-jittor-v*)
+              package_dir="packages/pi-jittor"
+              tag_version="${GITHUB_REF_NAME#pi-jittor-v}"
+              ;;
+            *)
+              echo "Unsupported release tag: $GITHUB_REF_NAME" >&2
+              exit 1
+              ;;
+          esac
+          package_version="$(node -p "require('./$package_dir/package.json').version")"
+          if [[ "$tag_version" != "$package_version" ]]; then
+            echo "Tag version $tag_version does not match $package_dir version $package_version" >&2
+            exit 1
+          fi
+          echo "dir=$package_dir" >> "$GITHUB_OUTPUT"
+
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: bun test
-      - run: bun x tsc --noEmit
+      - run: bun run typecheck
+
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
           package-manager-cache: false
+
       - run: npm install -g npm@latest
+
       - id: registry
+        working-directory: ${{ steps.package.outputs.dir }}
         shell: bash
         run: |
           name="$(node -p "require('./package.json').name")"
@@ -33,5 +64,7 @@ jobs:
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
+
       - if: steps.registry.outputs.published != 'true'
-        run: npm publish --access public
+        working-directory: ${{ steps.package.outputs.dir }}
+        run: npm publish --access public --provenance

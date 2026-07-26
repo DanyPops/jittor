@@ -1,7 +1,12 @@
-import type { MetricObservation } from "../../../src/domain/metric.ts";
-import { hasAnthropicRateLimitHeaders, parseAnthropicRateLimitHeaders } from "../../../src/providers/anthropic-contracts.ts";
-import { parseCodexRateLimitHeaders } from "../../../src/providers/codex.ts";
-import { classifyGoogleVertexFailure, googleVertexFailureMetrics, type GoogleVertexFailureMetadata } from "../../../src/providers/google-vertex-contracts.ts";
+import {
+	classifyGoogleVertexFailure,
+	googleVertexFailureMetrics,
+	hasAnthropicRateLimitHeaders,
+	parseAnthropicRateLimitHeaders,
+	parseCodexRateLimitHeaders,
+	type GoogleVertexFailureMetadata,
+	type MetricObservation,
+} from "@danypops/jittor";
 import { headerValue } from "./http-headers.ts";
 
 export interface ProviderTelemetryClient {

@@ -1,0 +1,34 @@
+{
+  "name": "@danypops/jittor",
+  "version": "0.11.0",
+  "description": "Just-in-Time Token Optimizing Router for Pi -- supervised daemon, router policy, and CLI",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "keywords": ["pi-package", "llm-router", "token-budget"],
+  "bin": {
+    "jittor": "src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "serve": "bun src/cli.ts serve",
+    "service:install": "bun src/cli.ts service install"
+  },
+  "dependencies": {
+    "@danypops/daemon-kit": "^0.3.1",
+    "google-auth-library": "^10.9.0"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanyPops/jittor.git",
+    "directory": "packages/jittor"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": ["src", "docs", "README.md"]
+}

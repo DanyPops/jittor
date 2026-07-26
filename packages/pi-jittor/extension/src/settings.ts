@@ -1,7 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { JITTOR_EXTENSION_SETTINGS_FILENAME, JITTOR_STATE_DIRECTORY } from "../../src/constants.ts";
-import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
+import { JITTOR_EXTENSION_SETTINGS_FILENAME, JITTOR_STATE_DIRECTORY, USAGE_PERIODS, type UsagePeriod } from "@danypops/jittor";
 
 export interface EnforcementControl {
 	isEnabled(): boolean;

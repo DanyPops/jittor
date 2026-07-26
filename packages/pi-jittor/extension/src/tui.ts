@@ -1,9 +1,14 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { HUMAN_STATUS_MAX_SOURCES, HUMAN_TEXT_FIELD_MAX_CHARACTERS } from "../../src/constants.ts";
-import type { MetricQuery, StoredMetricObservation } from "../../src/domain/metric.ts";
-import type { PolicyAction, Route } from "../../src/policy.ts";
-import type { RouterStatus } from "../../src/ports/router-controller.ts";
+import {
+	HUMAN_STATUS_MAX_SOURCES,
+	HUMAN_TEXT_FIELD_MAX_CHARACTERS,
+	type MetricQuery,
+	type PolicyAction,
+	type Route,
+	type RouterStatus,
+	type StoredMetricObservation,
+} from "@danypops/jittor";
 import type { ProviderBudget } from "./footer.ts";
 import { sessionSecretField } from "./session-identity.ts";
 

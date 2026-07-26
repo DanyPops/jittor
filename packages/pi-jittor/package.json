@@ -1,0 +1,34 @@
+{
+  "name": "@danypops/pi-jittor",
+  "version": "0.1.0",
+  "description": "Pi extension for Jittor: native routing enforcement, footer, settings, usage graphs, and benchmark panels backed by the @danypops/jittor daemon",
+  "type": "module",
+  "keywords": ["pi-package", "llm-router", "token-budget"],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": ["extension/src/index.ts"]
+  },
+  "dependencies": {
+    "@danypops/jittor": "^0.11.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanyPops/jittor.git",
+    "directory": "packages/pi-jittor"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": ["extension", "docs", "README.md"]
+}

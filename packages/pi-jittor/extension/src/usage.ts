@@ -1,7 +1,11 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { HUMAN_TEXT_FIELD_MAX_CHARACTERS, USAGE_CHART_HEIGHT, USAGE_MAX_DISTINCT_SCOPES, USAGE_RENDER_MAX_SERIES, USAGE_Y_AXIS_WIDTH } from "../../src/constants.ts";
 import {
+	HUMAN_TEXT_FIELD_MAX_CHARACTERS,
+	USAGE_CHART_HEIGHT,
+	USAGE_MAX_DISTINCT_SCOPES,
+	USAGE_RENDER_MAX_SERIES,
+	USAGE_Y_AXIS_WIDTH,
 	buildCostGraph,
 	buildUsageGraph,
 	resolveUsageWindow,
@@ -11,7 +15,7 @@ import {
 	type UsageAggregateRow,
 	type UsageGraph,
 	type UsagePeriod,
-} from "../../src/domain/usage.ts";
+} from "@danypops/jittor";
 import type { UsageBudgetControl } from "./settings.ts";
 import type { JittorPanelClient } from "./tui.ts";
 

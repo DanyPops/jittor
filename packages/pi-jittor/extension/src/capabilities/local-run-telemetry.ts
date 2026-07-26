@@ -1,5 +1,4 @@
-import { classifyTaskFromTools, modelRunMetrics, type ModelRunObservation } from "../../../src/domain/model-observation.ts";
-import type { MetricObservation } from "../../../src/domain/metric.ts";
+import { classifyTaskFromTools, modelRunMetrics, type MetricObservation, type ModelRunObservation } from "@danypops/jittor";
 
 export interface ActiveLocalModelRun {
 	runId: string;

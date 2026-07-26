@@ -8,9 +8,13 @@ import {
 	MODEL_RANKING_DEFAULT_LATENCY_WEIGHT,
 	MODEL_RANKING_DEFAULT_QUALITY_WEIGHT,
 	MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
-} from "../../src/constants.ts";
-import type { ModelTaskDomain, ModelTaskType } from "../../src/domain/model-observation.ts";
-import type { ModelCandidate, ModelRankingResult, RankedModel, UtilityComponentName } from "../../src/domain/model-ranking.ts";
+	type ModelCandidate,
+	type ModelRankingResult,
+	type ModelTaskDomain,
+	type ModelTaskType,
+	type RankedModel,
+	type UtilityComponentName,
+} from "@danypops/jittor";
 import { sessionSecretField } from "./session-identity.ts";
 
 export interface BenchmarkPanelClient {

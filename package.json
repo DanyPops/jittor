@@ -1,37 +1,26 @@
 {
-  "name": "@danypops/jittor",
-  "version": "0.11.0",
-  "description": "Just-in-Time Token Optimizing Router for Pi",
+  "name": "jittor-workspace",
+  "private": true,
   "type": "module",
-  "keywords": ["pi-package", "llm-router", "token-budget"],
-  "bin": {
-    "jittor": "src/cli.ts"
-  },
+  "workspaces": ["packages/*"],
+  "keywords": ["pi-package"],
   "scripts": {
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "serve": "bun src/cli.ts serve",
-    "service:install": "bun src/cli.ts service install",
+    "test": "bun run --filter '*' test",
+    "typecheck": "bun run --filter '*' typecheck",
+    "serve": "bun --cwd packages/jittor src/cli.ts serve",
+    "service:install": "bun --cwd packages/jittor src/cli.ts service install",
     "guard:install": "git config core.hooksPath .githooks"
   },
   "pi": {
-    "extensions": ["extension/src/index.ts"]
+    "extensions": ["packages/pi-jittor/extension/src/index.ts"]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
-  "dependencies": {
-    "@danypops/daemon-kit": "^0.3.1",
-    "google-auth-library": "^10.9.0"
-  },
-  "devDependencies": {
-    "bun-types": "latest"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/DanyPops/jittor.git"
-  },
-  "files": ["src", "extension", "docs", "README.md"]
+  }
 }

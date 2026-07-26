@@ -13,7 +13,7 @@ import {
 	MILLISECONDS_PER_HOUR,
 	MILLISECONDS_PER_MINUTE,
 	TELEMETRY_STALE_AFTER_MS,
-} from "../../src/constants.ts";
+} from "@danypops/jittor";
 
 type FooterColor = "accent" | "dim" | "warning" | "error";
 

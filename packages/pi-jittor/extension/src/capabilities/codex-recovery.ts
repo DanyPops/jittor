@@ -7,8 +7,11 @@ import {
 	CODEX_RECOVERY_MAX_DELAY_MS,
 	MILLISECONDS_PER_MINUTE,
 	MILLISECONDS_PER_SECOND,
-} from "../../../src/constants.ts";
-import { CodexRecoveryPolicy, classifyCodexFailure, type CodexFailureKind, type CodexFailureMetadata } from "../../../src/domain/codex-recovery.ts";
+	CodexRecoveryPolicy,
+	classifyCodexFailure,
+	type CodexFailureKind,
+	type CodexFailureMetadata,
+} from "@danypops/jittor";
 import type { CodexRecoveryControl } from "../settings.ts";
 import { headerValue } from "./http-headers.ts";
 

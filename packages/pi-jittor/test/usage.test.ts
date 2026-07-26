@@ -9,7 +9,7 @@ import {
 	type UsageAggregateRow,
 	type UsageBucketWindow,
 	type UsageGraph,
-} from "../src/domain/usage.ts";
+} from "@danypops/jittor";
 import { renderCostGraph, renderUsageGraph, showUsagePanel } from "../extension/src/usage.ts";
 import { registerJittorExtension } from "../extension/src/index.ts";
 

@@ -1,6 +1,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { USAGE_PERIODS, type UsagePeriod } from "../../src/domain/usage.ts";
+import { USAGE_PERIODS, type UsagePeriod } from "@danypops/jittor";
 import type { CodexRecoveryControl, EnforcementControl, UsageBudgetControl } from "./settings.ts";
 
 export interface SettingsSnapshot {

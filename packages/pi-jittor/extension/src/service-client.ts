@@ -1,5 +1,4 @@
-import { connectJittorClient } from "../../src/client.ts";
-import type { OperationInputs, OperationName, OperationOutputs } from "../../src/service.ts";
+import { connectJittorClient, type OperationInputs, type OperationName, type OperationOutputs } from "@danypops/jittor";
 
 let cached = connectJittorClient;
 let client: ReturnType<typeof connectJittorClient> | undefined;

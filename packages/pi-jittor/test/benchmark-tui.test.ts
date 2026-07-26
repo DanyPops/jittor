@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { visibleWidth } from "@earendil-works/pi-tui"
-import { BENCHMARK_TUI_MAX_CANDIDATES } from "../src/constants.ts"
-import type { ModelRankingResult } from "../src/domain/model-ranking.ts"
+import { BENCHMARK_TUI_MAX_CANDIDATES, type ModelRankingResult } from "@danypops/jittor"
 import { renderBenchmarkView, showBenchmarkPanel } from "../extension/src/benchmark-tui.ts"
 
 function ranking(count = 2): ModelRankingResult {
