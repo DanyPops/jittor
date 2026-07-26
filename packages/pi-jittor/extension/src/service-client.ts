@@ -1,25 +1,28 @@
-import { connectJittorClient, type OperationInputs, type OperationName, type OperationOutputs } from "@danypops/jittor";
+import { createRetryingClient, type RetryingClient } from "@danypops/daemon-kit/pi-client";
+import { connectJittorClient, type JittorClient, type OperationInputs, type OperationName, type OperationOutputs } from "@danypops/jittor";
 
-let cached = connectJittorClient;
-let client: ReturnType<typeof connectJittorClient> | undefined;
+type JittorConnector = () => Promise<JittorClient>;
+
+function defaultConnector(): Promise<JittorClient> {
+	return Promise.resolve(connectJittorClient());
+}
+
+let connector: JittorConnector = defaultConnector;
+let retrying: RetryingClient<JittorClient> = createRetryingClient(() => connector(), { label: "Jittor" });
 
 export async function callJittor<Name extends OperationName>(
 	operation: Name,
 	input: OperationInputs[Name],
 ): Promise<OperationOutputs[Name]> {
-	for (let attempt = 0; attempt < 2; attempt++) {
-		try {
-			client ??= cached();
-			return await client.call(operation, input);
-		} catch (error) {
-			client = undefined;
-			if (attempt === 1) throw error;
-		}
-	}
-	throw new Error("Jittor client retry exhausted");
+	return retrying.call((client) => client.call(operation, input));
+}
+
+export function setJittorClientConnectorForTests(value: JittorConnector): void {
+	connector = value;
+	retrying = createRetryingClient(() => connector(), { label: "Jittor" });
 }
 
 export function resetJittorClientForTests(): void {
-	client = undefined;
-	cached = connectJittorClient;
+	connector = defaultConnector;
+	retrying = createRetryingClient(() => connector(), { label: "Jittor" });
 }

@@ -12,12 +12,12 @@
     },
     "packages/jittor": {
       "name": "@danypops/jittor",
-      "version": "0.11.0",
+      "version": "0.12.0",
       "bin": {
         "jittor": "src/cli.ts",
       },
       "dependencies": {
-        "@danypops/daemon-kit": "^0.3.1",
+        "@danypops/daemon-kit": "^0.4.0",
         "google-auth-library": "^10.9.0",
       },
       "devDependencies": {
@@ -28,7 +28,8 @@
       "name": "@danypops/pi-jittor",
       "version": "0.1.0",
       "dependencies": {
-        "@danypops/jittor": "^0.11.0",
+        "@danypops/daemon-kit": "^0.4.0",
+        "@danypops/jittor": "^0.12.0",
       },
       "devDependencies": {
         "bun-types": "latest",
@@ -93,7 +94,7 @@
 
     "@babel/runtime": ["@babel/runtime@7.29.7", "", {}, "sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw=="],
 
-    "@danypops/daemon-kit": ["@danypops/daemon-kit@0.3.2", "", { "dependencies": { "pino": "^10.3.1" }, "peerDependencies": { "typescript": "^5" } }, "sha512-M9/XJ/rzxpaYcf8RwSURpRifezx4CLBYW4wmmJgEL7Bigu8RRw+SQ9gmW8HvL+7hch43AVIFmMpV5FlBaMMOsQ=="],
+    "@danypops/daemon-kit": ["@danypops/daemon-kit@0.4.0", "", { "dependencies": { "pino": "^10.3.1" }, "peerDependencies": { "typescript": "^5" } }, "sha512-oZ1Ryen4r9TpaoRdHPgxqvNo1EKO4erPCRTf4v2qlnF3RUYb6Rz/YHCacZF3WtWi0hr1qL9nmmR5YdT6RI6rgw=="],
 
     "@danypops/jittor": ["@danypops/jittor@workspace:packages/jittor"],
 

@@ -12,6 +12,7 @@
     "extensions": ["extension/src/index.ts"]
   },
   "dependencies": {
+    "@danypops/daemon-kit": "^0.4.0",
     "@danypops/jittor": "^0.12.0"
   },
   "peerDependencies": {
