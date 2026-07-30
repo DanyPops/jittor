@@ -21,7 +21,7 @@ describe("Jittor CLI context telemetry parity", () => {
 		const calls: Array<{ operation: string; input: unknown }> = [];
 		const code = await runCli(["context", "--json", "--since", "1000", "--until", "2000"], {
 			client: { async call(operation: "context.assess", input: { since?: number; until?: number }) { calls.push({ operation, input }); return summary; } } as never,
-			stdout: (line: string) => output.push(line), stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: () => {},
+			stdout: (line: string) => output.push(line), stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: async () => {},
 		});
 		expect(code).toBe(0);
 		expect(calls).toEqual([{ operation: "context.assess", input: { since: 1_000, until: 2_000 } }]);
@@ -40,13 +40,13 @@ describe("Jittor CLI context telemetry parity", () => {
 		};
 		const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return result; } };
 		expect(await runCli(["benchmarks", "list", "--source", "openrouter-models", "--json"], {
-			client: client as never, stdout: (line) => output.push(line), stderr: (line) => output.push(line), systemctl: () => {}, installService: () => {}, serve: () => {},
+			client: client as never, stdout: (line) => output.push(line), stderr: (line) => output.push(line), systemctl: () => {}, installService: () => {}, serve: async () => {},
 		})).toBe(0);
 		expect(calls).toEqual([{ operation: "benchmark.query", input: { sourceId: "openrouter-models" } }]);
 		expect(JSON.parse(output[0]!)).toEqual(result);
 		output.length = 0;
 		expect(await runCli(["benchmarks", "list", "--source", "openrouter-models"], {
-			client: client as never, stdout: (line) => output.push(line), stderr: (line) => output.push(line), systemctl: () => {}, installService: () => {}, serve: () => {},
+			client: client as never, stdout: (line) => output.push(line), stderr: (line) => output.push(line), systemctl: () => {}, installService: () => {}, serve: async () => {},
 		})).toBe(0);
 		expect(output.join("\n")).toContain("openai/gpt-5.4");
 		expect(output.join("\n")).toContain("OpenRouter");
@@ -58,7 +58,7 @@ describe("Jittor CLI context telemetry parity", () => {
 		const ranking = { scopeAuthority: "available-models", scopeWarning: "Pi available models are not the exact session scope", domain: "coding", type: "general", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
 		const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return ranking; } };
 		expect(await runCli(["benchmarks", "rank", "--candidate", "openai/gpt-5.4@high", "--source", "openrouter-models", "--domain", "coding", "--budget", "0.5", "--json"], {
-			client: client as never, stdout: (line) => output.push(line), stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: () => {},
+			client: client as never, stdout: (line) => output.push(line), stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: async () => {},
 		})).toBe(0);
 		expect(calls[0]).toMatchObject({ operation: "models.rank", input: { candidates: [{ provider: "openai", model: "gpt-5.4", thinking: "high" }], scopeAuthority: "available-models", domain: "coding", type: "general", budgetPressure: 0.5, sourceIds: ["openrouter-models"] } });
 		expect(JSON.parse(output[0]!)).toEqual(ranking);
@@ -67,7 +67,7 @@ describe("Jittor CLI context telemetry parity", () => {
 	it("records, queries, and prunes metrics through the typed daemon client with validated flags", async () => {
 		const calls: Array<{ operation: string; input: unknown }> = [];
 		const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return { deleted: 3 }; } };
-		const deps = { client: client as never, stdout: () => {}, stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: () => {} };
+		const deps = { client: client as never, stdout: () => {}, stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: async () => {} };
 		expect(await runCli(["metrics", "record", "--source", "anthropic", "--scope", "tokens", "--metric", "used-fraction", "--value", "0.25", "--unit", "ratio", "--observed-at", "1000", "--attributes", '{"limit":100}', "--json"], deps)).toBe(0);
 		expect(calls[0]).toEqual({ operation: "metrics.record", input: { source: "anthropic", scope: "tokens", metric: "used-fraction", value: 0.25, unit: "ratio", observedAt: 1_000, attributes: { limit: 100 } } });
 		expect(await runCli(["metrics", "record", "--source", "s", "--scope", "sc", "--metric", "m", "--value", "null", "--unit", "count", "--json"], deps)).toBe(0);
@@ -83,7 +83,7 @@ describe("Jittor CLI context telemetry parity", () => {
 	it("applies and clears a router override with an explicit route and optional expiry", async () => {
 		const calls: Array<{ operation: string; input: unknown }> = [];
 		const client = { async call(operation: string, input: unknown) { calls.push({ operation, input }); return {}; } };
-		const deps = { client: client as never, stdout: () => {}, stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: () => {} };
+		const deps = { client: client as never, stdout: () => {}, stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: async () => {} };
 		expect(await runCli(["router", "override", "--route", "openai/gpt-5.4@high", "--expires-at", "5000", "--json"], deps)).toBe(0);
 		expect(calls[0]).toEqual({ operation: "router.override", input: { route: { provider: "openai", model: "gpt-5.4", thinking: "high" }, expiresAt: 5_000 } });
 		expect(await runCli(["router", "clear-override", "--json"], deps)).toBe(0);
@@ -116,7 +116,7 @@ describe("Jittor CLI context telemetry parity", () => {
 			async call() { return status; },
 		};
 		expect(await runCli(["router", "status"], {
-			client: client as never, stdout: (line) => output.push(line), stderr: (line) => output.push(line), systemctl: () => {}, installService: () => {}, serve: () => {},
+			client: client as never, stdout: (line) => output.push(line), stderr: (line) => output.push(line), systemctl: () => {}, installService: () => {}, serve: async () => {},
 		})).toBe(0);
 		expect(output.join("\n")).not.toContain(secretToken);
 		expect(formatRouterStatus(status)).not.toContain(secretToken);
@@ -124,7 +124,7 @@ describe("Jittor CLI context telemetry parity", () => {
 		const failing = { async call() { throw new Error("Jittor daemon is not running; install or start jittor.service"); } };
 		const errors: string[] = [];
 		expect(await runCli(["router", "status"], {
-			client: failing as never, stdout: () => {}, stderr: (line) => errors.push(line), systemctl: () => {}, installService: () => {}, serve: () => {},
+			client: failing as never, stdout: () => {}, stderr: (line) => errors.push(line), systemctl: () => {}, installService: () => {}, serve: async () => {},
 		})).toBe(1);
 		expect(errors.join("\n")).not.toContain(secretToken);
 		expect(errors.join("\n")).toContain("install or start jittor.service");
@@ -162,7 +162,7 @@ describe("Jittor CLI context telemetry parity", () => {
 		const output: string[] = [];
 		const deps = {
 			client: { async call(_operation: "context.assess", _input: { since?: number; until?: number }) { return summary; } } as never, stdout: (line: string) => output.push(line), stderr: (line: string) => output.push(line),
-			systemctl: () => {}, installService: () => {}, serve: () => {},
+			systemctl: () => {}, installService: () => {}, serve: async () => {},
 		};
 		expect(await runCli(["context"], deps)).toBe(0);
 		expect(output.join("\n")).toContain("Papyrus injection");

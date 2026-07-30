@@ -1,5 +1,5 @@
 /**
- * Structured daemon logging, now backed by `@danypops/daemon-kit/logging` (pino) instead of a
+ * Structured daemon logging, now backed by `@danypops/vehicle-server/logging` (pino) instead of a
  * hand-rolled `console.error(JSON.stringify(...))` -- daemon-kit's own module doc explains why:
  * level ordering/filtering/child-scoping is exactly the kind of thing worth one shared,
  * dependency-backed implementation instead of four independent hand-rolled ones. One deliberate,
@@ -8,9 +8,9 @@
  * four daemons. `component`/`level`/`timestamp` and credential-safety (callers still must pass
  * only bounded, non-sensitive fields) are unchanged.
  */
-import { createLogger, type LogLevel as DaemonKitLogLevel, type Logger } from "@danypops/daemon-kit/logging";
+import { createLogger, type LogLevel as VehicleLogLevel, type Logger } from "@danypops/vehicle-server/logging";
 
-export type LogLevel = Extract<DaemonKitLogLevel, "info" | "warn" | "error">;
+export type LogLevel = Extract<VehicleLogLevel, "info" | "warn" | "error">;
 
 /**
  * Also passed directly as `StartDaemonOptions.logger` so daemon-kit's own maintenance-task

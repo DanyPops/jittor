@@ -1,4 +1,4 @@
-import { createRetryingClient, type RetryingClient } from "@danypops/daemon-kit/pi-client";
+import { createRetryingClient, type RetryingClient } from "@danypops/vehicle-client/daemon-client";
 import { connectJittorClient, type JittorClient, type OperationInputs, type OperationName, type OperationOutputs } from "@danypops/jittor";
 
 type JittorConnector = () => Promise<JittorClient>;

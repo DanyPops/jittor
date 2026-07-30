@@ -70,7 +70,7 @@ describe("Jittor daemon output-channel conformance", () => {
       stderr() {},
       systemctl() {},
       installService() {},
-      serve() {},
+      async serve() {},
     }
     expect(await runCli(["context", "--json"], { ...dependencies, stdout: (line) => jsonLines.push(line) })).toBe(0)
     expect(JSON.parse(jsonLines[0]!)).toEqual(assessment)

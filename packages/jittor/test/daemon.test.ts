@@ -52,7 +52,7 @@ describe("Jittor daemon state", () => {
 		expect(paths.database).toBe("/data/jittor/jittor.db");
 		expect(paths.token).toBe("/state/jittor/auth-token");
 		expect(paths.handle).toBe("/run/user/1000/jittor/daemon.json");
-		expect(paths.systemdUnit).toBe("/config/systemd/user/jittor.service");
+		expect(paths.serviceDescriptor).toBe("/config/systemd/user/jittor.service");
 	});
 
 	it("persists a private token and discoverable loopback handle", () => {
@@ -99,7 +99,7 @@ describe("Jittor daemon state", () => {
 			home: root, uid: 1000,
 			env: { XDG_DATA_HOME: join(root, "data"), XDG_STATE_HOME: join(root, "state"), XDG_RUNTIME_DIR: join(root, "run"), XDG_CONFIG_HOME: join(root, "config") },
 		});
-		const daemon = startDaemon(paths, { JITTOR_CODEX_AUTH_FILE: join(root, "definitely-does-not-exist.json") });
+		const daemon = await startDaemon(paths, { JITTOR_CODEX_AUTH_FILE: join(root, "definitely-does-not-exist.json") });
 		try {
 			await new Promise((resolve) => setTimeout(resolve, 50));
 			const client = connectJittorClient(paths);
@@ -115,7 +115,7 @@ describe("Jittor daemon state", () => {
 			home: root, uid: 1000,
 			env: { XDG_DATA_HOME: join(root, "data"), XDG_STATE_HOME: join(root, "state"), XDG_RUNTIME_DIR: join(root, "run"), XDG_CONFIG_HOME: join(root, "config") },
 		});
-		const daemon = startDaemon(paths);
+		const daemon = await startDaemon(paths);
 		try {
 			const client = connectJittorClient(paths);
 			expect(await client.health()).toEqual({ ok: true, version: VERSION });

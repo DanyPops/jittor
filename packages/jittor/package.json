@@ -16,7 +16,8 @@
     "service:install": "bun src/cli.ts service install"
   },
   "dependencies": {
-    "@danypops/daemon-kit": "^0.4.0",
+    "@danypops/vehicle-server": "^0.1.1",
+    "@danypops/vehicle-client": "^0.1.1",
     "google-auth-library": "^10.9.0"
   },
   "devDependencies": {

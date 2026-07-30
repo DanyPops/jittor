@@ -1,4 +1,4 @@
-import { errorResponse, healthResponse, readyResponse, requireBearerToken } from "@danypops/daemon-kit/http";
+import { errorResponse, healthResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
 import { SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "./constants.ts";
 import { InvalidSessionSecretError, SessionIdentity, type RegisterSessionIdentityResult } from "./session-identity-service.ts";
 import { VERSION } from "./version.ts";
@@ -188,7 +188,7 @@ export interface JittorAppOptions {
 
 /**
  * Bearer-check and the trivial health/ready/not-found responses now delegate to
- * `@danypops/daemon-kit/http` (the same handful of lines every daemon's service.ts hand-rolled).
+ * `@danypops/vehicle-server/rpc-http` (the same handful of lines every daemon's service.ts hand-rolled).
  * The response-size guard below stays jittor-specific: daemon-kit's `jsonResponse` is intentionally
  * unbounded (it has no operation dispatch of its own to guard), while jittor's `/api/v1/ops` can
  * return arbitrarily large query results that must be capped (see SERVICE_MAX_RESPONSE_BYTES).

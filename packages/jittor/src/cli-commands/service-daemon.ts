@@ -41,7 +41,7 @@ export function systemctl(...args: string[]): void {
 
 /** cliPath is the caller's own entrypoint file -- resolved from the real CLI script's `import.meta.url`, never this module's own, so the installed unit's ExecStart always points at the actual runnable CLI. */
 export function installService(cliPath: string): void {
-	const unitPath = resolveJittorPaths().systemdUnit;
+	const unitPath = resolveJittorPaths().serviceDescriptor;
 	mkdirSync(dirname(unitPath), { recursive: true });
 	const codexAuthFile = join(process.env["CODEX_HOME"] ?? join(homedir(), ".codex"), "auth.json");
 	writeFileSync(unitPath, renderSystemdUnit({

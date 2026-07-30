@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { openSqliteWithPragmas } from "@danypops/daemon-kit/storage";
+import { openSqliteWithPragmas } from "@danypops/vehicle-server/storage";
 import { SQLITE_BUSY_TIMEOUT_MS } from "./constants.ts";
 
 const INITIAL_SCHEMA = `
@@ -31,7 +31,7 @@ CREATE INDEX session_identities_last_seen_idx
 `;
 
 /**
- * Delegates bootstrap (pragmas, migration engine) to `@danypops/daemon-kit/storage`, which
+ * Delegates bootstrap (pragmas, migration engine) to `@danypops/vehicle-server/storage`, which
  * generalizes the byte-identical pragma/PRAGMA-user_version skeleton jittor's own db.ts used to
  * hand-roll (see daemon-kit's README). Jittor's only remaining responsibility is its own schema.
  */

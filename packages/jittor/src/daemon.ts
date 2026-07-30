@@ -1,4 +1,4 @@
-import { startDaemon as startDaemonKit, type RunningDaemon } from "@danypops/daemon-kit/daemon";
+import { startDaemon as startDaemonKit, type RunningDaemon } from "@danypops/vehicle-server/daemon";
 import { MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
 import { DEFAULT_POLICY, UNCONFIGURED_ROUTE } from "./config.ts";
 import { SQLiteMetricStore } from "./adapters/sqlite-metric-store.ts";
@@ -23,7 +23,7 @@ import type { GoogleVertexMetricSource } from "./providers/google-vertex-contrac
 import { ensureAuthToken, resolveJittorPaths, type JittorPaths } from "./state.ts";
 import { logEvent, logger } from "./log.ts";
 
-export type { RunningDaemon } from "@danypops/daemon-kit/daemon";
+export type { RunningDaemon } from "@danypops/vehicle-server/daemon";
 
 export function reportMaintenanceFailure(event: string, error: unknown): void {
 	logEvent("error", event, { message: error instanceof Error ? error.message : String(error) });
@@ -65,7 +65,7 @@ export function telemetrySourcesFromEnvironment(env: Record<string, string | und
 }
 
 /**
- * Composition root, now built on `@danypops/daemon-kit/daemon`'s `startDaemon` for binding,
+ * Composition root, now built on `@danypops/vehicle-server/daemon`'s `startDaemon` for binding,
  * atomic handle write, maintenance-timer driving, and clean shutdown -- the skeleton that used to
  * be hand-rolled here (and, byte-identically, in web-spider-daemon's and papyrus's daemon.ts; see
  * daemon-kit's README). Each maintenance task still catches and classifies its own failure via
@@ -74,10 +74,10 @@ export function telemetrySourcesFromEnvironment(env: Record<string, string | und
  * daemon-kit's own generic "maintenance task failed: <name>" catch, which exists as a safety net
  * for tasks that don't self-classify, not to replace a consumer's own richer classification.
  */
-export function startDaemon(
+export async function startDaemon(
 	paths: JittorPaths = resolveJittorPaths(),
 	env: Record<string, string | undefined> = process.env,
-): RunningDaemon {
+): Promise<RunningDaemon> {
 	const token = ensureAuthToken(paths);
 	const db = openJittorDb(paths.database);
 	const metrics = new SQLiteMetricStore(db);
@@ -96,7 +96,7 @@ export function startDaemon(
 	});
 	const service = new JittorService(metrics, router, benchmarks, modelRanker, sessionIdentity);
 
-	const daemon = startDaemonKit({
+	const daemon = await startDaemonKit({
 		daemonLabel: "Jittor",
 		handlePath: paths.handle,
 		logger,
@@ -115,8 +115,8 @@ export function startDaemon(
 	return daemon;
 }
 
-export function serveMain(): void {
-	const daemon = startDaemon();
+export async function serveMain(): Promise<void> {
+	const daemon = await startDaemon();
 	console.error(`[jittor] listening on ${daemon.host}:${daemon.port}`);
 	const stop = async (): Promise<void> => {
 		await daemon.stop();

@@ -40,7 +40,7 @@ const cases: Case[] = [
 function fakeDeps(calls: Array<{ operation: string; input: unknown }>, result: unknown = {}) {
 	return {
 		client: { async call(operation: string, input: unknown) { calls.push({ operation, input }); return result; } } as never,
-		stdout: () => {}, stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: () => {},
+		stdout: () => {}, stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: async () => {},
 	};
 }
 

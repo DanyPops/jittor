@@ -21,7 +21,7 @@ function fakeConnectionRefused(): JittorClient {
 	});
 }
 
-describe("Jittor daemon-kit retrying client wiring", () => {
+describe("Jittor vehicle-client retrying client wiring", () => {
 	it("reconnects and retries once when the cached client's connection is stale, succeeding transparently", async () => {
 		let connectorCalls = 0;
 		setJittorClientConnectorForTests(async () => {

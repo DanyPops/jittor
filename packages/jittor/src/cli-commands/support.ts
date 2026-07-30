@@ -8,7 +8,7 @@ export interface CliDependencies {
 	stderr(line: string): void;
 	systemctl(...args: string[]): void;
 	installService(): void;
-	serve(): void;
+	serve(): Promise<void>;
 }
 
 export function humanField(value: string): string {

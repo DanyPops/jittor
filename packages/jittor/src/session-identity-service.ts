@@ -1,4 +1,4 @@
-import { isSessionRegistered, registerSessionIdentity, releaseSessionIdentity, verifySessionSecret } from "@danypops/daemon-kit/session-identity";
+import { isSessionRegistered, registerSessionIdentity, releaseSessionIdentity, verifySessionSecret } from "@danypops/vehicle-server/session-identity";
 import type { SessionIdentityStore } from "./ports/session-identity-store.ts";
 
 export interface RegisterSessionIdentityResult {

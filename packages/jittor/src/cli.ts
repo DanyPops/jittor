@@ -52,7 +52,7 @@ function usage(stderr: (line: string) => void): number {
 export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEPENDENCIES): Promise<number> {
 	const [command, action, ...rest] = args;
 	const fail = () => usage(deps.stderr);
-	if (command === "serve") { deps.serve(); return 0; }
+	if (command === "serve") { await deps.serve(); return 0; }
 	if (command === "session") return runSessionCommand(action, rest, deps, fail);
 	if (command === "metrics") return runMetricsCommand(action, rest, deps, fail);
 	if (command === "telemetry") return runTelemetryCommand(action, rest, deps, fail);

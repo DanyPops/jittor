@@ -1,4 +1,4 @@
-import { AuthenticatedRpcClient, type FetchTransport } from "@danypops/daemon-kit/rpc-client";
+import { AuthenticatedRpcClient, type FetchTransport } from "@danypops/vehicle-client/rpc-client";
 import type { OperationInputs, OperationName, OperationOutputs } from "./service.ts";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, type JittorPaths } from "./state.ts";
 
@@ -6,7 +6,7 @@ export type { FetchTransport };
 
 /**
  * Jittor's typed authenticated RPC client, now a thin named subclass of
- * `@danypops/daemon-kit/rpc-client`'s `AuthenticatedRpcClient` -- the shared substrate factored
+ * `@danypops/vehicle-client/rpc-client`'s `AuthenticatedRpcClient` -- the shared substrate factored
  * out after jittor's own client.ts and web-spider-daemon's were found byte-identical (see
  * daemon-kit's README). Keeps the old 3-positional-argument constructor so every existing call
  * site is untouched by this migration.
