@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { ProgressBar } from "malevich-tui-components";
 import {
 	FOOTER_BAR_MAX_WIDTH,
 	FOOTER_BAR_MIN_WIDTH,
@@ -119,11 +120,11 @@ function barWidth(width: number): number {
 	return width >= FOOTER_WIDE_TERMINAL_WIDTH ? FOOTER_BAR_MAX_WIDTH : FOOTER_BAR_MIN_WIDTH;
 }
 
+// Thin wrapper over Malevich's ProgressBar.format() -- keeps this file's own call sites
+// (fraction-first, width-second, tolerant of null/non-finite) unchanged.
 function progressBar(fraction: number | null, width: number): string {
-	if (fraction === null || !Number.isFinite(fraction)) return "░".repeat(width);
-	const clamped = Math.min(1, Math.max(0, fraction));
-	const filled = Math.round(width * clamped);
-	return "█".repeat(filled) + "░".repeat(width - filled);
+	const value = fraction === null || !Number.isFinite(fraction) ? 0 : fraction;
+	return new ProgressBar({ value, max: 1, width }).format(width);
 }
 
 function fillColor(fraction: number | null): FooterColor {
