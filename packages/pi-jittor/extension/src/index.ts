@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+	CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN,
 	CONTEXT_HUB_CONTRIBUTION_CHANNEL,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
 	MAX_DYNAMIC_ROUTES,
@@ -38,7 +39,9 @@ import { CodexRecoveryCapability, SYSTEM_RECOVERY_RUNTIME, type CodexRecoveryRun
 import { ProviderResponseTelemetry } from "./capabilities/provider-response-telemetry.ts";
 import { LocalRunTelemetry } from "./capabilities/local-run-telemetry.ts";
 import { ContextHubCapability } from "./capabilities/context-hub.ts";
+import { basePromptSegment, buildBasePromptItems, buildMessageHistoryTree, composeContextBreakdown, messageHistorySegment, type SessionEntryLike, type SessionTreeNodeLike } from "./context-breakdown.ts";
 import { showContextView } from "./context-view.ts";
+import type { ContextSegmentItem } from "@danypops/jittor";
 
 export { formatFooterStatus } from "./tui.ts";
 export type { CodexRecoveryRuntime } from "./capabilities/codex-recovery.ts";
@@ -259,6 +262,12 @@ export function registerJittorExtension(
 	const codexRecoveryCapability = new CodexRecoveryCapability(pi, codexRecovery, recoveryRuntime);
 	const contextHub = new ContextHubCapability();
 	const stopContextHub = pi.events?.on?.(CONTEXT_HUB_CONTRIBUTION_CHANNEL, (payload) => contextHub.observe(payload));
+	// Cached from the most recent before_agent_start observation: Pi's own base system prompt is
+	// only ever visible transiently inside that hook's event, so /context reuses this rather than
+	// going without it entirely. Measured as of THIS extension's own place in the before_agent_start
+	// chain -- see buildBasePromptItems' own doc comment for the load-order caveat this implies.
+	let lastObservedBasePromptTokens: number | null = null;
+	let lastObservedBasePromptItems: ContextSegmentItem[] = [];
 	const contextObservations = new Set<string>();
 	const stopPapyrusContext = pi.events?.on?.(PAPYRUS_CONTEXT_INJECTION_CHANNEL, (payload) => {
 		try {
@@ -465,11 +474,26 @@ export function registerJittorExtension(
 	});
 
 	pi.registerCommand("context", {
-		description: "Context Hub: real usage plus every segment's estimated size (tool schemas by owning extension, and whatever other extensions contributed), each tagged with how it was attributed",
+		description: "Context Hub: real usage plus every segment's estimated size (base prompt, message history, tool schemas by owning extension, and whatever other extensions contributed), each tagged with how it was attributed",
 		handler: async (_args, ctx) => {
-			const toolSegment = toolLedgerSegment(pi.getAllTools());
-			const segments = [toolSegment, ...contextHub.contributedSegments()];
-			await showContextView(ctx, segments, ctx.getContextUsage());
+			const activeToolNames = new Set(pi.getActiveTools());
+			const toolSegment = toolLedgerSegment(pi.getAllTools().filter((tool) => activeToolNames.has(tool.name)));
+			// Real tree (not just the linear current-branch path): surfaces content sitting in an
+			// abandoned /tree branch, which cost real tokens to generate but isn't in context now.
+			const tree = ctx.sessionManager.getTree() as SessionTreeNodeLike[];
+			// buildContextEntries(), NOT getBranch(): getBranch() returns every raw entry on the current
+			// path including everything a real compaction has already summarized away.
+			const activeEntryIds = new Set((ctx.sessionManager.buildContextEntries() as SessionEntryLike[]).map((entry) => entry.id));
+			const branchEntryIds = new Set((ctx.sessionManager.getBranch() as SessionEntryLike[]).map((entry) => entry.id));
+			const messageHistory = buildMessageHistoryTree(tree, activeEntryIds, branchEntryIds);
+			const usage = ctx.getContextUsage();
+			const ownSegments = [basePromptSegment(lastObservedBasePromptTokens, lastObservedBasePromptItems), messageHistorySegment(messageHistory), toolSegment];
+			const breakdown = composeContextBreakdown({
+				totalTokens: usage?.tokens ?? null,
+				contextWindow: ctx.model?.contextWindow ?? null,
+				segments: [...ownSegments, ...contextHub.contributedSegments()],
+			});
+			await showContextView(ctx, breakdown);
 		},
 	});
 
@@ -540,6 +564,15 @@ export function registerJittorExtension(
 			footerState.providerBudget = null;
 			footerState.requestRender?.();
 		}
+	});
+
+	pi.on("before_agent_start", async (event) => {
+		// No new hook, no new risk: measures event.systemPrompt's length and structural
+		// event.systemPromptOptions as-of this handler's own place in the before_agent_start chain --
+		// see buildBasePromptItems' own doc comment for the resulting load-order caveat.
+		const characters = (event.systemPrompt ?? "").length;
+		lastObservedBasePromptTokens = Math.ceil(characters / CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN);
+		lastObservedBasePromptItems = buildBasePromptItems(event.systemPromptOptions, characters);
 	});
 
 	pi.on("session_before_compact", async (event, ctx) => {

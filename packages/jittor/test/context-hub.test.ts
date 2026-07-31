@@ -41,6 +41,12 @@ describe("Context Hub: shared contribution channel", () => {
 		expect(() => validateContextContribution({ ...contribution(), segment: { ...contribution().segment, confidence: "definitely" } }, 1_500)).toThrow("confidence");
 	});
 
+	it("keeps a segment marked unknown visible even at zero tokens, and rejects a non-boolean unknown field", () => {
+		const segment = validateContextSegment({ key: "basePrompt", label: "Base prompt", estimatedTokens: 0, confidence: "exact-structural", unknown: true });
+		expect(segment.unknown).toBe(true);
+		expect(() => validateContextSegment({ key: "x", label: "X", estimatedTokens: 0, confidence: "audited", unknown: "yes" })).toThrow("unknown must be a boolean");
+	});
+
 	it("rejects a segment item tree nested past the bound", () => {
 		let deep: Record<string, unknown> = { label: "leaf", estimatedTokens: 1 };
 		for (let i = 0; i < 8; i++) deep = { label: `level-${i}`, estimatedTokens: 1, children: [deep] };

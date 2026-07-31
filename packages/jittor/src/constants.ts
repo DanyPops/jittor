@@ -132,4 +132,8 @@ export const CONTEXT_HUB_CONTRIBUTION_MAX_AGE_MS = 5 * MILLISECONDS_PER_MINUTE;
 export const CONTEXT_HUB_CONTRIBUTION_DEDUP_LIMIT = 1_000;
 /** Matches Papyrus's own CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN; kept independent since Jittor does not depend on the Papyrus package. */
 export const CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN = 4;
-export const CONTEXT_HUB_CONFIDENCE_TIERS = ["exact-tool", "exact-cooperative", "correlated", "audited"] as const;
+/** Matches Papyrus's own CONTEXT_TREE_MAX_NODES: a bound on the message-history tree walk, independent of any other producer's own item-count bound (CONTEXT_HUB_MAX_ITEMS_PER_SEGMENT). */
+export const CONTEXT_TREE_MAX_NODES = 50_000;
+/** Pi's own documented compaction-reserve default (docs/compaction.md): headroom kept free for the model's response, subtracted from the model's contextWindow to get the real usable budget. */
+export const CONTEXT_DEFAULT_RESERVE_TOKENS = 16_384;
+export const CONTEXT_HUB_CONFIDENCE_TIERS = ["exact-tool", "exact-structural", "exact-cooperative", "correlated", "audited"] as const;

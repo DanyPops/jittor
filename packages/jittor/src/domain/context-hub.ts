@@ -39,6 +39,14 @@ export interface ContextSegment {
 	estimatedTokens: number;
 	confidence: ContextConfidenceTier;
 	items?: ContextSegmentItem[];
+	/**
+	 * True when this segment's size is genuinely unmeasured (not yet observed), as opposed to
+	 * measured-and-actually-zero -- e.g. the base system prompt before the first observed turn.
+	 * A display layer that hides zero-token rows to cut noise must NOT hide an unknown segment
+	 * just because its placeholder value happens to be zero -- that would silently misrepresent
+	 * "we don't know" as "there is nothing here".
+	 */
+	unknown?: boolean;
 }
 
 export interface ContextContribution {
@@ -86,7 +94,7 @@ export function validateContextSegment(value: unknown): ContextSegment {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("context segment must be an object");
 	const input = value as Record<string, unknown>;
 	for (const key of Object.keys(input)) {
-		if (key !== "key" && key !== "label" && key !== "estimatedTokens" && key !== "confidence" && key !== "items") {
+		if (key !== "key" && key !== "label" && key !== "estimatedTokens" && key !== "confidence" && key !== "items" && key !== "unknown") {
 			throw new Error(`context segment contains unexpected field: ${key}`);
 		}
 	}
@@ -94,11 +102,13 @@ export function validateContextSegment(value: unknown): ContextSegment {
 	if (typeof confidence !== "string" || !CONTEXT_HUB_CONFIDENCE_TIERS.includes(confidence as ContextConfidenceTier)) {
 		throw new Error(`confidence must be one of ${CONTEXT_HUB_CONFIDENCE_TIERS.join(", ")}`);
 	}
+	if (input["unknown"] !== undefined && typeof input["unknown"] !== "boolean") throw new Error("segment.unknown must be a boolean");
 	const segment: ContextSegment = {
 		key: nonEmptyString(input["key"], "segment.key", CONTEXT_HUB_SEGMENT_KEY_MAX_CHARACTERS),
 		label: nonEmptyString(input["label"], "segment.label", CONTEXT_HUB_SEGMENT_LABEL_MAX_CHARACTERS),
 		estimatedTokens: boundedInteger(input["estimatedTokens"], "segment.estimatedTokens"),
 		confidence: confidence as ContextConfidenceTier,
+		...(input["unknown"] !== undefined ? { unknown: input["unknown"] as boolean } : {}),
 	};
 	if (input["items"] !== undefined) {
 		if (!Array.isArray(input["items"])) throw new Error("segment.items must be an array");

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { toolLedgerSegment, type ContextSegment } from "@danypops/jittor";
 import { ContextHubCapability } from "../extension/src/capabilities/context-hub.ts";
+import type { ContextBreakdown } from "../extension/src/context-breakdown.ts";
 import { buildContextReport } from "../extension/src/context-report.ts";
+
+function breakdown(overrides: Partial<ContextBreakdown> = {}): ContextBreakdown {
+	return { totalTokens: null, contextWindow: null, effectiveBudget: null, overshootTokens: 0, segments: [], ...overrides };
+}
 
 function contribution(overrides: Record<string, unknown> = {}) {
 	return {
@@ -64,23 +69,23 @@ describe("buildContextReport", () => {
 			{ key: "toolDefinitions", label: "Tool definitions", estimatedTokens: 500, confidence: "exact-tool", items: [{ label: "builtin (4 tools)", estimatedTokens: 500 }] },
 			{ key: "rules", label: "Active Rules", estimatedTokens: 1_200, confidence: "exact-cooperative" },
 		];
-		const report = buildContextReport(segments, { tokens: 12_000, contextWindow: 200_000, percent: 6 });
+		const report = buildContextReport(breakdown({ totalTokens: 12_000, contextWindow: 200_000, effectiveBudget: 200_000, segments }));
 		const lines = report.split("\n");
-		expect(lines[0]).toBe("Real usage: 12.0k / 200.0k tokens (6.0%)");
+		expect(lines[0]).toBe("Real usage: 12.0k / 200.0k tokens (6.0% of usable budget)");
 		expect(report.indexOf("Active Rules")).toBeLessThan(report.indexOf("Tool definitions")); // heavier segment first
 		expect(report).toContain("[exact-cooperative]");
 		expect(report).toContain("[exact-tool]");
 	});
 
 	it("reports estimate-only when real usage is unknown", () => {
-		const report = buildContextReport([], undefined);
+		const report = buildContextReport(breakdown());
 		expect(report).toContain("not yet reported");
 		expect(report).toContain("no segments observed yet");
 	});
 
 	it("bounds rendered items per segment rather than dumping every one", () => {
 		const items = Array.from({ length: 20 }, (_, index) => ({ label: `item-${index}`, estimatedTokens: index }));
-		const report = buildContextReport([{ key: "x", label: "X", estimatedTokens: 190, confidence: "audited", items }], undefined);
+		const report = buildContextReport(breakdown({ segments: [{ key: "x", label: "X", estimatedTokens: 190, confidence: "audited", items }] }));
 		const itemLines = report.split("\n").filter((line) => line.startsWith("  "));
 		expect(itemLines).toHaveLength(5);
 		expect(itemLines[0]).toContain("item-19"); // heaviest first
@@ -94,7 +99,7 @@ describe("toolLedgerSegment integration with buildContextReport", () => {
 			{ name: "bash", description: "Execute a shell command", sourceInfo: { source: "builtin" } },
 			{ name: "jittor_context", description: "Show context usage", sourceInfo: { source: "@danypops/pi-jittor" } },
 		]);
-		const report = buildContextReport([segment], { tokens: 100, contextWindow: 200_000, percent: 0.05 });
+		const report = buildContextReport(breakdown({ totalTokens: 100, contextWindow: 200_000, effectiveBudget: 200_000, segments: [segment] }));
 		expect(report).toContain("Tool definitions");
 		expect(report).toContain("builtin (2 tools)");
 		expect(report).toContain("@danypops/pi-jittor (1 tool)");

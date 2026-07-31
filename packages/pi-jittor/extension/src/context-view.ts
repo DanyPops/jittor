@@ -2,7 +2,8 @@ import type { ExtensionCommandContext, Theme, ThemeColor } from "@earendil-works
 import { matchesKey, truncateToWidth, type TUI } from "@earendil-works/pi-tui";
 import { buildContextRows, renderContextRowLines, renderContextUsageBar, type ContextBarTheme, type ContextRow, type ContextRowsTheme, type ContextSegment as MalevichContextSegment } from "malevich-tui-components";
 import type { ContextSegment } from "@danypops/jittor";
-import { buildContextReport, type ContextReportUsage } from "./context-report.ts";
+import type { ContextBreakdown } from "./context-breakdown.ts";
+import { buildContextReport } from "./context-report.ts";
 
 const VISIBLE_ROWS = 24;
 
@@ -25,9 +26,13 @@ function formatTokenCount(tokens: number): string {
 	return tokens >= 1_000 ? `${(tokens / 1_000).toFixed(1)}k` : String(tokens);
 }
 
+function percentOf(part: number, whole: number): string {
+	return whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : "—";
+}
+
 /** Folds each segment's confidence tier into its label so it survives Malevich's confidence-unaware row builder. */
 function withConfidenceLabel(segment: ContextSegment): MalevichContextSegment {
-	return { key: segment.key, label: `${segment.label} [${segment.confidence}]`, estimatedTokens: segment.estimatedTokens, items: segment.items };
+	return { key: segment.key, label: `${segment.label} [${segment.confidence}]`, estimatedTokens: segment.estimatedTokens, items: segment.items, unknown: segment.unknown };
 }
 
 class ContextViewport {
@@ -38,14 +43,13 @@ class ContextViewport {
 	constructor(
 		private readonly tui: TUI,
 		private readonly theme: Theme,
-		segments: readonly ContextSegment[],
-		private readonly usage: ContextReportUsage | undefined,
+		private readonly breakdown: ContextBreakdown,
 		private readonly close: () => void,
 	) {
 		// Heaviest-first: Malevich renders segments in the order given, so sorting by weight for a
 		// merged multi-producer view is this viewport's own policy, matching context-report.ts.
-		this.segments = [...segments].sort((left, right) => right.estimatedTokens - left.estimatedTokens).map(withConfidenceLabel);
-		this.rows = buildContextRows(this.segments, usage?.tokens ?? undefined);
+		this.segments = [...breakdown.segments].sort((left, right) => right.estimatedTokens - left.estimatedTokens).map(withConfidenceLabel);
+		this.rows = buildContextRows(this.segments, breakdown.totalTokens ?? undefined);
 	}
 
 	invalidate(): void {}
@@ -56,16 +60,21 @@ class ContextViewport {
 		const border = theme.fg("borderMuted", "─".repeat(contentWidth));
 		const lines: string[] = [border, truncateToWidth(theme.fg("accent", theme.bold("Context")), contentWidth, "")];
 
-		if (this.usage?.tokens !== null && this.usage?.tokens !== undefined) {
-			const percent = this.usage.percent !== null && this.usage.percent !== undefined ? ` (${this.usage.percent.toFixed(1)}% of ${formatTokenCount(this.usage.contextWindow)} window)` : "";
-			lines.push(truncateToWidth(`${formatTokenCount(this.usage.tokens)} tokens${percent}`, contentWidth, ""));
+		const { totalTokens, effectiveBudget } = this.breakdown;
+		if (totalTokens !== null && effectiveBudget !== null) {
+			lines.push(truncateToWidth(`${formatTokenCount(totalTokens)} / ${formatTokenCount(effectiveBudget)} tokens (${percentOf(totalTokens, effectiveBudget)} of usable budget)`, contentWidth, ""));
+		} else if (totalTokens !== null) {
+			lines.push(truncateToWidth(`${formatTokenCount(totalTokens)} tokens (model context window unknown)`, contentWidth, ""));
 		} else {
 			lines.push(theme.fg("dim", "No real usage reported yet — sizes below are estimates only"));
 		}
 
 		const colorFor = (key: string) => (s: string) => theme.fg(paletteColor(key), s);
 		const barTheme: ContextBarTheme = { colorFor, empty: (s) => theme.fg("dim", s) };
-		lines.push(renderContextUsageBar(barTheme, this.segments, contentWidth, this.usage?.contextWindow, this.usage?.tokens ?? undefined));
+		lines.push(renderContextUsageBar(barTheme, this.segments, contentWidth, effectiveBudget ?? undefined, totalTokens ?? undefined));
+		if (this.breakdown.overshootTokens > 0) {
+			lines.push(truncateToWidth(theme.fg("warning", `Estimates exceed real total by ~${this.breakdown.overshootTokens} tok — sizes below are approximate, not exact`), contentWidth, ""));
+		}
 		lines.push("");
 
 		const rowsTheme: ContextRowsTheme = { colorFor, header: (s) => theme.bold(s) };
@@ -90,10 +99,10 @@ class ContextViewport {
 }
 
 /** Interactive scrollable Context Hub view in TUI mode; the same plain-text report as /context's non-interactive path otherwise. */
-export async function showContextView(ctx: ExtensionCommandContext, segments: readonly ContextSegment[], usage: ContextReportUsage | undefined): Promise<void> {
+export async function showContextView(ctx: ExtensionCommandContext, breakdown: ContextBreakdown): Promise<void> {
 	if (ctx.mode !== "tui") {
-		ctx.ui.notify(buildContextReport(segments, usage), "info");
+		ctx.ui.notify(buildContextReport(breakdown), "info");
 		return;
 	}
-	await ctx.ui.custom<void>((tui, theme, _keybindings, done) => new ContextViewport(tui, theme, segments, usage, done));
+	await ctx.ui.custom<void>((tui, theme, _keybindings, done) => new ContextViewport(tui, theme, breakdown, done));
 }
