@@ -115,3 +115,21 @@ export const GOOGLE_VERTEX_BUDGET_MAX_MESSAGES_PER_PULL = 20;
  */
 export const GOOGLE_VERTEX_BUDGET_CONFIDENCE = 0.6;
 export const GOOGLE_ADC_TOKEN_REFRESH_SKEW_MS = 60_000;
+/**
+ * Context Hub: the shared, versioned, multi-producer channel any extension can target to
+ * contribute one segment of the context-window breakdown (successor to the single-producer
+ * papyrus.context-injection.v1 shape) -- Papyrus's rules/tasks segment is the first producer.
+ */
+export const CONTEXT_HUB_CONTRIBUTION_CHANNEL = "jittor.context-contribution.v1";
+export const CONTEXT_HUB_CONTRIBUTION_SCHEMA = "jittor.context-contribution/v1";
+export const CONTEXT_HUB_PRODUCER_NAME_MAX_CHARACTERS = 80;
+export const CONTEXT_HUB_SEGMENT_LABEL_MAX_CHARACTERS = 160;
+export const CONTEXT_HUB_SEGMENT_KEY_MAX_CHARACTERS = 80;
+export const CONTEXT_HUB_ITEM_LABEL_MAX_CHARACTERS = 200;
+export const CONTEXT_HUB_MAX_ITEMS_PER_SEGMENT = 500;
+export const CONTEXT_HUB_MAX_ITEM_DEPTH = 6;
+export const CONTEXT_HUB_CONTRIBUTION_MAX_AGE_MS = 5 * MILLISECONDS_PER_MINUTE;
+export const CONTEXT_HUB_CONTRIBUTION_DEDUP_LIMIT = 1_000;
+/** Matches Papyrus's own CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN; kept independent since Jittor does not depend on the Papyrus package. */
+export const CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN = 4;
+export const CONTEXT_HUB_CONFIDENCE_TIERS = ["exact-tool", "exact-cooperative", "correlated", "audited"] as const;

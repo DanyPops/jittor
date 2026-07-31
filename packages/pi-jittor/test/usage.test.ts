@@ -153,7 +153,7 @@ describe("usage graph TUI", () => {
 			on() {},
 		} as unknown as ExtensionAPI;
 		registerJittorExtension(pi, fake);
-		expect([...commands.keys()]).toEqual(["jittor", "usage"]);
+		expect([...commands.keys()]).toEqual(["jittor", "context", "usage"]);
 
 		const notifications: string[] = [];
 		const command = commands.get("usage") as { handler(args: string, ctx: ExtensionCommandContext): Promise<void> };

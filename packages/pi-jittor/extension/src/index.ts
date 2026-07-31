@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+	CONTEXT_HUB_CONTRIBUTION_CHANNEL,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
 	MAX_DYNAMIC_ROUTES,
 	PAPYRUS_CONTEXT_INJECTION_CHANNEL,
@@ -10,6 +11,7 @@ import {
 	validatePapyrusContextInjection,
 	applyTaskFocusEvent,
 	validateTaskFocusEvent,
+	toolLedgerSegment,
 	TASK_DOMAINS,
 	TASK_TYPES,
 	USAGE_PERIODS,
@@ -35,6 +37,8 @@ import { showUsagePanel } from "./usage.ts";
 import { CodexRecoveryCapability, SYSTEM_RECOVERY_RUNTIME, type CodexRecoveryRuntime } from "./capabilities/codex-recovery.ts";
 import { ProviderResponseTelemetry } from "./capabilities/provider-response-telemetry.ts";
 import { LocalRunTelemetry } from "./capabilities/local-run-telemetry.ts";
+import { ContextHubCapability } from "./capabilities/context-hub.ts";
+import { buildContextReport } from "./context-report.ts";
 
 export { formatFooterStatus } from "./tui.ts";
 export type { CodexRecoveryRuntime } from "./capabilities/codex-recovery.ts";
@@ -253,6 +257,8 @@ export function registerJittorExtension(
 	const localRunTelemetry = new LocalRunTelemetry();
 	const providerResponseTelemetry = new ProviderResponseTelemetry();
 	const codexRecoveryCapability = new CodexRecoveryCapability(pi, codexRecovery, recoveryRuntime);
+	const contextHub = new ContextHubCapability();
+	const stopContextHub = pi.events?.on?.(CONTEXT_HUB_CONTRIBUTION_CHANNEL, (payload) => contextHub.observe(payload));
 	const contextObservations = new Set<string>();
 	const stopPapyrusContext = pi.events?.on?.(PAPYRUS_CONTEXT_INJECTION_CHANNEL, (payload) => {
 		try {
@@ -458,6 +464,15 @@ export function registerJittorExtension(
 		},
 	});
 
+	pi.registerCommand("context", {
+		description: "Context Hub: real usage plus every segment's estimated size (tool schemas by owning extension, and whatever other extensions contributed), each tagged with how it was attributed",
+		handler: async (_args, ctx) => {
+			const toolSegment = toolLedgerSegment(pi.getAllTools());
+			const segments = [toolSegment, ...contextHub.contributedSegments()];
+			ctx.ui.notify(buildContextReport(segments, ctx.getContextUsage()), "info");
+		},
+	});
+
 	pi.registerCommand("usage", {
 		description: "Cumulative token/cost usage graph with hourly/daily/weekly/monthly/quarterly views",
 		handler: async (args, ctx) => {
@@ -502,6 +517,7 @@ export function registerJittorExtension(
 		finishCompactionUi();
 		compactionTelemetry = new CompactionTelemetry();
 		localRunTelemetry.reset();
+		contextHub.reset();
 		cancelRecovery(true);
 		providerResponseTelemetry.resetTurn();
 		ctx.ui.setStatus("jittor", undefined);
@@ -642,6 +658,7 @@ export function registerJittorExtension(
 		if (compactionTelemetry.hasOpenCompaction()) await recordMetrics(client, [compactionTelemetry.abort(Date.now(), "session-shutdown")]).catch(() => undefined);
 		stopPapyrusContext?.();
 		stopPapyrusTaskFocus?.();
+		stopContextHub?.();
 		cancelRecovery(true);
 		localRunTelemetry.reset();
 		const session_id = ctx.sessionManager.getSessionId();

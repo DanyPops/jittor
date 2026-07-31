@@ -33,6 +33,20 @@ export {
 	validateTaskFocusEvent,
 } from "./domain/task-focus.ts";
 export {
+	type ContextConfidenceTier,
+	type ContextContribution,
+	type ContextSegment,
+	type ContextSegmentItem,
+	type ToolLedgerEntry,
+	type ToolLedgerSourceUsage,
+	type ToolLedgerToolUsage,
+	computeToolSchemaLedger,
+	contextContributionMetric,
+	toolLedgerSegment,
+	validateContextContribution,
+	validateContextSegment,
+} from "./domain/context-hub.ts";
+export {
 	METRIC_UNITS,
 	type MetricObservation,
 	type MetricQuery,
