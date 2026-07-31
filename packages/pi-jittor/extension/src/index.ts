@@ -38,7 +38,7 @@ import { CodexRecoveryCapability, SYSTEM_RECOVERY_RUNTIME, type CodexRecoveryRun
 import { ProviderResponseTelemetry } from "./capabilities/provider-response-telemetry.ts";
 import { LocalRunTelemetry } from "./capabilities/local-run-telemetry.ts";
 import { ContextHubCapability } from "./capabilities/context-hub.ts";
-import { buildContextReport } from "./context-report.ts";
+import { showContextView } from "./context-view.ts";
 
 export { formatFooterStatus } from "./tui.ts";
 export type { CodexRecoveryRuntime } from "./capabilities/codex-recovery.ts";
@@ -469,7 +469,7 @@ export function registerJittorExtension(
 		handler: async (_args, ctx) => {
 			const toolSegment = toolLedgerSegment(pi.getAllTools());
 			const segments = [toolSegment, ...contextHub.contributedSegments()];
-			ctx.ui.notify(buildContextReport(segments, ctx.getContextUsage()), "info");
+			await showContextView(ctx, segments, ctx.getContextUsage());
 		},
 	});
 
