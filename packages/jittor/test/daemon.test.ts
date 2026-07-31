@@ -134,14 +134,22 @@ describe("Jittor daemon state", () => {
 });
 
 describe("Jittor systemd unit", () => {
-	it("supervises the Bun daemon with restart and hardening controls", () => {
+	// Delegates to vehicle-server's shared generateSystemdUnit (see service-daemon.ts) --
+	// ExecStart is now shell-quoted per argument (more correct for a path containing a
+	// space) rather than the old bespoke unquoted string.
+	it("supervises the Bun daemon with restart, hardening, and network-online controls", () => {
 		const unit = renderSystemdUnit({ bunBin: "/usr/bin/bun", cliPath: "/opt/jittor/src/cli.ts" });
-		expect(unit).toContain("ExecStart=/usr/bin/bun /opt/jittor/src/cli.ts serve");
+		expect(unit).toContain('ExecStart="/usr/bin/bun" "/opt/jittor/src/cli.ts" "serve"');
 		expect(unit).toContain("Restart=always");
+		expect(unit).toContain("RestartSec=2");
 		expect(unit).toContain("NoNewPrivileges=true");
+		expect(unit).toContain("PrivateTmp=true");
+		expect(unit).toContain("After=default.target network-online.target");
+		expect(unit).toContain("Wants=network-online.target");
+		expect(unit).toContain("Environment=DAEMON_KIT_LAUNCH_PROVENANCE=service");
 		expect(renderSystemdUnit({
 			bunBin: "/usr/bin/bun", cliPath: "/opt/jittor/src/cli.ts", codexAuthFile: "/home/test/.codex/auth.json",
-		})).toContain('Environment="JITTOR_CODEX_AUTH_FILE=/home/test/.codex/auth.json"');
+		})).toContain("Environment=JITTOR_CODEX_AUTH_FILE=/home/test/.codex/auth.json");
 		expect(renderSystemdUnit({
 			bunBin: "/usr/bin/bun", cliPath: "/opt/jittor/src/cli.ts", openRouterBenchmarks: true,
 		})).toContain("Environment=JITTOR_OPENROUTER_BENCHMARKS=1");

@@ -1,6 +1,6 @@
 {
   "name": "@danypops/jittor",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "description": "Just-in-Time Token Optimizing Router for Pi -- supervised daemon, router policy, and CLI",
   "type": "module",
   "main": "./src/index.ts",
@@ -16,7 +16,7 @@
     "service:install": "bun src/cli.ts service install"
   },
   "dependencies": {
-    "@danypops/vehicle-server": "^0.2.1",
+    "@danypops/vehicle-server": "^0.3.1",
     "@danypops/vehicle-client": "^0.1.1",
     "google-auth-library": "^10.9.0"
   },
