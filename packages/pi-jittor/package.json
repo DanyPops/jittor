@@ -14,7 +14,7 @@
   "dependencies": {
     "@danypops/vehicle-client": "^0.1.1",
     "@danypops/jittor": "^0.14.0",
-    "malevich-tui-components": "^0.6.0"
+    "malevich-tui-components": "^0.16.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
