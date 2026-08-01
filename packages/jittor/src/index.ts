@@ -1,51 +1,44 @@
-export * from "./constants.ts";
 export {
+	connectJittorClient,
 	type FetchTransport,
 	JittorClient,
-	connectJittorClient,
 } from "./client.ts";
+export * from "./constants.ts";
 export {
-	EXPECTED_OPERATION_NAMES,
-	InvalidSessionSecretError,
-	JittorService,
-	UnknownOperationError,
-	createApp,
-	type JittorAppOptions,
-	type OperationInputs,
-	type OperationName,
-	type OperationOutputs,
-} from "./service.ts";
-export {
-	type CompactionDurationEstimate,
-	type CompactionStart,
-	CompactionTelemetry,
-	type ContextAssessment,
-	type PapyrusContextInjection,
-	assessContextTelemetry,
-	estimateCompactionDuration,
-	papyrusContextMetric,
-	validatePapyrusContextInjection,
-} from "./domain/context-telemetry.ts";
-export {
-	type TaskFocusEvent,
-	type TaskFocusStatus,
-	applyTaskFocusEvent,
-	validateTaskFocusEvent,
-} from "./domain/task-focus.ts";
+	type CodexFailure,
+	type CodexFailureKind,
+	type CodexFailureMetadata,
+	type CodexRecoveryAttempt,
+	type CodexRecoveryOptions,
+	type CodexRecoveryPlan,
+	CodexRecoveryPolicy,
+	classifyCodexFailure,
+} from "./domain/codex-recovery.ts";
 export {
 	type ContextConfidenceTier,
 	type ContextContribution,
 	type ContextSegment,
 	type ContextSegmentItem,
+	computeToolSchemaLedger,
+	contextContributionMetric,
 	type ToolLedgerEntry,
 	type ToolLedgerSourceUsage,
 	type ToolLedgerToolUsage,
-	computeToolSchemaLedger,
-	contextContributionMetric,
 	toolLedgerSegment,
 	validateContextContribution,
 	validateContextSegment,
 } from "./domain/context-hub.ts";
+export {
+	assessContextTelemetry,
+	type CompactionDurationEstimate,
+	type CompactionStart,
+	CompactionTelemetry,
+	type ContextAssessment,
+	estimateCompactionDuration,
+	type PapyrusContextInjection,
+	papyrusContextMetric,
+	validatePapyrusContextInjection,
+} from "./domain/context-telemetry.ts";
 export {
 	METRIC_UNITS,
 	type MetricObservation,
@@ -55,8 +48,8 @@ export {
 	validateMetricObservation,
 } from "./domain/metric.ts";
 export {
-	TASK_DOMAINS,
-	TASK_TYPES,
+	aggregateModelMetrics,
+	classifyTaskFromTools,
 	type ExplicitOutcome,
 	type ModelAggregateOptions,
 	type ModelMetricAggregate,
@@ -64,9 +57,9 @@ export {
 	type ModelTaskClassification,
 	type ModelTaskDomain,
 	type ModelTaskType,
-	aggregateModelMetrics,
-	classifyTaskFromTools,
 	modelRunMetrics,
+	TASK_DOMAINS,
+	TASK_TYPES,
 	validateModelRunObservation,
 } from "./domain/model-observation.ts";
 export {
@@ -75,17 +68,27 @@ export {
 	type ModelRankingResult,
 	type RankedModel,
 	type RankingProvenance,
+	rankModelCandidates,
 	type ScopeAuthority,
 	type UtilityComponent,
 	type UtilityComponentName,
 	type UtilityWeights,
-	rankModelCandidates,
 } from "./domain/model-ranking.ts";
 export {
-	USAGE_PERIODS,
+	applyTaskFocusEvent,
+	type TaskFocusEvent,
+	type TaskFocusStatus,
+	validateTaskFocusEvent,
+} from "./domain/task-focus.ts";
+export {
+	buildCostGraph,
+	buildUsageGraph,
 	type CostBucket,
 	type CostGraph,
 	type CostSeries,
+	identity,
+	resolveUsageWindow,
+	USAGE_PERIODS,
 	type UsageAggregateRow,
 	type UsageBreakdown,
 	type UsageBucket,
@@ -94,43 +97,13 @@ export {
 	type UsageGraphOptions,
 	type UsagePeriod,
 	type UsageSeries,
-	buildCostGraph,
-	buildUsageGraph,
-	identity,
-	resolveUsageWindow,
 	usageBucketIndex,
 	usagePeriod,
 	usagePeriodStart,
 } from "./domain/usage.ts";
 export {
-	CodexRecoveryPolicy,
-	classifyCodexFailure,
-	type CodexFailure,
-	type CodexFailureKind,
-	type CodexFailureMetadata,
-	type CodexRecoveryAttempt,
-	type CodexRecoveryOptions,
-	type CodexRecoveryPlan,
-} from "./domain/codex-recovery.ts";
-export {
-	hasAnthropicRateLimitHeaders,
-	parseAnthropicRateLimitHeaders,
-	type AnthropicMetricSource,
-	type AnthropicRateLimitSnapshot,
-	type AnthropicRateLimitWindow,
-} from "./providers/anthropic-contracts.ts";
-export { parseCodexRateLimitHeaders } from "./providers/codex.ts";
-export {
-	classifyGoogleVertexFailure,
-	googleVertexFailureMetrics,
-	type GoogleVertexFailure,
-	type GoogleVertexFailureKind,
-	type GoogleVertexFailureMetadata,
-	type GoogleVertexMetricSource,
-} from "./providers/google-vertex-contracts.ts";
-export {
-	evaluateRoutingPolicy,
 	type BudgetWindow,
+	evaluateRoutingPolicy,
 	type PolicyAction,
 	type PolicyConfig,
 	type PolicyDecision,
@@ -140,6 +113,7 @@ export {
 	type Route,
 	type TelemetryFreshness,
 } from "./policy.ts";
+export type { DistinctScopesFilter, MetricStore, UsageAggregateFilter } from "./ports/metric-store.ts";
 export type {
 	RouteOverride,
 	RouterController,
@@ -147,5 +121,31 @@ export type {
 	TelemetryPollResult,
 	TelemetrySourceStatus,
 } from "./ports/router-controller.ts";
-export type { DistinctScopesFilter, MetricStore, UsageAggregateFilter } from "./ports/metric-store.ts";
+export {
+	type AnthropicMetricSource,
+	type AnthropicRateLimitSnapshot,
+	type AnthropicRateLimitWindow,
+	hasAnthropicRateLimitHeaders,
+	parseAnthropicRateLimitHeaders,
+} from "./providers/anthropic-contracts.ts";
+export { parseCodexRateLimitHeaders } from "./providers/codex.ts";
+export {
+	classifyGoogleVertexFailure,
+	type GoogleVertexFailure,
+	type GoogleVertexFailureKind,
+	type GoogleVertexFailureMetadata,
+	type GoogleVertexMetricSource,
+	googleVertexFailureMetrics,
+} from "./providers/google-vertex-contracts.ts";
+export {
+	createApp,
+	EXPECTED_OPERATION_NAMES,
+	InvalidSessionSecretError,
+	type JittorAppOptions,
+	JittorService,
+	type OperationInputs,
+	type OperationName,
+	type OperationOutputs,
+	UnknownOperationError,
+} from "./service.ts";
 export { VERSION as jittorVersion } from "./version.ts";

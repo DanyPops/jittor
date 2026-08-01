@@ -42,7 +42,8 @@ function headerInteger(headers: Headers, name: string): number | null {
 	const raw = headers.get(name);
 	if (raw === null) return null;
 	const value = Number(raw);
-	if (!Number.isFinite(value) || !Number.isSafeInteger(value) || value < 0) throw new Error(`Anthropic rate-limit header schema changed: ${name}`);
+	if (!Number.isFinite(value) || !Number.isSafeInteger(value) || value < 0)
+		throw new Error(`Anthropic rate-limit header schema changed: ${name}`);
 	return value;
 }
 
@@ -62,7 +63,12 @@ function parseWindow(headers: Headers, prefix: string): AnthropicRateLimitWindow
 	return { limit, remaining, resetsAt };
 }
 
-function windowMetrics(source: AnthropicMetricSource, scope: string, window: AnthropicRateLimitWindow | null, observedAt: number): MetricObservation[] {
+function windowMetrics(
+	source: AnthropicMetricSource,
+	scope: string,
+	window: AnthropicRateLimitWindow | null,
+	observedAt: number,
+): MetricObservation[] {
 	if (!window) return [];
 	const metrics: MetricObservation[] = [];
 	const attributes = { limit: window.limit, remaining: window.remaining, resetsAt: window.resetsAt };
@@ -85,7 +91,11 @@ function windowMetrics(source: AnthropicMetricSource, scope: string, window: Ant
  */
 export type AnthropicMetricSource = "anthropic" | "anthropic-vertex";
 
-export function parseAnthropicRateLimitHeaders(headers: Headers, observedAt = Date.now(), source: AnthropicMetricSource = "anthropic"): AnthropicRateLimitSnapshot {
+export function parseAnthropicRateLimitHeaders(
+	headers: Headers,
+	observedAt = Date.now(),
+	source: AnthropicMetricSource = "anthropic",
+): AnthropicRateLimitSnapshot {
 	const requests = parseWindow(headers, "anthropic-ratelimit-requests");
 	const tokens = parseWindow(headers, "anthropic-ratelimit-tokens");
 	const inputTokens = parseWindow(headers, "anthropic-ratelimit-input-tokens");

@@ -1,6 +1,6 @@
 import type { CompactionDurationEstimate } from "../domain/context-telemetry.ts";
-import { callAndPrint, type CliDependencies } from "./support.ts";
 import { parseJsonOnlyArgs } from "./router.ts";
+import { type CliDependencies, callAndPrint } from "./support.ts";
 
 export function formatCompactionEstimate(estimate: CompactionDurationEstimate): string {
 	if (estimate.confidence === "cold-start" || estimate.ms === null) {
@@ -9,7 +9,12 @@ export function formatCompactionEstimate(estimate: CompactionDurationEstimate): 
 	return `Compaction duration: ~${estimate.ms.toLocaleString()}ms learned from ${estimate.sampleSize.toLocaleString()} sample(s)`;
 }
 
-export async function runCompactionCommand(action: string | undefined, rest: string[], deps: CliDependencies, usage: () => number): Promise<number> {
+export async function runCompactionCommand(
+	action: string | undefined,
+	rest: string[],
+	deps: CliDependencies,
+	usage: () => number,
+): Promise<number> {
 	if (action !== "estimate") return usage();
 	const parsed = parseJsonOnlyArgs(rest);
 	if (!parsed) return usage();

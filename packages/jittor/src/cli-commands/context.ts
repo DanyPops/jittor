@@ -8,7 +8,10 @@ function parseContextArgs(args: string[]): { input: { since?: number; until?: nu
 	let json = false;
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
-		if (argument === "--json") { json = true; continue; }
+		if (argument === "--json") {
+			json = true;
+			continue;
+		}
 		if (argument !== "--since" && argument !== "--until") return null;
 		const raw = args[++index];
 		const value = raw === undefined ? Number.NaN : Number(raw);
@@ -35,7 +38,12 @@ export function formatContextAssessment(summary: ContextAssessment): string {
 	].join("\n");
 }
 
-export async function runContextCommand(action: string | undefined, rest: string[], deps: CliDependencies, usage: () => number): Promise<number> {
+export async function runContextCommand(
+	action: string | undefined,
+	rest: string[],
+	deps: CliDependencies,
+	usage: () => number,
+): Promise<number> {
 	const parsed = parseContextArgs([...(action === undefined ? [] : [action]), ...rest]);
 	if (!parsed) return usage();
 	try {

@@ -35,14 +35,16 @@ function defaultSettings(): ExtensionSettings {
 function parseUsageTokenBudgets(value: unknown): Partial<Record<UsagePeriod, number>> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
 	const record = value as Record<string, unknown>;
-	return Object.fromEntries(USAGE_PERIODS.flatMap(({ id }) => {
-		const tokens = record[id];
-		return typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0 ? [[id, tokens]] : [];
-	})) as Partial<Record<UsagePeriod, number>>;
+	return Object.fromEntries(
+		USAGE_PERIODS.flatMap(({ id }) => {
+			const tokens = record[id];
+			return typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0 ? [[id, tokens]] : [];
+		}),
+	) as Partial<Record<UsagePeriod, number>>;
 }
 
 function settingsPath(env: Record<string, string | undefined> = process.env): string {
-	const config = env["XDG_CONFIG_HOME"] ?? join(env["HOME"] ?? ".", ".config");
+	const config = env.XDG_CONFIG_HOME ?? join(env.HOME ?? ".", ".config");
 	return join(config, JITTOR_STATE_DIRECTORY, JITTOR_EXTENSION_SETTINGS_FILENAME);
 }
 
@@ -52,10 +54,10 @@ function loadSettings(path: string): ExtensionSettings {
 		if (typeof value !== "object" || value === null || Array.isArray(value)) return defaultSettings();
 		const record = value as Record<string, unknown>;
 		return {
-			enforcementEnabled: record["enforcementEnabled"] !== false,
-			footerEnabled: record["footerEnabled"] !== false,
-			codexRecoveryEnabled: record["codexRecoveryEnabled"] === true,
-			usageTokenBudgets: parseUsageTokenBudgets(record["usageTokenBudgets"]),
+			enforcementEnabled: record.enforcementEnabled !== false,
+			footerEnabled: record.footerEnabled !== false,
+			codexRecoveryEnabled: record.codexRecoveryEnabled === true,
+			usageTokenBudgets: parseUsageTokenBudgets(record.usageTokenBudgets),
 		};
 	} catch {
 		return defaultSettings();
@@ -93,7 +95,8 @@ export function persistentEnforcementControl(env: Record<string, string | undefi
 			return settings.usageTokenBudgets[period];
 		},
 		setUsageTokenBudget(period, tokens): void {
-			if (tokens !== undefined && (!Number.isFinite(tokens) || tokens <= 0)) throw new Error("usage token budget must be a positive finite number");
+			if (tokens !== undefined && (!Number.isFinite(tokens) || tokens <= 0))
+				throw new Error("usage token budget must be a positive finite number");
 			if (tokens === undefined) delete settings.usageTokenBudgets[period];
 			else settings.usageTokenBudgets[period] = tokens;
 			persistSettings(path, settings);

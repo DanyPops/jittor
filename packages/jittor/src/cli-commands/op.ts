@@ -22,7 +22,12 @@ function parseOpArgs(args: string[]): { operation: OperationName; input: Record<
 	return { operation: operation as OperationName, input };
 }
 
-export async function runOpCommand(action: string | undefined, rest: string[], deps: CliDependencies, usage: () => number): Promise<number> {
+export async function runOpCommand(
+	action: string | undefined,
+	rest: string[],
+	deps: CliDependencies,
+	usage: () => number,
+): Promise<number> {
 	const parsed = parseOpArgs(action === undefined ? [] : [action, ...rest]);
 	if (!parsed) return usage();
 	try {

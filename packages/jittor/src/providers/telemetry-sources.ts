@@ -1,16 +1,18 @@
 import type { BudgetWindow } from "../policy.ts";
 import type { TelemetryBatch, TelemetrySource } from "../ports/telemetry-source.ts";
-import { CodexSubscriptionTelemetryAdapter, loadCodexFileCredentials, type CodexRateLimitSnapshot, type CodexWindow, type CodexTransport } from "./codex.ts";
-import { OpenRouterTelemetryAdapter, type OpenRouterTransport } from "./openrouter.ts";
+import {
+	type CodexRateLimitSnapshot,
+	CodexSubscriptionTelemetryAdapter,
+	type CodexTransport,
+	type CodexWindow,
+	loadCodexFileCredentials,
+} from "./codex.ts";
+import type { GoogleAdcTokenProvider } from "./google-adc-auth.ts";
 import { GoogleVertexBudgetTelemetryAdapter, type GoogleVertexBudgetTransport } from "./google-vertex-budget.ts";
 import type { GoogleVertexMetricSource } from "./google-vertex-contracts.ts";
-import type { GoogleAdcTokenProvider } from "./google-adc-auth.ts";
+import { OpenRouterTelemetryAdapter, type OpenRouterTransport } from "./openrouter.ts";
 
-function budgetWindow(
-	limit: CodexRateLimitSnapshot,
-	name: "primary" | "secondary",
-	window: CodexWindow | null,
-): BudgetWindow | null {
+function budgetWindow(limit: CodexRateLimitSnapshot, name: "primary" | "secondary", window: CodexWindow | null): BudgetWindow | null {
 	if (!window || window.windowSeconds === null || window.resetsAt === null) return null;
 	return {
 		id: `${limit.limitId}:${name}@${limit.observedAt}`,
@@ -26,8 +28,9 @@ function budgetWindow(
 }
 
 function windowsFromLimit(limit: CodexRateLimitSnapshot): BudgetWindow[] {
-	return [budgetWindow(limit, "primary", limit.primary), budgetWindow(limit, "secondary", limit.secondary)]
-		.filter((window): window is BudgetWindow => window !== null);
+	return [budgetWindow(limit, "primary", limit.primary), budgetWindow(limit, "secondary", limit.secondary)].filter(
+		(window): window is BudgetWindow => window !== null,
+	);
 }
 
 export class CodexTelemetrySource implements TelemetrySource {

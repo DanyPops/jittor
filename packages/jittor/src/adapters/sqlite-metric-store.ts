@@ -40,22 +40,26 @@ export class SQLiteMetricStore implements MetricStore {
 
 	recordBatch(inputs: MetricObservation[]): StoredMetricObservation[] {
 		const observations = inputs.map((input) => validateMetricObservation(input));
-		return this.db.transaction((rows: typeof observations) => rows.map((observation) => this.get(Number(this.insert(observation).lastInsertRowid))))(observations);
+		return this.db.transaction((rows: typeof observations) =>
+			rows.map((observation) => this.get(Number(this.insert(observation).lastInsertRowid))),
+		)(observations);
 	}
 
 	private insert(observation: MetricObservation): { lastInsertRowid: number | bigint } {
-		return this.db.query(`
+		return this.db
+			.query(`
 			INSERT INTO metric_observations (source, scope, metric, value, unit, observed_at, attributes)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`).run(
-			observation.source,
-			observation.scope,
-			observation.metric,
-			observation.value,
-			observation.unit,
-			observation.observedAt,
-			JSON.stringify(observation.attributes ?? {}),
-		);
+		`)
+			.run(
+				observation.source,
+				observation.scope,
+				observation.metric,
+				observation.value,
+				observation.unit,
+				observation.observedAt,
+				JSON.stringify(observation.attributes ?? {}),
+			);
 	}
 
 	query(filter: MetricQuery = {}): StoredMetricObservation[] {
@@ -69,30 +73,40 @@ export class SQLiteMetricStore implements MetricStore {
 		addEquals("source", filter.source);
 		addEquals("scope", filter.scope);
 		addEquals("metric", filter.metric);
-		if (filter.since !== undefined) { conditions.push("observed_at >= ?"); parameters.push(filter.since); }
-		if (filter.until !== undefined) { conditions.push("observed_at <= ?"); parameters.push(filter.until); }
+		if (filter.since !== undefined) {
+			conditions.push("observed_at >= ?");
+			parameters.push(filter.since);
+		}
+		if (filter.until !== undefined) {
+			conditions.push("observed_at <= ?");
+			parameters.push(filter.until);
+		}
 		const requestedLimit = Number.isFinite(filter.limit) ? Math.floor(filter.limit!) : DEFAULT_QUERY_LIMIT;
 		const limit = Math.max(1, Math.min(MAX_QUERY_LIMIT, requestedLimit));
 		const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 		const order = filter.order === "desc" ? "DESC" : "ASC";
-		const rows = this.db.query(`
+		const rows = this.db
+			.query(`
 			SELECT id, source, scope, metric, value, unit, observed_at, attributes
 			FROM metric_observations
 			${where}
 			ORDER BY observed_at ${order}, id ${order}
 			LIMIT ${limit}
-		`).all(...parameters) as MetricRow[];
+		`)
+			.all(...parameters) as MetricRow[];
 		return rows.map(fromRow);
 	}
 
 	distinctScopes(filter: DistinctScopesFilter): string[] {
 		const limit = Math.max(1, Math.min(MAX_QUERY_LIMIT, Math.floor(filter.limit)));
-		const rows = this.db.query(`
+		const rows = this.db
+			.query(`
 			SELECT DISTINCT scope FROM metric_observations
 			WHERE source = ? AND observed_at >= ? AND observed_at <= ?
 			ORDER BY scope ASC
 			LIMIT ?
-		`).all(filter.source, filter.since, filter.until, limit) as Array<{ scope: string }>;
+		`)
+			.all(filter.source, filter.since, filter.until, limit) as Array<{ scope: string }>;
 		return rows.map((row) => row.scope);
 	}
 
@@ -104,7 +118,8 @@ export class SQLiteMetricStore implements MetricStore {
 		// MIN(a, b) is SQLite's scalar two-argument form (smallest of the arguments), mirroring
 		// usageBucketIndex's own `Math.min(bucketCount - 1, Math.floor(...))` clamp exactly, so a bucket
 		// this returns always matches the same-indexed bucket the client-side window renders.
-		const rows = this.db.query(`
+		const rows = this.db
+			.query(`
 			SELECT scope, metric,
 				MIN(CAST((observed_at - ?) AS REAL) / ?, ? - 1) AS bucket_index_raw,
 				SUM(value) AS sum
@@ -112,11 +127,17 @@ export class SQLiteMetricStore implements MetricStore {
 			WHERE source = ? AND observed_at >= ? AND observed_at <= ? AND value >= 0 AND scope IN (${scopePlaceholders})
 			GROUP BY scope, metric, CAST(bucket_index_raw AS INTEGER)
 			LIMIT ?
-		`).all(
-			filter.since, filter.bucketSizeMs, filter.bucketCount,
-			filter.source, filter.since, filter.until, ...filter.scopes,
-			USAGE_AGGREGATE_MAX_ROWS,
-		) as Array<{ scope: string; metric: string; bucket_index_raw: number; sum: number }>;
+		`)
+			.all(
+				filter.since,
+				filter.bucketSizeMs,
+				filter.bucketCount,
+				filter.source,
+				filter.since,
+				filter.until,
+				...filter.scopes,
+				USAGE_AGGREGATE_MAX_ROWS,
+			) as Array<{ scope: string; metric: string; bucket_index_raw: number; sum: number }>;
 		return rows.map((row) => ({
 			scope: row.scope,
 			metric: row.metric,
@@ -139,10 +160,12 @@ export class SQLiteMetricStore implements MetricStore {
 	}
 
 	private get(id: number): StoredMetricObservation {
-		const row = this.db.query(`
+		const row = this.db
+			.query(`
 			SELECT id, source, scope, metric, value, unit, observed_at, attributes
 			FROM metric_observations WHERE id = ?
-		`).get(id) as MetricRow | null;
+		`)
+			.get(id) as MetricRow | null;
 		if (!row) throw new Error(`metric observation ${id} was not persisted`);
 		return fromRow(row);
 	}

@@ -44,7 +44,15 @@ function attributeText(attributes: Record<string, unknown>, key: string): string
 function entryFor(byTask: Map<string, TaskCostEntry>, taskId: string): TaskCostEntry {
 	const existing = byTask.get(taskId);
 	if (existing) return existing;
-	const created: TaskCostEntry = { taskId, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, byModel: [] };
+	const created: TaskCostEntry = {
+		taskId,
+		costUsd: 0,
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		byModel: [],
+	};
 	byTask.set(taskId, created);
 	return created;
 }
@@ -53,7 +61,16 @@ function breakdownFor(byModel: Map<string, TaskCostBreakdown>, provider: string,
 	const key = `${provider}\u0000${model}\u0000${thinking}`;
 	const existing = byModel.get(key);
 	if (existing) return existing;
-	const created: TaskCostBreakdown = { provider, model, thinking, costUsd: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+	const created: TaskCostBreakdown = {
+		provider,
+		model,
+		thinking,
+		costUsd: 0,
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+	};
 	byModel.set(key, created);
 	return created;
 }
@@ -80,25 +97,49 @@ export function buildTaskCostSummary(rows: StoredMetricObservation[], options: T
 	for (const row of rows) {
 		if (row.source !== "pi" || typeof row.value !== "number" || !Number.isFinite(row.value) || row.value < 0) continue;
 		if (row.observedAt < options.since || row.observedAt > options.until) continue;
-		const taskId = typeof row.attributes["taskId"] === "string" ? row.attributes["taskId"] : undefined;
+		const taskId = typeof row.attributes.taskId === "string" ? row.attributes.taskId : undefined;
 		if (row.metric === "cost" && row.unit === "usd") {
-			if (taskId === undefined) { unattributedCostUsd += row.value; continue; }
+			if (taskId === undefined) {
+				unattributedCostUsd += row.value;
+				continue;
+			}
 			entryFor(byTask, taskId).costUsd += row.value;
 			if (!byTaskModel.has(taskId)) byTaskModel.set(taskId, new Map());
-			breakdownFor(byTaskModel.get(taskId)!, attributeText(row.attributes, "provider"), attributeText(row.attributes, "model"), attributeText(row.attributes, "thinking")).costUsd += row.value;
+			breakdownFor(
+				byTaskModel.get(taskId)!,
+				attributeText(row.attributes, "provider"),
+				attributeText(row.attributes, "model"),
+				attributeText(row.attributes, "thinking"),
+			).costUsd += row.value;
 			continue;
 		}
 		if (taskId === undefined || row.unit !== "tokens" || !TOKEN_METRICS.has(row.metric)) continue;
 		const entry = entryFor(byTask, taskId);
 		if (!byTaskModel.has(taskId)) byTaskModel.set(taskId, new Map());
-		const breakdown = breakdownFor(byTaskModel.get(taskId)!, attributeText(row.attributes, "provider"), attributeText(row.attributes, "model"), attributeText(row.attributes, "thinking"));
-		if (row.metric === "input-tokens") { entry.inputTokens += row.value; breakdown.inputTokens += row.value; }
-		else if (row.metric === "output-tokens") { entry.outputTokens += row.value; breakdown.outputTokens += row.value; }
-		else if (row.metric === "cache-read-tokens") { entry.cacheReadTokens += row.value; breakdown.cacheReadTokens += row.value; }
-		else { entry.cacheWriteTokens += row.value; breakdown.cacheWriteTokens += row.value; }
+		const breakdown = breakdownFor(
+			byTaskModel.get(taskId)!,
+			attributeText(row.attributes, "provider"),
+			attributeText(row.attributes, "model"),
+			attributeText(row.attributes, "thinking"),
+		);
+		if (row.metric === "input-tokens") {
+			entry.inputTokens += row.value;
+			breakdown.inputTokens += row.value;
+		} else if (row.metric === "output-tokens") {
+			entry.outputTokens += row.value;
+			breakdown.outputTokens += row.value;
+		} else if (row.metric === "cache-read-tokens") {
+			entry.cacheReadTokens += row.value;
+			breakdown.cacheReadTokens += row.value;
+		} else {
+			entry.cacheWriteTokens += row.value;
+			breakdown.cacheWriteTokens += row.value;
+		}
 	}
 	for (const [taskId, entry] of byTask) {
-		entry.byModel = [...(byTaskModel.get(taskId)?.values() ?? [])].sort((left, right) => right.costUsd - left.costUsd || left.model.localeCompare(right.model));
+		entry.byModel = [...(byTaskModel.get(taskId)?.values() ?? [])].sort(
+			(left, right) => right.costUsd - left.costUsd || left.model.localeCompare(right.model),
+		);
 	}
 	const entries = [...byTask.values()].sort((left, right) => right.costUsd - left.costUsd || left.taskId.localeCompare(right.taskId));
 	return { since: options.since, until: options.until, entries, unattributedCostUsd, truncated: options.truncated === true };

@@ -2,13 +2,26 @@ import { describe, expect, it } from "bun:test";
 import { applyTaskFocusEvent, validateTaskFocusEvent } from "../src/domain/task-focus.ts";
 
 function payload(overrides: Record<string, unknown> = {}) {
-	return { schema: "papyrus.task-focus/v1", taskId: "ship-feature-x", sessionId: "session-1", status: "focused", observedAt: 1_000, ...overrides };
+	return {
+		schema: "papyrus.task-focus/v1",
+		taskId: "ship-feature-x",
+		sessionId: "session-1",
+		status: "focused",
+		observedAt: 1_000,
+		...overrides,
+	};
 }
 
 describe("Papyrus task-focus event validation", () => {
 	it("accepts a well-formed focused/paused/unpaused event", () => {
 		const event = validateTaskFocusEvent(payload(), 1_500);
-		expect(event).toEqual({ schema: "papyrus.task-focus/v1", taskId: "ship-feature-x", sessionId: "session-1", status: "focused", observedAt: 1_000 });
+		expect(event).toEqual({
+			schema: "papyrus.task-focus/v1",
+			taskId: "ship-feature-x",
+			sessionId: "session-1",
+			status: "focused",
+			observedAt: 1_000,
+		});
 	});
 
 	it("accepts a cleared event with a null taskId and no sessionId", () => {
@@ -29,7 +42,9 @@ describe("Papyrus task-focus event validation", () => {
 		expect(() => validateTaskFocusEvent(payload({ status: "focused", taskId: null }), 1_500)).toThrow("requires a taskId");
 		expect(() => validateTaskFocusEvent(payload({ status: "paused", taskId: null }), 1_500)).toThrow("requires a taskId");
 		expect(() => validateTaskFocusEvent(payload({ status: "unpaused", taskId: null }), 1_500)).toThrow("requires a taskId");
-		expect(() => validateTaskFocusEvent({ schema: "papyrus.task-focus/v1", taskId: null, status: "cleared", observedAt: 1_000 }, 1_500)).not.toThrow();
+		expect(() =>
+			validateTaskFocusEvent({ schema: "papyrus.task-focus/v1", taskId: null, status: "cleared", observedAt: 1_000 }, 1_500),
+		).not.toThrow();
 	});
 });
 
@@ -41,6 +56,10 @@ describe("Task focus state application", () => {
 
 	it("clears the tracked task id on paused and cleared, even though Papyrus itself keeps the pause state", () => {
 		expect(applyTaskFocusEvent(validateTaskFocusEvent(payload({ status: "paused" }), 1_500))).toBeNull();
-		expect(applyTaskFocusEvent(validateTaskFocusEvent({ schema: "papyrus.task-focus/v1", taskId: null, status: "cleared", observedAt: 1_000 }, 1_500))).toBeNull();
+		expect(
+			applyTaskFocusEvent(
+				validateTaskFocusEvent({ schema: "papyrus.task-focus/v1", taskId: null, status: "cleared", observedAt: 1_000 }, 1_500),
+			),
+		).toBeNull();
 	});
 });

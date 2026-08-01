@@ -1,5 +1,5 @@
-import type { MetricObservation } from "../domain/metric.ts";
 import { MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_SECOND } from "../constants.ts";
+import type { MetricObservation } from "../domain/metric.ts";
 
 /**
  * Google Vertex AI has no documented per-response rate-limit or remaining-quota header, and no
@@ -15,13 +15,7 @@ import { MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_SECOND } from "../constants.t
  * `errorMessage` string Pi already exposes for every provider (see classifyCodexFailure for the
  * established pattern this mirrors).
  */
-export type GoogleVertexFailureKind =
-	| "quota"
-	| "authentication"
-	| "invalid-request"
-	| "overload"
-	| "transport"
-	| "unknown";
+export type GoogleVertexFailureKind = "quota" | "authentication" | "invalid-request" | "overload" | "transport" | "unknown";
 
 export interface GoogleVertexFailure {
 	kind: GoogleVertexFailureKind;
@@ -72,12 +66,24 @@ export function classifyGoogleVertexFailure(value: unknown, metadata: GoogleVert
 		return { kind: "quota", transient: true, status: "RESOURCE_EXHAUSTED", ...base };
 	}
 	if (matches(evidence, ["unauthenticated", "permission_denied"]) || metadata.status === 401 || metadata.status === 403) {
-		return { kind: "authentication", transient: false, status: matches(evidence, ["unauthenticated"]) ? "UNAUTHENTICATED" : "PERMISSION_DENIED", ...base };
+		return {
+			kind: "authentication",
+			transient: false,
+			status: matches(evidence, ["unauthenticated"]) ? "UNAUTHENTICATED" : "PERMISSION_DENIED",
+			...base,
+		};
 	}
-	if (matches(evidence, ["invalid_argument", "failed_precondition", "out_of_range"]) || metadata.status === 400 || metadata.status === 422) {
+	if (
+		matches(evidence, ["invalid_argument", "failed_precondition", "out_of_range"]) ||
+		metadata.status === 400 ||
+		metadata.status === 422
+	) {
 		return { kind: "invalid-request", transient: false, status: "INVALID_ARGUMENT", ...base };
 	}
-	if (matches(evidence, ["unavailable", "internal", "aborted"]) || (metadata.status !== undefined && metadata.status >= 500 && metadata.status <= 599)) {
+	if (
+		matches(evidence, ["unavailable", "internal", "aborted"]) ||
+		(metadata.status !== undefined && metadata.status >= 500 && metadata.status <= 599)
+	) {
 		return { kind: "overload", transient: true, status: "UNAVAILABLE", ...base };
 	}
 	if (matches(evidence, ["deadline_exceeded", "timeout", "timed out", "network", "connection", "fetch failed", "cancelled"])) {
@@ -99,18 +105,24 @@ export function classifyGoogleVertexFailure(value: unknown, metadata: GoogleVert
 export type GoogleVertexMetricSource = "google-vertex" | "anthropic-vertex";
 
 /** A bounded failure-count observation; never a fabricated remaining-budget fraction. */
-export function googleVertexFailureMetrics(failure: GoogleVertexFailure, observedAt: number, source: GoogleVertexMetricSource = "google-vertex"): MetricObservation[] {
-	return [{
-		source,
-		scope: "failure",
-		metric: failure.kind,
-		value: 1,
-		unit: "count",
-		observedAt,
-		attributes: {
-			transient: failure.transient,
-			...(failure.status ? { status: failure.status } : {}),
-			...(failure.code !== undefined ? { code: failure.code } : {}),
+export function googleVertexFailureMetrics(
+	failure: GoogleVertexFailure,
+	observedAt: number,
+	source: GoogleVertexMetricSource = "google-vertex",
+): MetricObservation[] {
+	return [
+		{
+			source,
+			scope: "failure",
+			metric: failure.kind,
+			value: 1,
+			unit: "count",
+			observedAt,
+			attributes: {
+				transient: failure.transient,
+				...(failure.status ? { status: failure.status } : {}),
+				...(failure.code !== undefined ? { code: failure.code } : {}),
+			},
 		},
-	}];
+	];
 }

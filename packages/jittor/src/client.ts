@@ -1,6 +1,6 @@
 import { AuthenticatedRpcClient, type FetchTransport } from "@danypops/vehicle-client/rpc-client";
 import type { OperationInputs, OperationName, OperationOutputs } from "./service.ts";
-import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, type JittorPaths } from "./state.ts";
+import { ensureAuthToken, type JittorPaths, readDaemonHandle, resolveJittorPaths } from "./state.ts";
 
 export type { FetchTransport };
 

@@ -1,21 +1,16 @@
 import { readFileSync, statSync } from "node:fs";
-import {
-	parseCodexRateLimitHeaders,
-	parseCodexUsage,
-	type CodexRateLimitSnapshot,
-	type CodexUsageSnapshot,
-} from "./codex-contracts.ts";
+import { type CodexRateLimitSnapshot, type CodexUsageSnapshot, parseCodexRateLimitHeaders, parseCodexUsage } from "./codex-contracts.ts";
 
 export {
-	parseCodexRateLimitHeaders,
-	parseCodexUsage,
-	rateLimitMetrics,
 	type CodexCredits,
 	type CodexRateLimitSnapshot,
 	type CodexSpendControl,
 	type CodexSpendLimit,
 	type CodexUsageSnapshot,
 	type CodexWindow,
+	parseCodexRateLimitHeaders,
+	parseCodexUsage,
+	rateLimitMetrics,
 } from "./codex-contracts.ts";
 
 const CHATGPT_BACKEND_BASE_URL = "https://chatgpt.com/backend-api";
@@ -54,10 +49,10 @@ export function loadCodexFileCredentials(path: string): CodexCredentials {
 		throw new Error(`Codex credentials are unavailable at ${path}`);
 	}
 	const root = record(parsed, "auth.json root");
-	const tokens = record(root["tokens"], "auth.json tokens");
+	const tokens = record(root.tokens, "auth.json tokens");
 	return {
-		accessToken: requiredString(tokens["access_token"], "access_token"),
-		accountId: requiredString(tokens["account_id"], "account_id"),
+		accessToken: requiredString(tokens.access_token, "access_token"),
+		accountId: requiredString(tokens.account_id, "account_id"),
 	};
 }
 
@@ -79,13 +74,15 @@ export class CodexSubscriptionTelemetryAdapter {
 	}
 
 	async readUsage(observedAt = Date.now()): Promise<CodexUsageSnapshot> {
-		const response = await this.transport(new Request(`${this.baseUrl}/wham/usage`, {
-			headers: {
-				authorization: `Bearer ${this.credentials.accessToken}`,
-				"chatgpt-account-id": this.credentials.accountId,
-				accept: "application/json",
-			},
-		}));
+		const response = await this.transport(
+			new Request(`${this.baseUrl}/wham/usage`, {
+				headers: {
+					authorization: `Bearer ${this.credentials.accessToken}`,
+					"chatgpt-account-id": this.credentials.accountId,
+					accept: "application/json",
+				},
+			}),
+		);
 		if (!response.ok) throw new Error(`Codex experimental usage request failed with HTTP ${response.status}`);
 		let payload: unknown;
 		try {

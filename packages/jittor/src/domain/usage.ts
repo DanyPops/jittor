@@ -7,9 +7,9 @@ export const USAGE_PERIODS = [
 	{ id: "monthly", label: "Monthly", windowMs: 30 * MILLISECONDS_PER_DAY, bucketCount: 30 },
 	{ id: "quarterly", label: "Quarterly", windowMs: 90 * MILLISECONDS_PER_DAY, bucketCount: 90 },
 ] as const;
-export type UsagePeriod = typeof USAGE_PERIODS[number]["id"];
+export type UsagePeriod = (typeof USAGE_PERIODS)[number]["id"];
 
-export function usagePeriod(period: UsagePeriod): typeof USAGE_PERIODS[number] {
+export function usagePeriod(period: UsagePeriod): (typeof USAGE_PERIODS)[number] {
 	return USAGE_PERIODS.find((candidate) => candidate.id === period)!;
 }
 

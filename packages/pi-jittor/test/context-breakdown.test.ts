@@ -66,20 +66,50 @@ describe("buildMessageHistoryTree", () => {
 	});
 
 	it("counts thinking blocks and tool-call arguments, not just plain text", () => {
-		const tree = [node("1", { type: "message", message: { role: "assistant", content: [{ type: "thinking", thinking: "a".repeat(20) }, { type: "toolCall", arguments: { path: "b".repeat(20) } }] } })];
+		const tree = [
+			node("1", {
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "a".repeat(20) },
+						{ type: "toolCall", arguments: { path: "b".repeat(20) } },
+					],
+				},
+			}),
+		];
 		const result = buildMessageHistoryTree(tree, new Set(["1"]));
 		expect(result.items[0]!.estimatedTokens).toBeGreaterThan(0);
 	});
 
 	it("excludes bashExecution output explicitly marked excludeFromContext, matching Pi's own !! prefix behavior", () => {
-		const included = buildMessageHistoryTree([node("1", { type: "message", message: { role: "bashExecution", command: "ls", output: "x".repeat(100), excludeFromContext: false } })], new Set(["1"]));
-		const excluded = buildMessageHistoryTree([node("2", { type: "message", message: { role: "bashExecution", command: "ls", output: "x".repeat(100), excludeFromContext: true } })], new Set(["2"]));
+		const included = buildMessageHistoryTree(
+			[
+				node("1", {
+					type: "message",
+					message: { role: "bashExecution", command: "ls", output: "x".repeat(100), excludeFromContext: false },
+				}),
+			],
+			new Set(["1"]),
+		);
+		const excluded = buildMessageHistoryTree(
+			[
+				node("2", {
+					type: "message",
+					message: { role: "bashExecution", command: "ls", output: "x".repeat(100), excludeFromContext: true },
+				}),
+			],
+			new Set(["2"]),
+		);
 		expect(included.items).toHaveLength(1);
 		expect(excluded.items).toHaveLength(0);
 	});
 
 	it("counts compaction and branch_summary entries' summaries, since they do participate in context", () => {
-		const tree = [node("1", { type: "compaction", summary: "x".repeat(400) }), node("2", { type: "branch_summary", summary: "y".repeat(400) })];
+		const tree = [
+			node("1", { type: "compaction", summary: "x".repeat(400) }),
+			node("2", { type: "branch_summary", summary: "y".repeat(400) }),
+		];
 		const result = buildMessageHistoryTree(tree, new Set(["1", "2"]));
 		expect(result.activeTokens).toBe(Math.ceil(800 / 4));
 	});
@@ -94,7 +124,10 @@ describe("buildMessageHistoryTree", () => {
 	});
 
 	it("tolerates a malformed or unexpected message shape without throwing", () => {
-		const tree = [node("1", { type: "message", message: null }), node("2", { type: "message", message: "not an object" as unknown as undefined })];
+		const tree = [
+			node("1", { type: "message", message: null }),
+			node("2", { type: "message", message: "not an object" as unknown as undefined }),
+		];
 		expect(() => buildMessageHistoryTree(tree, new Set())).not.toThrow();
 	});
 
@@ -109,12 +142,24 @@ describe("buildMessageHistoryTree", () => {
 
 describe("buildBasePromptItems", () => {
 	it("splits tool snippets, skills, and context files into their own items, each with a real count", () => {
-		const items = buildBasePromptItems({
-			cwd: "/workspace",
-			toolSnippets: { read: "Read the contents of a file.", bash: "Execute a bash command." },
-			skills: [{ name: "commit", description: "Write commits.", filePath: "/skills/commit/SKILL.md", baseDir: "/skills/commit", sourceInfo: {} as never, disableModelInvocation: false }],
-			contextFiles: [{ path: "/workspace/AGENTS.md", content: "Some project instructions." }],
-		}, 5000);
+		const items = buildBasePromptItems(
+			{
+				cwd: "/workspace",
+				toolSnippets: { read: "Read the contents of a file.", bash: "Execute a bash command." },
+				skills: [
+					{
+						name: "commit",
+						description: "Write commits.",
+						filePath: "/skills/commit/SKILL.md",
+						baseDir: "/skills/commit",
+						sourceInfo: {} as never,
+						disableModelInvocation: false,
+					},
+				],
+				contextFiles: [{ path: "/workspace/AGENTS.md", content: "Some project instructions." }],
+			},
+			5000,
+		);
 		const labels = items.map((item) => item.label);
 		expect(labels.some((label) => label.includes("Tool snippets (2 tools)"))).toBe(true);
 		expect(labels.some((label) => label.includes("Skills catalog (1 skills)"))).toBe(true);
@@ -124,13 +169,16 @@ describe("buildBasePromptItems", () => {
 	});
 
 	it("excludes skills marked disableModelInvocation from the count, since Pi's own formatSkillsForPrompt does the same", () => {
-		const items = buildBasePromptItems({
-			cwd: "/workspace",
-			skills: [
-				{ name: "visible", description: "d", filePath: "/f", baseDir: "/", sourceInfo: {} as never, disableModelInvocation: false },
-				{ name: "hidden", description: "d", filePath: "/f", baseDir: "/", sourceInfo: {} as never, disableModelInvocation: true },
-			],
-		}, 5000);
+		const items = buildBasePromptItems(
+			{
+				cwd: "/workspace",
+				skills: [
+					{ name: "visible", description: "d", filePath: "/f", baseDir: "/", sourceInfo: {} as never, disableModelInvocation: false },
+					{ name: "hidden", description: "d", filePath: "/f", baseDir: "/", sourceInfo: {} as never, disableModelInvocation: true },
+				],
+			},
+			5000,
+		);
 		const skillsItem = items.find((item) => item.label.includes("Skills catalog"))!;
 		expect(skillsItem.label).toContain("(1 skills)");
 	});
@@ -162,7 +210,11 @@ describe("basePromptSegment / messageHistorySegment", () => {
 
 	it("uses only the active-path token sum for messageHistory's own total, even though items include inactive branches", () => {
 		const tree = buildMessageHistoryTree(
-			[node("1", { type: "message", message: { role: "user", content: "x".repeat(40) } }, [node("2b", { type: "message", message: { role: "assistant", content: [{ type: "text", text: "z".repeat(400) }] } })])],
+			[
+				node("1", { type: "message", message: { role: "user", content: "x".repeat(40) } }, [
+					node("2b", { type: "message", message: { role: "assistant", content: [{ type: "text", text: "z".repeat(400) }] } }),
+				]),
+			],
 			new Set(["1"]),
 		);
 		const segment = messageHistorySegment(tree);
@@ -177,14 +229,22 @@ describe("composeContextBreakdown", () => {
 	}
 
 	it("derives 'other' as the remainder between the real total and every known segment", () => {
-		const breakdown = composeContextBreakdown({ totalTokens: 1000, contextWindow: 200_000, segments: [segment("rules", 100), segment("tasks", 20), segment("skills", 50)] });
+		const breakdown = composeContextBreakdown({
+			totalTokens: 1000,
+			contextWindow: 200_000,
+			segments: [segment("rules", 100), segment("tasks", 20), segment("skills", 50)],
+		});
 		const other = breakdown.segments.find((s) => s.key === "other")!;
 		expect(other.estimatedTokens).toBe(1000 - 170);
 		expect(breakdown.overshootTokens).toBe(0);
 	});
 
 	it("clamps 'other' to zero instead of going negative when estimates overshoot the real total, preserving the overshoot amount", () => {
-		const breakdown = composeContextBreakdown({ totalTokens: 50, contextWindow: null, segments: [segment("rules", 100), segment("tasks", 20), segment("skills", 50)] });
+		const breakdown = composeContextBreakdown({
+			totalTokens: 50,
+			contextWindow: null,
+			segments: [segment("rules", 100), segment("tasks", 20), segment("skills", 50)],
+		});
 		const other = breakdown.segments.find((s) => s.key === "other")!;
 		expect(other.estimatedTokens).toBe(0);
 		expect(breakdown.overshootTokens).toBe(120);

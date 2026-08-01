@@ -1,27 +1,27 @@
-import { startDaemon as startDaemonKit, type RunningDaemon } from "@danypops/vehicle-server/daemon";
-import { MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
-import { DEFAULT_POLICY, UNCONFIGURED_ROUTE } from "./config.ts";
-import { SQLiteMetricStore } from "./adapters/sqlite-metric-store.ts";
+import { type RunningDaemon, startDaemon as startDaemonKit } from "@danypops/vehicle-server/daemon";
+import { ArtificialAnalysisDirectSource } from "./adapters/artificial-analysis-direct-source.ts";
+import { LmArenaHfSource } from "./adapters/lmarena-hf-source.ts";
 import { MetricBenchmarkStore } from "./adapters/metric-benchmark-store.ts";
 import { OpenRouterBenchmarkSource } from "./adapters/openrouter-benchmark-source.ts";
 import { OpenRouterDesignArenaSource } from "./adapters/openrouter-design-arena-source.ts";
-import { LmArenaHfSource } from "./adapters/lmarena-hf-source.ts";
-import { ArtificialAnalysisDirectSource } from "./adapters/artificial-analysis-direct-source.ts";
+import { SQLiteMetricStore } from "./adapters/sqlite-metric-store.ts";
+import { SQLiteSessionIdentityStore } from "./adapters/sqlite-session-identity-store.ts";
+import { DEFAULT_POLICY, UNCONFIGURED_ROUTE } from "./config.ts";
+import { MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
 import { openJittorDb } from "./db.ts";
 import { BenchmarkCatalog } from "./domain/benchmark.ts";
 import { EvidenceModelRanker } from "./domain/model-ranking-service.ts";
-import { createApp, JittorService } from "./service.ts";
-import { JittorRouter } from "./router.ts";
-import { SQLiteSessionIdentityStore } from "./adapters/sqlite-session-identity-store.ts";
-import { SessionIdentity } from "./session-identity-service.ts";
+import { logEvent, logger } from "./log.ts";
 import type { BenchmarkSource } from "./ports/benchmark-source.ts";
 import type { TelemetrySource } from "./ports/telemetry-source.ts";
-import { CodexTelemetrySource, GoogleVertexBudgetTelemetrySource, OpenRouterTelemetrySource } from "./providers/telemetry-sources.ts";
 import { createGoogleAdcTokenProvider } from "./providers/google-adc-auth.ts";
 import { GOOGLE_PUBSUB_READONLY_SCOPE } from "./providers/google-vertex-budget.ts";
 import type { GoogleVertexMetricSource } from "./providers/google-vertex-contracts.ts";
-import { ensureAuthToken, resolveJittorPaths, type JittorPaths } from "./state.ts";
-import { logEvent, logger } from "./log.ts";
+import { CodexTelemetrySource, GoogleVertexBudgetTelemetrySource, OpenRouterTelemetrySource } from "./providers/telemetry-sources.ts";
+import { JittorRouter } from "./router.ts";
+import { createApp, JittorService } from "./service.ts";
+import { SessionIdentity } from "./session-identity-service.ts";
+import { ensureAuthToken, type JittorPaths, resolveJittorPaths } from "./state.ts";
 
 export type { RunningDaemon } from "@danypops/vehicle-server/daemon";
 
@@ -32,12 +32,12 @@ export function reportMaintenanceFailure(event: string, error: unknown): void {
 // Flag name predates non-OpenRouter sources; kept as the one "opt into online benchmark
 // ingestion" toggle rather than adding a second flag for the same decision.
 export function benchmarkSourcesFromEnvironment(env: Record<string, string | undefined> = process.env): BenchmarkSource[] {
-	if (env["JITTOR_OPENROUTER_BENCHMARKS"] !== "1") return [];
+	if (env.JITTOR_OPENROUTER_BENCHMARKS !== "1") return [];
 	const sources: BenchmarkSource[] = [new OpenRouterBenchmarkSource(), new LmArenaHfSource()];
 	// Design Arena's own API needs manual approval, unlike Artificial Analysis's instant signup --
 	// no direct alternative exists yet, so the OpenRouter passthrough stays.
-	if (env["OPENROUTER_API_KEY"]) sources.push(new OpenRouterDesignArenaSource(env["OPENROUTER_API_KEY"]));
-	if (env["ARTIFICIAL_ANALYSIS_API_KEY"]) sources.push(new ArtificialAnalysisDirectSource(env["ARTIFICIAL_ANALYSIS_API_KEY"]));
+	if (env.OPENROUTER_API_KEY) sources.push(new OpenRouterDesignArenaSource(env.OPENROUTER_API_KEY));
+	if (env.ARTIFICIAL_ANALYSIS_API_KEY) sources.push(new ArtificialAnalysisDirectSource(env.ARTIFICIAL_ANALYSIS_API_KEY));
 	return sources;
 }
 
@@ -49,15 +49,15 @@ function googleVertexMetricSource(value: string | undefined): GoogleVertexMetric
 
 export function telemetrySourcesFromEnvironment(env: Record<string, string | undefined> = process.env): TelemetrySource[] {
 	const sources: TelemetrySource[] = [];
-	const codexAuthFile = env["JITTOR_CODEX_AUTH_FILE"];
+	const codexAuthFile = env.JITTOR_CODEX_AUTH_FILE;
 	if (codexAuthFile) sources.push(new CodexTelemetrySource(codexAuthFile));
-	const openRouterKey = env["OPENROUTER_API_KEY"];
+	const openRouterKey = env.OPENROUTER_API_KEY;
 	if (openRouterKey) sources.push(new OpenRouterTelemetrySource(openRouterKey));
 	// Opt-in only: the Pub/Sub subscription is one-time GCP console/CLI setup outside Jittor (see
 	// docs/PROVIDER_RESEARCH.md), so its absence must never attempt ADC discovery or a network call.
-	const vertexBudgetSubscription = env["JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION"];
+	const vertexBudgetSubscription = env.JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION;
 	if (vertexBudgetSubscription) {
-		const source = googleVertexMetricSource(env["JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE"]);
+		const source = googleVertexMetricSource(env.JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE);
 		const tokenProvider = createGoogleAdcTokenProvider([GOOGLE_PUBSUB_READONLY_SCOPE]);
 		sources.push(new GoogleVertexBudgetTelemetrySource(vertexBudgetSubscription, tokenProvider, Date.now, fetch, source));
 	}
@@ -102,11 +102,31 @@ export async function startDaemon(
 		logger,
 		buildApp: () => createApp({ service, token }),
 		maintenanceTasks: [
-			{ name: "checkpoint", intervalMs: MAINTENANCE_INTERVAL_MS, run: async () => { await service.execute("service.checkpoint", {}).catch((error) => reportMaintenanceFailure("checkpoint_failed", error)); } },
-			{ name: "benchmark-refresh", intervalMs: MAINTENANCE_INTERVAL_MS, run: async () => { await benchmarks.refresh().catch((error) => reportMaintenanceFailure("benchmark_refresh_failed", error)); } },
-			{ name: "telemetry-poll", intervalMs: TELEMETRY_POLL_INTERVAL_MS, run: async () => { await router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error)); } },
+			{
+				name: "checkpoint",
+				intervalMs: MAINTENANCE_INTERVAL_MS,
+				run: async () => {
+					await service.execute("service.checkpoint", {}).catch((error) => reportMaintenanceFailure("checkpoint_failed", error));
+				},
+			},
+			{
+				name: "benchmark-refresh",
+				intervalMs: MAINTENANCE_INTERVAL_MS,
+				run: async () => {
+					await benchmarks.refresh().catch((error) => reportMaintenanceFailure("benchmark_refresh_failed", error));
+				},
+			},
+			{
+				name: "telemetry-poll",
+				intervalMs: TELEMETRY_POLL_INTERVAL_MS,
+				run: async () => {
+					await router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error));
+				},
+			},
 		],
-		onShutdown: () => { service.close(); },
+		onShutdown: () => {
+			service.close();
+		},
 	});
 
 	if (sources.length > 0) router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error));

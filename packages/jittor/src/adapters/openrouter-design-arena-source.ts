@@ -1,9 +1,10 @@
+import { BENCHMARK_MAX_MODELS_PER_SOURCE, BENCHMARK_REFRESH_INTERVAL_MS, BENCHMARK_SOURCE_MAX_RESPONSE_BYTES } from "../constants.ts";
 import {
-	BENCHMARK_MAX_MODELS_PER_SOURCE,
-	BENCHMARK_REFRESH_INTERVAL_MS,
-	BENCHMARK_SOURCE_MAX_RESPONSE_BYTES,
-} from "../constants.ts";
-import { normalizeModelIdentity, validateBenchmarkObservation, type BenchmarkObservation, type BenchmarkSourceSnapshot } from "../domain/benchmark.ts";
+	type BenchmarkObservation,
+	type BenchmarkSourceSnapshot,
+	normalizeModelIdentity,
+	validateBenchmarkObservation,
+} from "../domain/benchmark.ts";
 import type { BenchmarkSource } from "../ports/benchmark-source.ts";
 import { contractRecord } from "../providers/openrouter-contracts.ts";
 import type { OpenRouterBenchmarkTransport } from "./openrouter-benchmark-source.ts";
@@ -22,7 +23,8 @@ const BASE_URL = `https://openrouter.ai/api/v1/benchmarks?source=design-arena&ma
 const RELEVANT_CATEGORIES = ["codecategories", "website", "uicomponent", "dataviz", "svg"] as const;
 
 function requiredText(value: unknown, name: string): string {
-	if (typeof value !== "string" || value.length === 0 || value.length > 500) throw new Error(`OpenRouter Design Arena benchmark ${name} schema changed`);
+	if (typeof value !== "string" || value.length === 0 || value.length > 500)
+		throw new Error(`OpenRouter Design Arena benchmark ${name} schema changed`);
 	return value;
 }
 
@@ -62,24 +64,32 @@ export class OpenRouterDesignArenaSource implements BenchmarkSource {
 		const response = await this.transport(new Request(url, { headers: { authorization: `Bearer ${this.apiKey}` } }));
 		if (!response.ok) throw new Error(`OpenRouter Design Arena benchmarks failed with HTTP ${response.status}`);
 		const text = await response.text();
-		if (new TextEncoder().encode(text).byteLength > BENCHMARK_SOURCE_MAX_RESPONSE_BYTES) throw new Error("OpenRouter Design Arena benchmark response exceeds the size limit");
+		if (new TextEncoder().encode(text).byteLength > BENCHMARK_SOURCE_MAX_RESPONSE_BYTES)
+			throw new Error("OpenRouter Design Arena benchmark response exceeds the size limit");
 		let payload: unknown;
-		try { payload = JSON.parse(text); } catch { throw new Error("OpenRouter Design Arena benchmark response is not valid JSON"); }
+		try {
+			payload = JSON.parse(text);
+		} catch {
+			throw new Error("OpenRouter Design Arena benchmark response is not valid JSON");
+		}
 		const root = contractRecord(payload, "benchmark response");
-		const meta = contractRecord(root["meta"], "benchmark metadata");
-		if (!Array.isArray(root["data"]) || root["data"].length > BENCHMARK_MAX_MODELS_PER_SOURCE) throw new Error("OpenRouter Design Arena benchmark result count is invalid");
-		if (requiredText(meta["source"], "source") !== "design-arena") throw new Error("OpenRouter Design Arena benchmark source schema changed");
-		const asOf = requiredText(meta["as_of"], "as-of date");
+		const meta = contractRecord(root.meta, "benchmark metadata");
+		if (!Array.isArray(root.data) || root.data.length > BENCHMARK_MAX_MODELS_PER_SOURCE)
+			throw new Error("OpenRouter Design Arena benchmark result count is invalid");
+		if (requiredText(meta.source, "source") !== "design-arena") throw new Error("OpenRouter Design Arena benchmark source schema changed");
+		const asOf = requiredText(meta.as_of, "as-of date");
 		const publishedAt = Date.parse(asOf);
-		if (!Number.isSafeInteger(publishedAt) || publishedAt <= 0) throw new Error("OpenRouter Design Arena benchmark publication date schema changed");
+		if (!Number.isSafeInteger(publishedAt) || publishedAt <= 0)
+			throw new Error("OpenRouter Design Arena benchmark publication date schema changed");
 		const revision = `${category}:${asOf}`;
-		const observations = root["data"].flatMap((value): BenchmarkObservation[] => {
+		const observations = root.data.flatMap((value): BenchmarkObservation[] => {
 			const row = contractRecord(value, "benchmark row");
-			if (requiredText(row["source"], "row source") !== "design-arena") throw new Error("OpenRouter Design Arena benchmark row source schema changed");
+			if (requiredText(row.source, "row source") !== "design-arena")
+				throw new Error("OpenRouter Design Arena benchmark row source schema changed");
 			// A null open_router_id means the model isn't reachable through OpenRouter at all
 			// (proprietary platform, image/video generator, deprecated model) -- not evidence
 			// Jittor can ever route against, so the row is skipped rather than rejected.
-			const openRouterId = row["open_router_id"];
+			const openRouterId = row.open_router_id;
 			if (openRouterId === null) return [];
 			const { provider, model } = identityFromOpenRouterId(requiredText(openRouterId, "open_router_id"));
 			const identity = normalizeModelIdentity(provider, model, [`openrouter/${provider}/${model}`]);
@@ -96,9 +106,16 @@ export class OpenRouterDesignArenaSource implements BenchmarkSource {
 				confidence: 0.7,
 			};
 			const methodology = { basis: "Design Arena Elo rating via OpenRouter", category, asOf };
-			return [validateBenchmarkObservation({
-				model: identity, dimension: "quality-design", value: requiredNumber(row["elo"], "elo rating"), unit: "elo", provenance, methodology,
-			})];
+			return [
+				validateBenchmarkObservation({
+					model: identity,
+					dimension: "quality-design",
+					value: requiredNumber(row.elo, "elo rating"),
+					unit: "elo",
+					provenance,
+					methodology,
+				}),
+			];
 		});
 		return { revision, observations };
 	}

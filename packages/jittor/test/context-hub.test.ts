@@ -2,10 +2,10 @@ import { describe, expect, it } from "bun:test";
 import {
 	computeToolSchemaLedger,
 	contextContributionMetric,
+	type ToolLedgerEntry,
 	toolLedgerSegment,
 	validateContextContribution,
 	validateContextSegment,
-	type ToolLedgerEntry,
 } from "../src/domain/context-hub.ts";
 
 function contribution() {
@@ -19,7 +19,10 @@ function contribution() {
 			label: "Active Rules",
 			estimatedTokens: 120,
 			confidence: "exact-cooperative",
-			items: [{ label: "Rule A", estimatedTokens: 80 }, { label: "Rule B", estimatedTokens: 40 }],
+			items: [
+				{ label: "Rule A", estimatedTokens: 80 },
+				{ label: "Rule B", estimatedTokens: 40 },
+			],
 		},
 	};
 }
@@ -38,19 +41,31 @@ describe("Context Hub: shared contribution channel", () => {
 		expect(() => validateContextContribution({ ...contribution(), schema: "v2" }, 1_500)).toThrow("schema");
 		expect(() => validateContextContribution(contribution(), 1_000 + 10 * 60_000)).toThrow("stale");
 		expect(() => validateContextContribution({ ...contribution(), extra: "rule body text" }, 1_500)).toThrow("unexpected field");
-		expect(() => validateContextContribution({ ...contribution(), segment: { ...contribution().segment, confidence: "definitely" } }, 1_500)).toThrow("confidence");
+		expect(() =>
+			validateContextContribution({ ...contribution(), segment: { ...contribution().segment, confidence: "definitely" } }, 1_500),
+		).toThrow("confidence");
 	});
 
 	it("keeps a segment marked unknown visible even at zero tokens, and rejects a non-boolean unknown field", () => {
-		const segment = validateContextSegment({ key: "basePrompt", label: "Base prompt", estimatedTokens: 0, confidence: "exact-structural", unknown: true });
+		const segment = validateContextSegment({
+			key: "basePrompt",
+			label: "Base prompt",
+			estimatedTokens: 0,
+			confidence: "exact-structural",
+			unknown: true,
+		});
 		expect(segment.unknown).toBe(true);
-		expect(() => validateContextSegment({ key: "x", label: "X", estimatedTokens: 0, confidence: "audited", unknown: "yes" })).toThrow("unknown must be a boolean");
+		expect(() => validateContextSegment({ key: "x", label: "X", estimatedTokens: 0, confidence: "audited", unknown: "yes" })).toThrow(
+			"unknown must be a boolean",
+		);
 	});
 
 	it("rejects a segment item tree nested past the bound", () => {
 		let deep: Record<string, unknown> = { label: "leaf", estimatedTokens: 1 };
 		for (let i = 0; i < 8; i++) deep = { label: `level-${i}`, estimatedTokens: 1, children: [deep] };
-		expect(() => validateContextSegment({ key: "x", label: "X", estimatedTokens: 1, confidence: "audited", items: [deep] })).toThrow("nesting");
+		expect(() => validateContextSegment({ key: "x", label: "X", estimatedTokens: 1, confidence: "audited", items: [deep] })).toThrow(
+			"nesting",
+		);
 	});
 
 	it("rejects a segment with more total items than the bound", () => {
@@ -78,7 +93,7 @@ describe("Context Hub: tool-schema ledger", () => {
 		expect(builtin.tools.map((t) => t.name)).toEqual(["bash", "read"]); // heaviest first: "Execute a shell command" > "Read file contents"
 	});
 
-	it("groups a tool with no sourceInfo under \"unknown\" rather than dropping it", () => {
+	it('groups a tool with no sourceInfo under "unknown" rather than dropping it', () => {
 		const ledger = computeToolSchemaLedger([tool({ sourceInfo: undefined })]);
 		expect(ledger).toHaveLength(1);
 		expect(ledger[0]!.source).toBe("unknown");
@@ -99,7 +114,11 @@ describe("Context Hub: tool-schema ledger", () => {
 	it("projects the ledger into one exact-tool ContextSegment, heaviest source first", () => {
 		const segment = toolLedgerSegment([
 			tool({ name: "read", sourceInfo: { source: "builtin" } }),
-			tool({ name: "jittor_context", description: "A much, much longer description than the builtin read tool has, to guarantee it sorts first", sourceInfo: { source: "@danypops/pi-jittor" } }),
+			tool({
+				name: "jittor_context",
+				description: "A much, much longer description than the builtin read tool has, to guarantee it sorts first",
+				sourceInfo: { source: "@danypops/pi-jittor" },
+			}),
 		]);
 		expect(segment.key).toBe("toolDefinitions");
 		expect(segment.confidence).toBe("exact-tool");

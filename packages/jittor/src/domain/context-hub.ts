@@ -17,8 +17,8 @@ import {
 	CONTEXT_HUB_CONTRIBUTION_MAX_AGE_MS,
 	CONTEXT_HUB_CONTRIBUTION_SCHEMA,
 	CONTEXT_HUB_ITEM_LABEL_MAX_CHARACTERS,
-	CONTEXT_HUB_MAX_ITEMS_PER_SEGMENT,
 	CONTEXT_HUB_MAX_ITEM_DEPTH,
+	CONTEXT_HUB_MAX_ITEMS_PER_SEGMENT,
 	CONTEXT_HUB_PRODUCER_NAME_MAX_CHARACTERS,
 	CONTEXT_HUB_SEGMENT_KEY_MAX_CHARACTERS,
 	CONTEXT_HUB_SEGMENT_LABEL_MAX_CHARACTERS,
@@ -58,12 +58,14 @@ export interface ContextContribution {
 }
 
 function nonEmptyString(value: unknown, name: string, maxLength: number): string {
-	if (typeof value !== "string" || value.length === 0 || value.length > maxLength) throw new Error(`${name} must be a non-empty string of at most ${maxLength} characters`);
+	if (typeof value !== "string" || value.length === 0 || value.length > maxLength)
+		throw new Error(`${name} must be a non-empty string of at most ${maxLength} characters`);
 	return value;
 }
 
 function boundedInteger(value: unknown, name: string): number {
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be a bounded non-negative integer`);
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+		throw new Error(`${name} must be a bounded non-negative integer`);
 	return value;
 }
 
@@ -76,15 +78,16 @@ function validateSegmentItem(value: unknown, depth: number): ContextSegmentItem 
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("context segment item must be an object");
 	const input = value as Record<string, unknown>;
 	for (const key of Object.keys(input)) {
-		if (key !== "label" && key !== "estimatedTokens" && key !== "children") throw new Error(`context segment item contains unexpected field: ${key}`);
+		if (key !== "label" && key !== "estimatedTokens" && key !== "children")
+			throw new Error(`context segment item contains unexpected field: ${key}`);
 	}
 	const item: ContextSegmentItem = {
-		label: nonEmptyString(input["label"], "item.label", CONTEXT_HUB_ITEM_LABEL_MAX_CHARACTERS),
-		estimatedTokens: boundedInteger(input["estimatedTokens"], "item.estimatedTokens"),
+		label: nonEmptyString(input.label, "item.label", CONTEXT_HUB_ITEM_LABEL_MAX_CHARACTERS),
+		estimatedTokens: boundedInteger(input.estimatedTokens, "item.estimatedTokens"),
 	};
-	if (input["children"] !== undefined) {
-		if (!Array.isArray(input["children"])) throw new Error("item.children must be an array");
-		item.children = input["children"].map((child) => validateSegmentItem(child, depth + 1));
+	if (input.children !== undefined) {
+		if (!Array.isArray(input.children)) throw new Error("item.children must be an array");
+		item.children = input.children.map((child) => validateSegmentItem(child, depth + 1));
 	}
 	return item;
 }
@@ -98,22 +101,23 @@ export function validateContextSegment(value: unknown): ContextSegment {
 			throw new Error(`context segment contains unexpected field: ${key}`);
 		}
 	}
-	const confidence = input["confidence"];
+	const confidence = input.confidence;
 	if (typeof confidence !== "string" || !CONTEXT_HUB_CONFIDENCE_TIERS.includes(confidence as ContextConfidenceTier)) {
 		throw new Error(`confidence must be one of ${CONTEXT_HUB_CONFIDENCE_TIERS.join(", ")}`);
 	}
-	if (input["unknown"] !== undefined && typeof input["unknown"] !== "boolean") throw new Error("segment.unknown must be a boolean");
+	if (input.unknown !== undefined && typeof input.unknown !== "boolean") throw new Error("segment.unknown must be a boolean");
 	const segment: ContextSegment = {
-		key: nonEmptyString(input["key"], "segment.key", CONTEXT_HUB_SEGMENT_KEY_MAX_CHARACTERS),
-		label: nonEmptyString(input["label"], "segment.label", CONTEXT_HUB_SEGMENT_LABEL_MAX_CHARACTERS),
-		estimatedTokens: boundedInteger(input["estimatedTokens"], "segment.estimatedTokens"),
+		key: nonEmptyString(input.key, "segment.key", CONTEXT_HUB_SEGMENT_KEY_MAX_CHARACTERS),
+		label: nonEmptyString(input.label, "segment.label", CONTEXT_HUB_SEGMENT_LABEL_MAX_CHARACTERS),
+		estimatedTokens: boundedInteger(input.estimatedTokens, "segment.estimatedTokens"),
 		confidence: confidence as ContextConfidenceTier,
-		...(input["unknown"] !== undefined ? { unknown: input["unknown"] as boolean } : {}),
+		...(input.unknown !== undefined ? { unknown: input.unknown as boolean } : {}),
 	};
-	if (input["items"] !== undefined) {
-		if (!Array.isArray(input["items"])) throw new Error("segment.items must be an array");
-		const items = input["items"].map((item) => validateSegmentItem(item, 1));
-		if (countItems(items) > CONTEXT_HUB_MAX_ITEMS_PER_SEGMENT) throw new Error(`segment.items exceeds ${CONTEXT_HUB_MAX_ITEMS_PER_SEGMENT} total items`);
+	if (input.items !== undefined) {
+		if (!Array.isArray(input.items)) throw new Error("segment.items must be an array");
+		const items = input.items.map((item) => validateSegmentItem(item, 1));
+		if (countItems(items) > CONTEXT_HUB_MAX_ITEMS_PER_SEGMENT)
+			throw new Error(`segment.items exceeds ${CONTEXT_HUB_MAX_ITEMS_PER_SEGMENT} total items`);
 		segment.items = items;
 	}
 	return segment;
@@ -125,16 +129,17 @@ const CONTRIBUTION_FIELDS = new Set(["schema", "observedAt", "sequence", "produc
 export function validateContextContribution(value: unknown, now = Date.now()): ContextContribution {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("context contribution must be an object");
 	const input = value as Record<string, unknown>;
-	for (const key of Object.keys(input)) if (!CONTRIBUTION_FIELDS.has(key)) throw new Error(`context contribution contains unexpected field: ${key}`);
-	if (input["schema"] !== CONTEXT_HUB_CONTRIBUTION_SCHEMA) throw new Error("context contribution schema is not supported");
-	const observedAt = boundedInteger(input["observedAt"], "observedAt");
+	for (const key of Object.keys(input))
+		if (!CONTRIBUTION_FIELDS.has(key)) throw new Error(`context contribution contains unexpected field: ${key}`);
+	if (input.schema !== CONTEXT_HUB_CONTRIBUTION_SCHEMA) throw new Error("context contribution schema is not supported");
+	const observedAt = boundedInteger(input.observedAt, "observedAt");
 	if (Math.abs(now - observedAt) > CONTEXT_HUB_CONTRIBUTION_MAX_AGE_MS) throw new Error("context contribution is stale");
 	return {
 		schema: CONTEXT_HUB_CONTRIBUTION_SCHEMA,
 		observedAt,
-		sequence: boundedInteger(input["sequence"], "sequence"),
-		producerName: nonEmptyString(input["producerName"], "producerName", CONTEXT_HUB_PRODUCER_NAME_MAX_CHARACTERS),
-		segment: validateContextSegment(input["segment"]),
+		sequence: boundedInteger(input.sequence, "sequence"),
+		producerName: nonEmptyString(input.producerName, "producerName", CONTEXT_HUB_PRODUCER_NAME_MAX_CHARACTERS),
+		segment: validateContextSegment(input.segment),
 	};
 }
 
@@ -199,7 +204,11 @@ export function computeToolSchemaLedger(tools: readonly ToolLedgerEntry[]): Tool
 	for (const tool of tools) {
 		const source = tool.sourceInfo?.source && tool.sourceInfo.source.length > 0 ? tool.sourceInfo.source : "unknown";
 		const characters = toolCharacters(tool);
-		const usage: ToolLedgerToolUsage = { name: tool.name, characters, estimatedTokens: Math.ceil(characters / CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN) };
+		const usage: ToolLedgerToolUsage = {
+			name: tool.name,
+			characters,
+			estimatedTokens: Math.ceil(characters / CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN),
+		};
 		const existing = bySource.get(source);
 		if (existing) existing.push(usage);
 		else bySource.set(source, [usage]);

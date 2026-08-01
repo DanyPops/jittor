@@ -2,11 +2,14 @@ import { describe, expect, it } from "bun:test";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderFooterLines, type ProviderBudget } from "../extension/src/footer.ts";
+import { type ProviderBudget, renderFooterLines } from "../extension/src/footer.ts";
 
 const colorCalls: Array<{ color: string; text: string }> = [];
 const theme = {
-	fg: (color: string, text: string) => { colorCalls.push({ color, text }); return text; },
+	fg: (color: string, text: string) => {
+		colorCalls.push({ color, text });
+		return text;
+	},
 	bold: (text: string) => text,
 };
 
@@ -18,9 +21,21 @@ function context(percent: number | null = 12.5, tokens: number | null = 25_000) 
 		sessionManager: {
 			getCwd: () => join(homedir(), "Projects", "jittor"),
 			getSessionName: () => undefined,
-			getEntries: () => [{ type: "message", message: { role: "assistant", usage: {
-				input: 10_000, output: 2_000, cacheRead: 8_000, cacheWrite: 0, cost: { total: 0 },
-			} } }],
+			getEntries: () => [
+				{
+					type: "message",
+					message: {
+						role: "assistant",
+						usage: {
+							input: 10_000,
+							output: 2_000,
+							cacheRead: 8_000,
+							cacheWrite: 0,
+							cost: { total: 0 },
+						},
+					},
+				},
+			],
 		},
 	};
 }
@@ -54,8 +69,14 @@ describe("Jittor integrated footer", () => {
 	it("computes cache hit from the same cumulative usage as the token totals", () => {
 		const aggregate = context();
 		aggregate.sessionManager.getEntries = () => [
-			{ type: "message", message: { role: "assistant", usage: { input: 100, output: 0, cacheRead: 100, cacheWrite: 0, cost: { total: 0 } } } },
-			{ type: "message", message: { role: "assistant", usage: { input: 900, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } },
+			{
+				type: "message",
+				message: { role: "assistant", usage: { input: 100, output: 0, cacheRead: 100, cacheWrite: 0, cost: { total: 0 } } },
+			},
+			{
+				type: "message",
+				message: { role: "assistant", usage: { input: 900, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } },
+			},
 		];
 		const line = renderFooterLines(aggregate, footerData, theme, weekly, "high", 220, 2_000)[0]!;
 		expect(line).toContain("↑1.0k R100 CH9.1%");
@@ -91,10 +112,10 @@ describe("Jittor integrated footer", () => {
 	});
 
 	it("holds the context bar steady at its initial fill and shows no timer text while compaction is still estimating (cold start)", () => {
-		const lines = renderFooterLines(
-			context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000,
-			{ startedAt: 2_000, initialFraction: 0.75 },
-		);
+		const lines = renderFooterLines(context(75, 150_000), footerData, theme, weekly, "high", 180, 8_000, {
+			startedAt: 2_000,
+			initialFraction: 0.75,
+		});
 		// No learned estimate => no real rate to drain against => fill holds at initialFraction (6 of 8) and no
 		// timer text is shown at all: no fabricated elapsed count-up, no guessed countdown.
 		expect(lines[0]).toMatch(/ctx ██████░░ ·/);
@@ -137,7 +158,11 @@ describe("Jittor integrated footer", () => {
 
 	it("uses the same drain semantics for an officially bounded OpenRouter key", () => {
 		const openRouter: ProviderBudget = {
-			kind: "bounded", label: "OR", remainingFraction: 0.4, observedAt: 1_000, resetText: "monthly reset",
+			kind: "bounded",
+			label: "OR",
+			remainingFraction: 0.4,
+			observedAt: 1_000,
+			resetText: "monthly reset",
 		};
 		const line = renderFooterLines(context(), footerData, theme, openRouter, "high", 180, 2_000)[0]!;
 		expect(line).toMatch(/OR ███░░░░░ 40.0% left · monthly reset/);
@@ -146,7 +171,15 @@ describe("Jittor integrated footer", () => {
 	it("marks stale provider telemetry and does not invent a bar for unbounded spend", () => {
 		const stale = renderFooterLines(context(), footerData, theme, weekly, "high", 140, 200_000);
 		expect(stale[0]).toContain("stale");
-		const spend = renderFooterLines(context(), footerData, theme, { kind: "unbounded", label: "spend", valueText: "$12.346", observedAt: 1_000 }, "high", 140, 2_000);
+		const spend = renderFooterLines(
+			context(),
+			footerData,
+			theme,
+			{ kind: "unbounded", label: "spend", valueText: "$12.346", observedAt: 1_000 },
+			"high",
+			140,
+			2_000,
+		);
 		expect(spend[0]).toContain("spend $12.346");
 		expect(spend[0]).not.toMatch(/spend [█░]+/);
 	});

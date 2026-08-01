@@ -1,17 +1,17 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	CODEX_RECOVERY_ATTEMPT_WINDOW_MS,
 	CODEX_RECOVERY_BASE_DELAY_MS,
 	CODEX_RECOVERY_JITTER_RATIO,
 	CODEX_RECOVERY_MAX_ATTEMPTS,
 	CODEX_RECOVERY_MAX_DELAY_MS,
-	MILLISECONDS_PER_MINUTE,
-	MILLISECONDS_PER_SECOND,
-	CodexRecoveryPolicy,
-	classifyCodexFailure,
 	type CodexFailureKind,
 	type CodexFailureMetadata,
+	CodexRecoveryPolicy,
+	classifyCodexFailure,
+	MILLISECONDS_PER_MINUTE,
+	MILLISECONDS_PER_SECOND,
 } from "@danypops/jittor";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { CodexRecoveryControl } from "../settings.ts";
 import { headerValue } from "./http-headers.ts";
 
@@ -25,8 +25,14 @@ export interface CodexRecoveryRuntime {
 export const SYSTEM_RECOVERY_RUNTIME: CodexRecoveryRuntime = {
 	now: Date.now,
 	random: Math.random,
-	setTimeout(callback, delayMs) { return setTimeout(() => { void callback(); }, delayMs); },
-	clearTimeout(handle) { clearTimeout(handle as ReturnType<typeof setTimeout>); },
+	setTimeout(callback, delayMs) {
+		return setTimeout(() => {
+			void callback();
+		}, delayMs);
+	},
+	clearTimeout(handle) {
+		clearTimeout(handle as ReturnType<typeof setTimeout>);
+	},
 };
 
 /**
@@ -47,13 +53,16 @@ export class CodexRecoveryCapability {
 		private readonly control: CodexRecoveryControl,
 		private readonly runtime: CodexRecoveryRuntime,
 	) {
-		this.policy = new CodexRecoveryPolicy({
-			baseDelayMs: CODEX_RECOVERY_BASE_DELAY_MS,
-			maxDelayMs: CODEX_RECOVERY_MAX_DELAY_MS,
-			maxAttempts: CODEX_RECOVERY_MAX_ATTEMPTS,
-			attemptWindowMs: CODEX_RECOVERY_ATTEMPT_WINDOW_MS,
-			jitterRatio: CODEX_RECOVERY_JITTER_RATIO,
-		}, runtime.random);
+		this.policy = new CodexRecoveryPolicy(
+			{
+				baseDelayMs: CODEX_RECOVERY_BASE_DELAY_MS,
+				maxDelayMs: CODEX_RECOVERY_MAX_DELAY_MS,
+				maxAttempts: CODEX_RECOVERY_MAX_ATTEMPTS,
+				attemptWindowMs: CODEX_RECOVERY_ATTEMPT_WINDOW_MS,
+				jitterRatio: CODEX_RECOVERY_JITTER_RATIO,
+			},
+			runtime.random,
+		);
 	}
 
 	/** Clears the tracked response at the start of every new turn, before any Codex response for it has arrived. */
@@ -90,9 +99,13 @@ export class CodexRecoveryCapability {
 		const attempt = this.cooldown?.attempt ?? (state.pending ? state.attempts + 1 : state.attempts);
 		const phase = this.cooldown
 			? `cooldown ${Math.ceil(Math.max(0, this.cooldown.until - now) / MILLISECONDS_PER_SECOND)}s`
-			: state.pending ? "pending"
-				: state.attempts >= CODEX_RECOVERY_MAX_ATTEMPTS ? "exhausted"
-					: state.attempts > 0 ? "waiting" : "idle";
+			: state.pending
+				? "pending"
+				: state.attempts >= CODEX_RECOVERY_MAX_ATTEMPTS
+					? "exhausted"
+					: state.attempts > 0
+						? "waiting"
+						: "idle";
 		const failureKind = this.cooldown?.failureKind ?? state.lastFailureKind;
 		return [
 			`Codex recovery: ${enabled ? "on" : "off"}`,
@@ -119,12 +132,15 @@ export class CodexRecoveryCapability {
 			if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
 			const attempt = this.policy.recordAttempt(this.runtime.now());
 			if (!attempt) return;
-			this.pi.sendMessage({
-				customType: "jittor-codex-recovery",
-				content: `Retry the previous Codex request after a transient ${attempt.failureKind} failure. Automatic recovery attempt ${attempt.attempt} of ${CODEX_RECOVERY_MAX_ATTEMPTS}.`,
-				display: false,
-				details: { attempt: attempt.attempt, failureKind: attempt.failureKind },
-			}, { triggerTurn: true, deliverAs: "followUp" });
+			this.pi.sendMessage(
+				{
+					customType: "jittor-codex-recovery",
+					content: `Retry the previous Codex request after a transient ${attempt.failureKind} failure. Automatic recovery attempt ${attempt.attempt} of ${CODEX_RECOVERY_MAX_ATTEMPTS}.`,
+					display: false,
+					details: { attempt: attempt.attempt, failureKind: attempt.failureKind },
+				},
+				{ triggerTurn: true, deliverAs: "followUp" },
+			);
 		}, plan.delayMs);
 	}
 }

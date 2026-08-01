@@ -1,7 +1,7 @@
 import { METRIC_ATTRIBUTES_MAX_DEPTH, METRIC_ATTRIBUTES_MAX_SERIALIZED_CHARACTERS, METRIC_IDENTITY_MAX_CHARACTERS } from "../constants.ts";
 
 export const METRIC_UNITS = ["ratio", "usd", "tokens", "tokens-per-second", "requests", "milliseconds", "count", "elo"] as const;
-export type MetricUnit = typeof METRIC_UNITS[number];
+export type MetricUnit = (typeof METRIC_UNITS)[number];
 
 export interface MetricObservation {
 	source: string;
@@ -75,21 +75,21 @@ export function validateMetricObservation(value: unknown): MetricObservation {
 		if (typeof input[key] !== "string" || input[key].trim().length === 0) throw new Error(`${key} is required`);
 		if (input[key].length > METRIC_IDENTITY_MAX_CHARACTERS) throw new Error(`${key} exceeds the length limit`);
 	}
-	if (!METRIC_UNITS.includes(input["unit"] as MetricUnit)) throw new Error("unit is not supported");
-	if (input["value"] !== null && (typeof input["value"] !== "number" || !Number.isFinite(input["value"]))) {
+	if (!METRIC_UNITS.includes(input.unit as MetricUnit)) throw new Error("unit is not supported");
+	if (input.value !== null && (typeof input.value !== "number" || !Number.isFinite(input.value))) {
 		throw new Error("value must be finite or null");
 	}
-	if (typeof input["observedAt"] !== "number" || !Number.isSafeInteger(input["observedAt"]) || input["observedAt"] < 0) {
+	if (typeof input.observedAt !== "number" || !Number.isSafeInteger(input.observedAt) || input.observedAt < 0) {
 		throw new Error("observedAt must be a non-negative integer timestamp");
 	}
-	const attributes = validateAttributes(input["attributes"]);
+	const attributes = validateAttributes(input.attributes);
 	return {
-		source: input["source"] as string,
-		scope: input["scope"] as string,
-		metric: input["metric"] as string,
-		value: input["value"] as number | null,
-		unit: input["unit"] as MetricUnit,
-		observedAt: input["observedAt"] as number,
+		source: input.source as string,
+		scope: input.scope as string,
+		metric: input.metric as string,
+		value: input.value as number | null,
+		unit: input.unit as MetricUnit,
+		observedAt: input.observedAt as number,
 		attributes,
 	};
 }

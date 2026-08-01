@@ -1,23 +1,23 @@
 import {
-	parseOpenRouterAnalytics,
-	parseOpenRouterGeneration,
-	parseOpenRouterKey,
-	parseOpenRouterModels,
 	type OpenRouterAnalyticsResult,
 	type OpenRouterGeneration,
 	type OpenRouterKeySnapshot,
 	type OpenRouterModel,
+	parseOpenRouterAnalytics,
+	parseOpenRouterGeneration,
+	parseOpenRouterKey,
+	parseOpenRouterModels,
 } from "./openrouter-contracts.ts";
 
 export {
-	openRouterUsageMetrics,
-	parseOpenRouterUsage,
 	type OpenRouterAnalyticsResult,
 	type OpenRouterGeneration,
 	type OpenRouterKeySnapshot,
 	type OpenRouterModel,
 	type OpenRouterUsage,
 	type OpenRouterUsageContext,
+	openRouterUsageMetrics,
+	parseOpenRouterUsage,
 } from "./openrouter-contracts.ts";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -51,20 +51,26 @@ export class OpenRouterTelemetryAdapter {
 
 	async queryAnalytics(query: Record<string, unknown>): Promise<OpenRouterAnalyticsResult> {
 		if (this.managementCapability !== true) throw new Error("OpenRouter analytics requires a detected management key");
-		return parseOpenRouterAnalytics(await this.request("/analytics/query", {
-			method: "POST",
-			body: JSON.stringify(query),
-		}));
+		return parseOpenRouterAnalytics(
+			await this.request("/analytics/query", {
+				method: "POST",
+				body: JSON.stringify(query),
+			}),
+		);
 	}
 
 	private async request(path: string, init: RequestInit = {}): Promise<unknown> {
-		const response = await this.transport(new Request(`${this.baseUrl}${path}`, {
-			...init,
-			headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json", ...init.headers },
-		}));
+		const response = await this.transport(
+			new Request(`${this.baseUrl}${path}`, {
+				...init,
+				headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json", ...init.headers },
+			}),
+		);
 		if (!response.ok) {
 			const retryAfter = response.headers.get("retry-after");
-			throw new Error(`OpenRouter ${path.split("?")[0]} failed with HTTP ${response.status}${retryAfter ? `; retry after ${retryAfter}` : ""}`);
+			throw new Error(
+				`OpenRouter ${path.split("?")[0]} failed with HTTP ${response.status}${retryAfter ? `; retry after ${retryAfter}` : ""}`,
+			);
 		}
 		return response.json();
 	}

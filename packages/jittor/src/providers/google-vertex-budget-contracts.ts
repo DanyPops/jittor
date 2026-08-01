@@ -1,11 +1,11 @@
-import type { BudgetWindow } from "../policy.ts";
-import type { MetricObservation } from "../domain/metric.ts";
-import type { GoogleVertexMetricSource } from "./google-vertex-contracts.ts";
 import {
 	GOOGLE_VERTEX_BUDGET_CONFIDENCE,
 	GOOGLE_VERTEX_BUDGET_DISPLAY_NAME_MAX_CHARACTERS,
 	MILLISECONDS_PER_SECOND,
 } from "../constants.ts";
+import type { MetricObservation } from "../domain/metric.ts";
+import type { BudgetWindow } from "../policy.ts";
+import type { GoogleVertexMetricSource } from "./google-vertex-contracts.ts";
 
 /**
  * Cloud Billing's programmatic budget notification schema (Pub/Sub attributes + base64 JSON data
@@ -61,7 +61,8 @@ function requiredTimestamp(value: unknown, name: string): number {
 
 function optionalFraction(value: unknown, name: string): number | undefined {
 	if (value === undefined) return undefined;
-	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`Google Vertex budget notification schema changed: ${name}`);
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+		throw new Error(`Google Vertex budget notification schema changed: ${name}`);
 	return value;
 }
 
@@ -77,11 +78,12 @@ export function parseGoogleVertexBudgetNotification(
 	attributes: { billingAccountId?: unknown; budgetId?: unknown; schemaVersion?: unknown },
 	publishedAt: number,
 ): GoogleVertexBudgetNotification {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("Google Vertex budget notification schema changed: data");
+	if (typeof data !== "object" || data === null || Array.isArray(data))
+		throw new Error("Google Vertex budget notification schema changed: data");
 	const input = data as Record<string, unknown>;
 	if (!Number.isFinite(publishedAt) || publishedAt < 0) throw new Error("Google Vertex budget notification schema changed: publishTime");
 
-	const budgetAmountType = requiredString(input["budgetAmountType"], "budgetAmountType");
+	const budgetAmountType = requiredString(input.budgetAmountType, "budgetAmountType");
 	if (!BUDGET_AMOUNT_TYPES.includes(budgetAmountType as GoogleVertexBudgetAmountType)) {
 		throw new Error("Google Vertex budget notification schema changed: budgetAmountType");
 	}
@@ -90,14 +92,14 @@ export function parseGoogleVertexBudgetNotification(
 		billingAccountId: requiredString(attributes.billingAccountId, "billingAccountId"),
 		budgetId: requiredString(attributes.budgetId, "budgetId"),
 		schemaVersion: requiredString(attributes.schemaVersion, "schemaVersion"),
-		budgetDisplayName: requiredString(input["budgetDisplayName"], "budgetDisplayName", GOOGLE_VERTEX_BUDGET_DISPLAY_NAME_MAX_CHARACTERS),
-		costAmount: requiredFiniteNumber(input["costAmount"], "costAmount"),
-		costIntervalStart: requiredTimestamp(input["costIntervalStart"], "costIntervalStart"),
-		budgetAmount: requiredFiniteNumber(input["budgetAmount"], "budgetAmount"),
+		budgetDisplayName: requiredString(input.budgetDisplayName, "budgetDisplayName", GOOGLE_VERTEX_BUDGET_DISPLAY_NAME_MAX_CHARACTERS),
+		costAmount: requiredFiniteNumber(input.costAmount, "costAmount"),
+		costIntervalStart: requiredTimestamp(input.costIntervalStart, "costIntervalStart"),
+		budgetAmount: requiredFiniteNumber(input.budgetAmount, "budgetAmount"),
 		budgetAmountType: budgetAmountType as GoogleVertexBudgetAmountType,
-		currencyCode: requiredString(input["currencyCode"], "currencyCode", 8),
-		alertThresholdExceeded: optionalFraction(input["alertThresholdExceeded"], "alertThresholdExceeded"),
-		forecastThresholdExceeded: optionalFraction(input["forecastThresholdExceeded"], "forecastThresholdExceeded"),
+		currencyCode: requiredString(input.currencyCode, "currencyCode", 8),
+		alertThresholdExceeded: optionalFraction(input.alertThresholdExceeded, "alertThresholdExceeded"),
+		forecastThresholdExceeded: optionalFraction(input.forecastThresholdExceeded, "forecastThresholdExceeded"),
 		publishedAt,
 	};
 }
@@ -127,7 +129,15 @@ export function googleVertexBudgetMetrics(
 		{ source, scope: "budget", metric: "cap", value: notification.budgetAmount, unit: "usd", observedAt, attributes },
 	];
 	if (notification.budgetAmount > 0) {
-		metrics.push({ source, scope: "budget", metric: "spend-fraction", value: notification.costAmount / notification.budgetAmount, unit: "ratio", observedAt, attributes });
+		metrics.push({
+			source,
+			scope: "budget",
+			metric: "spend-fraction",
+			value: notification.costAmount / notification.budgetAmount,
+			unit: "ratio",
+			observedAt,
+			attributes,
+		});
 	}
 	return metrics;
 }

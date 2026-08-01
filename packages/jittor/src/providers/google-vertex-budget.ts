@@ -1,21 +1,21 @@
-import type { BudgetWindow } from "../policy.ts";
+import { GOOGLE_VERTEX_BUDGET_MAX_MESSAGES_PER_PULL } from "../constants.ts";
 import type { MetricObservation } from "../domain/metric.ts";
+import type { BudgetWindow } from "../policy.ts";
+import type { GoogleAdcTokenProvider } from "./google-adc-auth.ts";
 import {
+	type GoogleVertexBudgetNotification,
 	googleVertexBudgetMetrics,
 	googleVertexBudgetWindow,
 	parseGoogleVertexBudgetNotification,
-	type GoogleVertexBudgetNotification,
 } from "./google-vertex-budget-contracts.ts";
 import type { GoogleVertexMetricSource } from "./google-vertex-contracts.ts";
-import type { GoogleAdcTokenProvider } from "./google-adc-auth.ts";
-import { GOOGLE_VERTEX_BUDGET_MAX_MESSAGES_PER_PULL } from "../constants.ts";
 
 export {
+	type GoogleVertexBudgetAmountType,
+	type GoogleVertexBudgetNotification,
 	googleVertexBudgetMetrics,
 	googleVertexBudgetWindow,
 	parseGoogleVertexBudgetNotification,
-	type GoogleVertexBudgetAmountType,
-	type GoogleVertexBudgetNotification,
 } from "./google-vertex-budget-contracts.ts";
 
 const PUBSUB_BASE_URL = "https://pubsub.googleapis.com/v1";
@@ -67,7 +67,7 @@ export class GoogleVertexBudgetTelemetryAdapter {
 	async pull(observedAt = Date.now()): Promise<GoogleVertexBudgetSnapshot | null> {
 		const token = await this.tokenProvider();
 		const pullResponse = await this.request(":pull", token, { maxMessages: GOOGLE_VERTEX_BUDGET_MAX_MESSAGES_PER_PULL });
-		const body = await pullResponse.json() as { receivedMessages?: RawPubSubMessage[] };
+		const body = (await pullResponse.json()) as { receivedMessages?: RawPubSubMessage[] };
 		const received = Array.isArray(body.receivedMessages) ? body.receivedMessages : [];
 		if (received.length === 0) return null;
 
@@ -85,7 +85,7 @@ export class GoogleVertexBudgetTelemetryAdapter {
 		if (parseFailure) throw parseFailure;
 		if (parsed.length === 0) return null;
 
-		const freshest = parsed.reduce((latest, candidate) => candidate.publishedAt > latest.publishedAt ? candidate : latest);
+		const freshest = parsed.reduce((latest, candidate) => (candidate.publishedAt > latest.publishedAt ? candidate : latest));
 		return {
 			notification: freshest,
 			metrics: googleVertexBudgetMetrics(freshest, observedAt, this.source),
@@ -116,11 +116,13 @@ export class GoogleVertexBudgetTelemetryAdapter {
 	}
 
 	private async request(action: ":pull" | ":acknowledge", token: string, body: Record<string, unknown>): Promise<Response> {
-		const response = await this.transport(new Request(`${PUBSUB_BASE_URL}/${this.subscription}${action}`, {
-			method: "POST",
-			headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-			body: JSON.stringify(body),
-		}));
+		const response = await this.transport(
+			new Request(`${PUBSUB_BASE_URL}/${this.subscription}${action}`, {
+				method: "POST",
+				headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+				body: JSON.stringify(body),
+			}),
+		);
 		if (!response.ok) throw new Error(`Google Cloud Pub/Sub ${action.slice(1)} failed with HTTP ${response.status}`);
 		return response;
 	}

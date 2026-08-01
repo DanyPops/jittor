@@ -46,7 +46,8 @@ describe("reportMaintenanceFailure", () => {
 describe("Jittor daemon state", () => {
 	it("resolves database, runtime handle, and config through XDG paths", () => {
 		const paths = resolveJittorPaths({
-			home: "/home/test", uid: 1000,
+			home: "/home/test",
+			uid: 1000,
 			env: { XDG_DATA_HOME: "/data", XDG_STATE_HOME: "/state", XDG_RUNTIME_DIR: "/run/user/1000", XDG_CONFIG_HOME: "/config" },
 		});
 		expect(paths.database).toBe("/data/jittor/jittor.db");
@@ -58,8 +59,14 @@ describe("Jittor daemon state", () => {
 	it("persists a private token and discoverable loopback handle", () => {
 		const root = mkdtempSync(join(tmpdir(), "jittor-state-"));
 		const paths = resolveJittorPaths({
-			home: root, uid: 1000,
-			env: { XDG_DATA_HOME: join(root, "data"), XDG_STATE_HOME: join(root, "state"), XDG_RUNTIME_DIR: join(root, "run"), XDG_CONFIG_HOME: join(root, "config") },
+			home: root,
+			uid: 1000,
+			env: {
+				XDG_DATA_HOME: join(root, "data"),
+				XDG_STATE_HOME: join(root, "state"),
+				XDG_RUNTIME_DIR: join(root, "run"),
+				XDG_CONFIG_HOME: join(root, "config"),
+			},
 		});
 		const token = ensureAuthToken(paths);
 		expect(token).toMatch(/^[a-f0-9]{64}$/);
@@ -70,22 +77,41 @@ describe("Jittor daemon state", () => {
 
 	it("configures providers only from explicit environment inputs", () => {
 		expect(telemetrySourcesFromEnvironment({})).toEqual([]);
-		expect(telemetrySourcesFromEnvironment({ JITTOR_CODEX_AUTH_FILE: "/private/auth.json" }).map((source) => source.id)).toEqual(["codex-subscription"]);
+		expect(telemetrySourcesFromEnvironment({ JITTOR_CODEX_AUTH_FILE: "/private/auth.json" }).map((source) => source.id)).toEqual([
+			"codex-subscription",
+		]);
 		expect(telemetrySourcesFromEnvironment({ OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter"]);
 		expect(benchmarkSourcesFromEnvironment({})).toEqual([]);
-		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf"]);
-		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "openrouter-design-arena"]);
-		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", ARTIFICIAL_ANALYSIS_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "artificial-analysis-direct"]);
-		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret", ARTIFICIAL_ANALYSIS_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter-models", "lmarena-hf", "openrouter-design-arena", "artificial-analysis-direct"]);
+		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1" }).map((source) => source.id)).toEqual([
+			"openrouter-models",
+			"lmarena-hf",
+		]);
+		expect(
+			benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", OPENROUTER_API_KEY: "secret" }).map((source) => source.id),
+		).toEqual(["openrouter-models", "lmarena-hf", "openrouter-design-arena"]);
+		expect(
+			benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1", ARTIFICIAL_ANALYSIS_API_KEY: "secret" }).map(
+				(source) => source.id,
+			),
+		).toEqual(["openrouter-models", "lmarena-hf", "artificial-analysis-direct"]);
+		expect(
+			benchmarkSourcesFromEnvironment({
+				JITTOR_OPENROUTER_BENCHMARKS: "1",
+				OPENROUTER_API_KEY: "secret",
+				ARTIFICIAL_ANALYSIS_API_KEY: "secret",
+			}).map((source) => source.id),
+		).toEqual(["openrouter-models", "lmarena-hf", "openrouter-design-arena", "artificial-analysis-direct"]);
 		const anthropicVertex = telemetrySourcesFromEnvironment({
 			JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION: "projects/p/subscriptions/s",
 			JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE: "anthropic-vertex",
 		});
 		expect(anthropicVertex.map((source) => source.provider)).toEqual(["anthropic-vertex"]);
-		expect(() => telemetrySourcesFromEnvironment({
-			JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION: "projects/p/subscriptions/s",
-			JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE: "other-provider",
-		})).toThrow("JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE must be google-vertex or anthropic-vertex");
+		expect(() =>
+			telemetrySourcesFromEnvironment({
+				JITTOR_GOOGLE_VERTEX_BUDGET_SUBSCRIPTION: "projects/p/subscriptions/s",
+				JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE: "other-provider",
+			}),
+		).toThrow("JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE must be google-vertex or anthropic-vertex");
 	});
 
 	it("starting with a configured (but unreachable) telemetry source never crashes or hangs the daemon", async () => {
@@ -96,8 +122,14 @@ describe("Jittor daemon state", () => {
 		// stays a non-event for the daemon, matching that internal contract.
 		const root = mkdtempSync(join(tmpdir(), "jittor-daemon-poll-fail-"));
 		const paths = resolveJittorPaths({
-			home: root, uid: 1000,
-			env: { XDG_DATA_HOME: join(root, "data"), XDG_STATE_HOME: join(root, "state"), XDG_RUNTIME_DIR: join(root, "run"), XDG_CONFIG_HOME: join(root, "config") },
+			home: root,
+			uid: 1000,
+			env: {
+				XDG_DATA_HOME: join(root, "data"),
+				XDG_STATE_HOME: join(root, "state"),
+				XDG_RUNTIME_DIR: join(root, "run"),
+				XDG_CONFIG_HOME: join(root, "config"),
+			},
 		});
 		const daemon = await startDaemon(paths, { JITTOR_CODEX_AUTH_FILE: join(root, "definitely-does-not-exist.json") });
 		try {
@@ -112,20 +144,31 @@ describe("Jittor daemon state", () => {
 	it("composes SQLite, authenticated HTTP, and the typed client", async () => {
 		const root = mkdtempSync(join(tmpdir(), "jittor-daemon-"));
 		const paths = resolveJittorPaths({
-			home: root, uid: 1000,
-			env: { XDG_DATA_HOME: join(root, "data"), XDG_STATE_HOME: join(root, "state"), XDG_RUNTIME_DIR: join(root, "run"), XDG_CONFIG_HOME: join(root, "config") },
+			home: root,
+			uid: 1000,
+			env: {
+				XDG_DATA_HOME: join(root, "data"),
+				XDG_STATE_HOME: join(root, "state"),
+				XDG_RUNTIME_DIR: join(root, "run"),
+				XDG_CONFIG_HOME: join(root, "config"),
+			},
 		});
 		const daemon = await startDaemon(paths);
 		try {
 			const client = connectJittorClient(paths);
 			expect(await client.health()).toEqual({ ok: true, version: VERSION });
 			await client.call("metrics.record", {
-				source: "jittor", scope: "daemon", metric: "requests", value: 1, unit: "count", observedAt: 1000,
+				source: "jittor",
+				scope: "daemon",
+				metric: "requests",
+				value: 1,
+				unit: "count",
+				observedAt: 1000,
 			});
 			expect(await client.call("metrics.query", { source: "jittor" })).toHaveLength(1);
-		const { secret } = await client.call("session.register", { session_id: "session-a" });
-		await expect(client.call("router.pause", { session_id: "session-a" })).rejects.toThrow();
-		expect(await client.call("router.pause", { session_id: "session-a", session_secret: secret })).toMatchObject({ paused: true });
+			const { secret } = await client.call("session.register", { session_id: "session-a" });
+			await expect(client.call("router.pause", { session_id: "session-a" })).rejects.toThrow();
+			expect(await client.call("router.pause", { session_id: "session-a", session_secret: secret })).toMatchObject({ paused: true });
 		} finally {
 			await daemon.stop();
 		}
@@ -147,11 +190,19 @@ describe("Jittor systemd unit", () => {
 		expect(unit).toContain("After=default.target network-online.target");
 		expect(unit).toContain("Wants=network-online.target");
 		expect(unit).toContain("Environment=DAEMON_KIT_LAUNCH_PROVENANCE=service");
-		expect(renderSystemdUnit({
-			bunBin: "/usr/bin/bun", cliPath: "/opt/jittor/src/cli.ts", codexAuthFile: "/home/test/.codex/auth.json",
-		})).toContain("Environment=JITTOR_CODEX_AUTH_FILE=/home/test/.codex/auth.json");
-		expect(renderSystemdUnit({
-			bunBin: "/usr/bin/bun", cliPath: "/opt/jittor/src/cli.ts", openRouterBenchmarks: true,
-		})).toContain("Environment=JITTOR_OPENROUTER_BENCHMARKS=1");
+		expect(
+			renderSystemdUnit({
+				bunBin: "/usr/bin/bun",
+				cliPath: "/opt/jittor/src/cli.ts",
+				codexAuthFile: "/home/test/.codex/auth.json",
+			}),
+		).toContain("Environment=JITTOR_CODEX_AUTH_FILE=/home/test/.codex/auth.json");
+		expect(
+			renderSystemdUnit({
+				bunBin: "/usr/bin/bun",
+				cliPath: "/opt/jittor/src/cli.ts",
+				openRouterBenchmarks: true,
+			}),
+		).toContain("Environment=JITTOR_OPENROUTER_BENCHMARKS=1");
 	});
 });

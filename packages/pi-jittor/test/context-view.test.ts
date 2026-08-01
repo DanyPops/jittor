@@ -1,13 +1,19 @@
 import { describe, expect, it } from "bun:test";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ContextSegment } from "@danypops/jittor";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ContextBreakdown } from "../extension/src/context-breakdown.ts";
 import { showContextView } from "../extension/src/context-view.ts";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 
 const SEGMENTS: ContextSegment[] = [
-	{ key: "toolDefinitions", label: "Tool definitions", estimatedTokens: 500, confidence: "exact-tool", items: [{ label: "builtin (4 tools)", estimatedTokens: 500 }] },
+	{
+		key: "toolDefinitions",
+		label: "Tool definitions",
+		estimatedTokens: 500,
+		confidence: "exact-tool",
+		items: [{ label: "builtin (4 tools)", estimatedTokens: 500 }],
+	},
 	{ key: "rules", label: "Active Rules", estimatedTokens: 1_200, confidence: "exact-cooperative" },
 ];
 
@@ -18,7 +24,14 @@ function breakdown(overrides: Partial<ContextBreakdown> = {}): ContextBreakdown 
 describe("showContextView", () => {
 	it("falls back to a plain-text notify in non-TUI mode", async () => {
 		const notifications: string[] = [];
-		const ctx = { mode: "print", ui: { notify(message: string) { notifications.push(message); } } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			mode: "print",
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
+		} as unknown as ExtensionCommandContext;
 		await showContextView(ctx, breakdown({ totalTokens: 12_000, contextWindow: 200_000, effectiveBudget: 200_000 }));
 		expect(notifications).toHaveLength(1);
 		expect(notifications[0]).toContain("Real usage: 12.0k / 200.0k tokens (6.0% of usable budget)");
@@ -67,7 +80,9 @@ describe("showContextView", () => {
 			ui: {
 				async custom(factory: Function) {
 					let closed = false;
-					const component = factory({ requestRender() {} }, theme, {}, () => { closed = true; });
+					const component = factory({ requestRender() {} }, theme, {}, () => {
+						closed = true;
+					});
 					component.handleInput("\x1b[B"); // down
 					component.handleInput("\x1b"); // escape
 					expect(closed).toBe(true);

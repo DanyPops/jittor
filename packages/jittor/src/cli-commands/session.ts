@@ -1,11 +1,14 @@
-import { callAndPrint, humanField, type CliDependencies } from "./support.ts";
+import { type CliDependencies, callAndPrint, humanField } from "./support.ts";
 
 export const SESSION_USAGE_LINES = [
 	"  session register --session-id <id> [--json]",
 	"  session release --session-id <id> [--session-secret <secret>] [--json]",
 ];
 
-interface SessionArgs { input: { session_id: string; session_secret?: string }; json: boolean }
+interface SessionArgs {
+	input: { session_id: string; session_secret?: string };
+	json: boolean;
+}
 
 function parseSessionArgs(args: string[]): SessionArgs | null {
 	let json = false;
@@ -13,7 +16,10 @@ function parseSessionArgs(args: string[]): SessionArgs | null {
 	let sessionSecret: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
-		if (argument === "--json") { json = true; continue; }
+		if (argument === "--json") {
+			json = true;
+			continue;
+		}
 		if (!["--session-id", "--session-secret"].includes(argument ?? "")) return null;
 		const raw = args[++index];
 		if (raw === undefined || raw.length === 0) return null;
@@ -32,7 +38,12 @@ export function formatSessionRelease(result: { released: boolean }): string {
 	return result.released ? "Session released" : "Session was not registered, or the secret did not match";
 }
 
-export async function runSessionCommand(action: string | undefined, rest: string[], deps: CliDependencies, usage: () => number): Promise<number> {
+export async function runSessionCommand(
+	action: string | undefined,
+	rest: string[],
+	deps: CliDependencies,
+	usage: () => number,
+): Promise<number> {
 	if (action !== "register" && action !== "release") return usage();
 	const parsed = parseSessionArgs(rest);
 	if (!parsed) return usage();

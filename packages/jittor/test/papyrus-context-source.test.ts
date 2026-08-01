@@ -24,19 +24,31 @@ describe("Papyrus context telemetry source", () => {
 		const observation = validatePapyrusContextInjection(payload(), 1_500);
 		const metric = papyrusContextMetric(observation);
 		expect(metric).toMatchObject({
-			source: "papyrus-context", scope: "system-prompt", metric: "injected-characters",
-			value: 500, unit: "count", observedAt: 1_000,
+			source: "papyrus-context",
+			scope: "system-prompt",
+			metric: "injected-characters",
+			value: 500,
+			unit: "count",
+			observedAt: 1_000,
 		});
 		expect(metric.attributes).toMatchObject({
-			sequence: 3, producerId: "123e4567-e89b-42d3-a456-426614174000", ruleCharacters: 200, taskCharacters: 300, estimatedTokens: 125,
-			share: 1 / 3, unchanged: false, fingerprint: "a".repeat(64),
+			sequence: 3,
+			producerId: "123e4567-e89b-42d3-a456-426614174000",
+			ruleCharacters: 200,
+			taskCharacters: 300,
+			estimatedTokens: 125,
+			share: 1 / 3,
+			unchanged: false,
+			fingerprint: "a".repeat(64),
 		});
 	});
 
 	it("rejects malformed, stale, oversized, or content-bearing payloads", () => {
 		expect(() => validatePapyrusContextInjection({ ...payload(), schema: "v2" }, 1_500)).toThrow("schema");
 		expect(() => validatePapyrusContextInjection(payload(), 1_000 + 10 * 60_000)).toThrow("stale");
-		expect(() => validatePapyrusContextInjection({ ...payload(), injected: { characters: 20_000_000, bytes: 20_000_000 } }, 1_500)).toThrow("bounded");
+		expect(() => validatePapyrusContextInjection({ ...payload(), injected: { characters: 20_000_000, bytes: 20_000_000 } }, 1_500)).toThrow(
+			"bounded",
+		);
 		expect(() => validatePapyrusContextInjection({ ...payload(), content: "secret rule body" }, 1_500)).toThrow("unexpected field");
 	});
 });

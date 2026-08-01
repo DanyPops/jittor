@@ -1,6 +1,6 @@
+import type { ContextSegment } from "@danypops/jittor";
 import { buildContextRows, type ContextSegment as MalevichContextSegment } from "malevich-tui-components";
 import type { ContextBreakdown } from "./context-breakdown.ts";
-import type { ContextSegment } from "@danypops/jittor";
 
 /** Bounds how many items render per segment in the plain-text fallback -- a notify-mode report is a scan-at-a-glance summary, not a full dump (the interactive TUI view has no such cap, since it scrolls). */
 const MAX_ITEMS_PER_SEGMENT_LINE = 5;
@@ -15,8 +15,16 @@ function percentOf(part: number, whole: number): string {
 
 /** Malevich's row builder is confidence-unaware (it's a generic segment/item shape); folding the tier into the label is how it survives into the rendered row text, e.g. "Active Rules [exact-cooperative]". */
 function withConfidenceLabel(segment: ContextSegment): MalevichContextSegment {
-	const items = [...(segment.items ?? [])].sort((left, right) => right.estimatedTokens - left.estimatedTokens).slice(0, MAX_ITEMS_PER_SEGMENT_LINE);
-	return { key: segment.key, label: `${segment.label} [${segment.confidence}]`, estimatedTokens: segment.estimatedTokens, items, unknown: segment.unknown };
+	const items = [...(segment.items ?? [])]
+		.sort((left, right) => right.estimatedTokens - left.estimatedTokens)
+		.slice(0, MAX_ITEMS_PER_SEGMENT_LINE);
+	return {
+		key: segment.key,
+		label: `${segment.label} [${segment.confidence}]`,
+		estimatedTokens: segment.estimatedTokens,
+		items,
+		unknown: segment.unknown,
+	};
 }
 
 /**
@@ -29,13 +37,16 @@ function withConfidenceLabel(segment: ContextSegment): MalevichContextSegment {
 export function buildContextReport(breakdown: ContextBreakdown): string {
 	const lines: string[] = [];
 	if (breakdown.totalTokens !== null && breakdown.effectiveBudget !== null) {
-		lines.push(`Real usage: ${formatTokens(breakdown.totalTokens)} / ${formatTokens(breakdown.effectiveBudget)} tokens (${percentOf(breakdown.totalTokens, breakdown.effectiveBudget)} of usable budget)`);
+		lines.push(
+			`Real usage: ${formatTokens(breakdown.totalTokens)} / ${formatTokens(breakdown.effectiveBudget)} tokens (${percentOf(breakdown.totalTokens, breakdown.effectiveBudget)} of usable budget)`,
+		);
 	} else if (breakdown.totalTokens !== null) {
 		lines.push(`Real usage: ${formatTokens(breakdown.totalTokens)} tokens (model context window unknown)`);
 	} else {
 		lines.push("Real usage: not yet reported -- sizes below are estimates only");
 	}
-	if (breakdown.overshootTokens > 0) lines.push(`Estimates exceed real total by ~${breakdown.overshootTokens} tok -- sizes below are approximate, not exact`);
+	if (breakdown.overshootTokens > 0)
+		lines.push(`Estimates exceed real total by ~${breakdown.overshootTokens} tok -- sizes below are approximate, not exact`);
 
 	const sorted = [...breakdown.segments].sort((left, right) => right.estimatedTokens - left.estimatedTokens).map(withConfidenceLabel);
 	const rows = buildContextRows(sorted, breakdown.totalTokens ?? undefined);

@@ -1,11 +1,11 @@
 import {
 	classifyGoogleVertexFailure,
+	type GoogleVertexFailureMetadata,
 	googleVertexFailureMetrics,
 	hasAnthropicRateLimitHeaders,
+	type MetricObservation,
 	parseAnthropicRateLimitHeaders,
 	parseCodexRateLimitHeaders,
-	type GoogleVertexFailureMetadata,
-	type MetricObservation,
 } from "@danypops/jittor";
 import { headerValue } from "./http-headers.ts";
 
@@ -67,22 +67,36 @@ export class ProviderResponseTelemetry {
 			}
 			// Well-evidenced regardless of headers: GCP's own quota system fronts this transport, so the
 			// same failure classification as google-vertex applies below.
-			this.lastAnthropicVertexResponse = { status, ...(headerValue(headers, "retry-after") ? { retryAfter: headerValue(headers, "retry-after") } : {}) };
+			this.lastAnthropicVertexResponse = {
+				status,
+				...(headerValue(headers, "retry-after") ? { retryAfter: headerValue(headers, "retry-after") } : {}),
+			};
 		}
 		if (provider === "google-vertex") {
-			this.lastGoogleVertexResponse = { status, ...(headerValue(headers, "retry-after") ? { retryAfter: headerValue(headers, "retry-after") } : {}) };
+			this.lastGoogleVertexResponse = {
+				status,
+				...(headerValue(headers, "retry-after") ? { retryAfter: headerValue(headers, "retry-after") } : {}),
+			};
 		}
 		if (Object.keys(headers).some((name) => name.toLowerCase().startsWith("x-codex-"))) {
 			try {
 				const updates = parseCodexRateLimitHeaders(new Headers(headers), Date.now());
-				await recordMetrics(client, updates.flatMap((update) => update.metrics));
+				await recordMetrics(
+					client,
+					updates.flatMap((update) => update.metrics),
+				);
 			} catch {
 				notifySchemaDrift("Codex telemetry schema drift");
 			}
 		}
 	}
 
-	async handleMessageEnd(client: ProviderTelemetryClient, provider: string | undefined, stopReason: string | undefined, errorMessage: string | undefined): Promise<void> {
+	async handleMessageEnd(
+		client: ProviderTelemetryClient,
+		provider: string | undefined,
+		stopReason: string | undefined,
+		errorMessage: string | undefined,
+	): Promise<void> {
 		if (provider === "google-vertex") {
 			if (stopReason === "error") {
 				const failure = classifyGoogleVertexFailure(errorMessage, this.lastGoogleVertexResponse);

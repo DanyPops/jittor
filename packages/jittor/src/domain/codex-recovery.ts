@@ -1,8 +1,4 @@
-import {
-	CODEX_ERROR_MESSAGE_LIMIT,
-	CODEX_RETRY_AFTER_MAX_MS,
-	MILLISECONDS_PER_SECOND,
-} from "../constants.ts";
+import { CODEX_ERROR_MESSAGE_LIMIT, CODEX_RETRY_AFTER_MAX_MS, MILLISECONDS_PER_SECOND } from "../constants.ts";
 
 export type CodexFailureKind =
 	| "concurrency"
@@ -57,10 +53,12 @@ export class CodexRecoveryPolicy {
 		private readonly random: () => number = Math.random,
 	) {
 		if (!Number.isFinite(options.baseDelayMs) || options.baseDelayMs < 0) throw new Error("baseDelayMs must be non-negative");
-		if (!Number.isFinite(options.maxDelayMs) || options.maxDelayMs < options.baseDelayMs) throw new Error("maxDelayMs must be at least baseDelayMs");
+		if (!Number.isFinite(options.maxDelayMs) || options.maxDelayMs < options.baseDelayMs)
+			throw new Error("maxDelayMs must be at least baseDelayMs");
 		if (!Number.isInteger(options.maxAttempts) || options.maxAttempts < 1) throw new Error("maxAttempts must be a positive integer");
 		if (!Number.isFinite(options.attemptWindowMs) || options.attemptWindowMs <= 0) throw new Error("attemptWindowMs must be positive");
-		if (!Number.isFinite(options.jitterRatio) || options.jitterRatio < 0 || options.jitterRatio > 1) throw new Error("jitterRatio must be between 0 and 1");
+		if (!Number.isFinite(options.jitterRatio) || options.jitterRatio < 0 || options.jitterRatio > 1)
+			throw new Error("jitterRatio must be between 0 and 1");
 	}
 
 	observeFailure(failure: CodexFailure, now: number): void {
@@ -88,13 +86,15 @@ export class CodexRecoveryPolicy {
 		this.normalizeWindow(now);
 		if (!this.pendingFailure) return { action: "wait", reason: "no transient Codex failure is pending" };
 		if (this.attempts >= this.options.maxAttempts) {
-			return { action: "exhausted", reason: `${this.options.maxAttempts} recovery attempts reached within ${this.options.attemptWindowMs}ms` };
+			return {
+				action: "exhausted",
+				reason: `${this.options.maxAttempts} recovery attempts reached within ${this.options.attemptWindowMs}ms`,
+			};
 		}
-		const base = this.pendingFailure.retryAfterMs
-			?? this.options.baseDelayMs * (2 ** this.attempts);
+		const base = this.pendingFailure.retryAfterMs ?? this.options.baseDelayMs * 2 ** this.attempts;
 		const sample = this.random();
 		const unit = Number.isFinite(sample) ? Math.min(1, Math.max(0, sample)) : 0;
-		const multiplier = 1 + ((unit * 2) - 1) * this.options.jitterRatio;
+		const multiplier = 1 + (unit * 2 - 1) * this.options.jitterRatio;
 		const jittered = Math.max(0, Math.round(base * multiplier));
 		const delayMs = this.pendingFailure.retryAfterMs === undefined ? jittered : Math.max(base, jittered);
 		return {
@@ -135,9 +135,7 @@ export class CodexRecoveryPolicy {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? value as Record<string, unknown>
-		: undefined;
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function firstString(...values: unknown[]): string | undefined {
@@ -160,15 +158,15 @@ function matches(value: string, patterns: readonly string[]): boolean {
 
 export function classifyCodexFailure(value: unknown, metadata: CodexFailureMetadata = {}): CodexFailure {
 	const root = asRecord(value);
-	const detail = asRecord(root?.["detail"]);
-	const nestedError = asRecord(root?.["error"]);
-	const code = firstString(detail?.["code"], detail?.["error_code"], nestedError?.["code"], root?.["code"]);
-	const source = firstString(detail?.["source"], nestedError?.["source"], root?.["source"]);
+	const detail = asRecord(root?.detail);
+	const nestedError = asRecord(root?.error);
+	const code = firstString(detail?.code, detail?.error_code, nestedError?.code, root?.code);
+	const source = firstString(detail?.source, nestedError?.source, root?.source);
 	const rawMessage = firstString(
-		detail?.["message"],
-		typeof root?.["error"] === "string" ? root["error"] : undefined,
-		nestedError?.["message"],
-		root?.["message"],
+		detail?.message,
+		typeof root?.error === "string" ? root.error : undefined,
+		nestedError?.message,
+		root?.message,
 		typeof value === "string" ? value : undefined,
 	);
 	const message = rawMessage?.slice(0, CODEX_ERROR_MESSAGE_LIMIT);
@@ -183,16 +181,27 @@ export function classifyCodexFailure(value: unknown, metadata: CodexFailureMetad
 	if (matches(evidence, ["insufficient_quota", "quota exceeded", "out of credits", "billing"])) {
 		return { kind: "quota", transient: false, ...base };
 	}
-	if (metadata.status === 401 || metadata.status === 403 || matches(evidence, ["invalid_api_key", "authentication", "unauthorized", "permission_denied"])) {
+	if (
+		metadata.status === 401 ||
+		metadata.status === 403 ||
+		matches(evidence, ["invalid_api_key", "authentication", "unauthorized", "permission_denied"])
+	) {
 		return { kind: "authentication", transient: false, ...base };
 	}
-	if (matches(evidence, ["invalid_prompt", "invalid_request", "context_length_exceeded"]) || metadata.status === 400 || metadata.status === 422) {
+	if (
+		matches(evidence, ["invalid_prompt", "invalid_request", "context_length_exceeded"]) ||
+		metadata.status === 400 ||
+		metadata.status === 422
+	) {
 		return { kind: "invalid-request", transient: false, ...base };
 	}
 	if (matches(evidence, ["concurrency_limit", "too many concurrent requests", "throttled"])) {
 		return { kind: "concurrency", transient: true, ...base };
 	}
-	if (matches(evidence, ["server_is_overloaded", "slow_down", "service unavailable", "overloaded"]) || (metadata.status !== undefined && metadata.status >= 500 && metadata.status <= 599)) {
+	if (
+		matches(evidence, ["server_is_overloaded", "slow_down", "service unavailable", "overloaded"]) ||
+		(metadata.status !== undefined && metadata.status >= 500 && metadata.status <= 599)
+	) {
 		return { kind: "overload", transient: true, ...base };
 	}
 	if (metadata.status === 429 || matches(evidence, ["rate_limit_exceeded", "rate limit", "too many requests"])) {

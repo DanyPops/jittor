@@ -1,5 +1,11 @@
+import {
+	CONTEXT_DEFAULT_RESERVE_TOKENS,
+	CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN,
+	CONTEXT_TREE_MAX_NODES,
+	type ContextSegment,
+	type ContextSegmentItem,
+} from "@danypops/jittor";
 import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
-import { CONTEXT_DEFAULT_RESERVE_TOKENS, CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN, CONTEXT_TREE_MAX_NODES, type ContextSegment, type ContextSegmentItem } from "@danypops/jittor";
 
 /**
  * Ported from pi-papyrus's context-budget.ts: the Pi-generic half (session message-history tree
@@ -29,21 +35,21 @@ export interface SessionTreeNodeLike {
 function messageContentCharacters(message: unknown): number {
 	if (typeof message !== "object" || message === null) return 0;
 	const record = message as Record<string, unknown>;
-	if (record["role"] === "bashExecution") {
+	if (record.role === "bashExecution") {
 		// Pi's own context builder excludes "!!"-prefixed bash output from context; match that.
-		if (record["excludeFromContext"] === true) return 0;
-		return String(record["command"] ?? "").length + String(record["output"] ?? "").length;
+		if (record.excludeFromContext === true) return 0;
+		return String(record.command ?? "").length + String(record.output ?? "").length;
 	}
-	const content = record["content"];
+	const content = record.content;
 	if (typeof content === "string") return content.length;
 	if (!Array.isArray(content)) return 0;
 	let characters = 0;
 	for (const block of content) {
 		if (typeof block !== "object" || block === null) continue;
 		const b = block as Record<string, unknown>;
-		if (b["type"] === "text") characters += String(b["text"] ?? "").length;
-		else if (b["type"] === "thinking") characters += String(b["thinking"] ?? "").length;
-		else if (b["type"] === "toolCall") characters += JSON.stringify(b["arguments"] ?? {}).length;
+		if (b.type === "text") characters += String(b.text ?? "").length;
+		else if (b.type === "thinking") characters += String(b.thinking ?? "").length;
+		else if (b.type === "toolCall") characters += JSON.stringify(b.arguments ?? {}).length;
 		// "image" blocks are deliberately not counted here -- image tokens follow a different,
 		// non-character-based cost model this char/4 estimate cannot represent; this is a real,
 		// documented undercount for image-heavy sessions, not a silent approximation.
@@ -54,13 +60,20 @@ function messageContentCharacters(message: unknown): number {
 function messageSnippet(message: unknown, maxLength = 48): string {
 	if (typeof message !== "object" || message === null) return "";
 	const record = message as Record<string, unknown>;
-	if (record["role"] === "bashExecution") return String(record["command"] ?? "");
-	const content = record["content"];
-	const text = typeof content === "string"
-		? content
-		: Array.isArray(content)
-			? content.map((block) => (typeof block === "object" && block !== null && (block as Record<string, unknown>)["type"] === "text" ? String((block as Record<string, unknown>)["text"] ?? "") : "")).join(" ")
-			: "";
+	if (record.role === "bashExecution") return String(record.command ?? "");
+	const content = record.content;
+	const text =
+		typeof content === "string"
+			? content
+			: Array.isArray(content)
+				? content
+						.map((block) =>
+							typeof block === "object" && block !== null && (block as Record<string, unknown>).type === "text"
+								? String((block as Record<string, unknown>).text ?? "")
+								: "",
+						)
+						.join(" ")
+				: "";
 	const collapsed = text.replace(/\s+/g, " ").trim();
 	return collapsed.length > maxLength ? `${collapsed.slice(0, maxLength - 1)}…` : collapsed;
 }
@@ -68,7 +81,7 @@ function messageSnippet(message: unknown, maxLength = 48): string {
 function entryLabel(entry: SessionEntryLike): string {
 	if (entry.type === "compaction") return "compaction summary";
 	if (entry.type === "branch_summary") return "branch summary";
-	const role = typeof entry.message === "object" && entry.message !== null ? (entry.message as Record<string, unknown>)["role"] : undefined;
+	const role = typeof entry.message === "object" && entry.message !== null ? (entry.message as Record<string, unknown>).role : undefined;
 	const prefix = typeof role === "string" ? role : entry.type;
 	const snippet = messageSnippet(entry.message);
 	return snippet ? `${prefix}: ${snippet}` : prefix;
@@ -113,7 +126,11 @@ interface WalkFrame {
  * by a reverse-order (children-before-parent) construction pass -- an ordinary long-running
  * session is one long linear chain, so recursion depth would equal entry count.
  */
-export function buildMessageHistoryTree(roots: ReadonlyArray<SessionTreeNodeLike>, activeEntryIds: ReadonlySet<string>, branchEntryIds?: ReadonlySet<string>): MessageHistoryTree {
+export function buildMessageHistoryTree(
+	roots: ReadonlyArray<SessionTreeNodeLike>,
+	activeEntryIds: ReadonlySet<string>,
+	branchEntryIds?: ReadonlySet<string>,
+): MessageHistoryTree {
 	const visited = new Set<string>();
 	let truncated = false;
 	let activeTokens = 0;
@@ -122,8 +139,14 @@ export function buildMessageHistoryTree(roots: ReadonlyArray<SessionTreeNodeLike
 	const stack: WalkFrame[] = [...roots].reverse().map((root) => ({ node: root, parentIndex: null }));
 	while (stack.length > 0) {
 		const frame = stack.pop()!;
-		if (order.length >= CONTEXT_TREE_MAX_NODES) { truncated = true; break; }
-		if (visited.has(frame.node.entry.id)) { truncated = true; continue; } // cycle guard
+		if (order.length >= CONTEXT_TREE_MAX_NODES) {
+			truncated = true;
+			break;
+		}
+		if (visited.has(frame.node.entry.id)) {
+			truncated = true;
+			continue;
+		} // cycle guard
 		visited.add(frame.node.entry.id);
 		const index = order.length;
 		order.push(frame);
@@ -137,11 +160,12 @@ export function buildMessageHistoryTree(roots: ReadonlyArray<SessionTreeNodeLike
 	for (let index = order.length - 1; index >= 0; index--) {
 		const frame = order[index]!;
 		const entry = frame.node.entry;
-		const characters = entry.type === "message"
-			? messageContentCharacters(entry.message)
-			: entry.type === "compaction" || entry.type === "branch_summary"
-				? (entry.summary ?? "").length
-				: 0;
+		const characters =
+			entry.type === "message"
+				? messageContentCharacters(entry.message)
+				: entry.type === "compaction" || entry.type === "branch_summary"
+					? (entry.summary ?? "").length
+					: 0;
 		const tokens = Math.ceil(characters / CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN);
 		const isActive = activeEntryIds.has(entry.id);
 		if (isActive) activeTokens += tokens;
@@ -210,7 +234,10 @@ export function buildBasePromptItems(options: BuildSystemPromptOptions, totalCha
 	}
 
 	const visibleSkills = (options.skills ?? []).filter((skill) => !skill.disableModelInvocation);
-	const skillsCharacters = visibleSkills.reduce((sum, skill) => sum + skill.name.length + skill.description.length + skill.filePath.length + 20, 0);
+	const skillsCharacters = visibleSkills.reduce(
+		(sum, skill) => sum + skill.name.length + skill.description.length + skill.filePath.length + 20,
+		0,
+	);
 	if (skillsCharacters > 0) {
 		items.push({ label: `Skills catalog (${visibleSkills.length} skills)`, estimatedTokens: toCeilTokens(skillsCharacters) });
 	}
@@ -218,7 +245,10 @@ export function buildBasePromptItems(options: BuildSystemPromptOptions, totalCha
 	const contextFiles = options.contextFiles ?? [];
 	const contextFilesCharacters = contextFiles.reduce((sum, file) => sum + file.path.length + file.content.length + 40, 0);
 	if (contextFilesCharacters > 0) {
-		items.push({ label: `Project context files (${contextFiles.length}, e.g. AGENTS.md)`, estimatedTokens: toCeilTokens(contextFilesCharacters) });
+		items.push({
+			label: `Project context files (${contextFiles.length}, e.g. AGENTS.md)`,
+			estimatedTokens: toCeilTokens(contextFilesCharacters),
+		});
 	}
 
 	const knownCharacters = toolSnippetsCharacters + skillsCharacters + contextFilesCharacters;
@@ -300,9 +330,10 @@ export function composeContextBreakdown(input: ComposeContextBreakdownInput): Co
 	const overshootTokens = input.totalTokens === null ? 0 : Math.max(0, knownTokens - input.totalTokens);
 	const other: ContextSegment = {
 		key: "other",
-		label: overshootTokens > 0
-			? `Unaccounted (message envelope, cache-control markers, and other wire-protocol overhead) -- estimate overshoot: other segments' estimates already exceed the real total by ~${overshootTokens} tokens, so this is a floor, not a real zero`
-			: "Unaccounted (message envelope, cache-control markers, and other wire-protocol overhead)",
+		label:
+			overshootTokens > 0
+				? `Unaccounted (message envelope, cache-control markers, and other wire-protocol overhead) -- estimate overshoot: other segments' estimates already exceed the real total by ~${overshootTokens} tokens, so this is a floor, not a real zero`
+				: "Unaccounted (message envelope, cache-control markers, and other wire-protocol overhead)",
 		estimatedTokens: input.totalTokens === null ? 0 : Math.max(0, input.totalTokens - knownTokens),
 		confidence: "correlated",
 	};

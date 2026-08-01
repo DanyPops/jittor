@@ -1,24 +1,26 @@
 #!/usr/bin/env bun
 import { fileURLToPath } from "node:url";
+import { BENCHMARKS_USAGE_LINES, runBenchmarksCommand } from "./cli-commands/benchmarks.ts";
+import { runCompactionCommand } from "./cli-commands/compaction.ts";
+import { CONTEXT_USAGE_LINES, formatContextAssessment, runContextCommand } from "./cli-commands/context.ts";
+import { formatCostByTask, formatMetricsQuery, METRICS_USAGE_LINES, runMetricsCommand } from "./cli-commands/metrics.ts";
+import { OP_USAGE_LINES, runOpCommand } from "./cli-commands/op.ts";
+import { formatRouterStatus, ROUTER_USAGE_LINES, runRouterCommand, runTelemetryCommand } from "./cli-commands/router.ts";
+import { installService, renderSystemdUnit, runServiceCommand, SERVICE_USAGE_LINES, systemctl } from "./cli-commands/service-daemon.ts";
+import { runSessionCommand, SESSION_USAGE_LINES } from "./cli-commands/session.ts";
+import type { CliDependencies } from "./cli-commands/support.ts";
 import { connectJittorClient } from "./client.ts";
 import { serveMain } from "./daemon.ts";
-import type { CliDependencies } from "./cli-commands/support.ts";
-import { installService, renderSystemdUnit, systemctl, runServiceCommand, SERVICE_USAGE_LINES } from "./cli-commands/service-daemon.ts";
-import { runSessionCommand, SESSION_USAGE_LINES } from "./cli-commands/session.ts";
-import { runMetricsCommand, METRICS_USAGE_LINES, formatMetricsQuery, formatCostByTask } from "./cli-commands/metrics.ts";
-import { runTelemetryCommand, runRouterCommand, ROUTER_USAGE_LINES, formatRouterStatus } from "./cli-commands/router.ts";
-import { runCompactionCommand } from "./cli-commands/compaction.ts";
-import { runOpCommand, OP_USAGE_LINES } from "./cli-commands/op.ts";
-import { runBenchmarksCommand, BENCHMARKS_USAGE_LINES } from "./cli-commands/benchmarks.ts";
-import { runContextCommand, CONTEXT_USAGE_LINES, formatContextAssessment } from "./cli-commands/context.ts";
 
 // Re-exported for external callers (tests, daemon.ts's systemd-unit test) that import these
 // directly from cli.ts rather than reaching into src/cli-commands/*.
 export type { CliDependencies };
-export { renderSystemdUnit, formatMetricsQuery, formatCostByTask, formatRouterStatus, formatContextAssessment };
+export { formatContextAssessment, formatCostByTask, formatMetricsQuery, formatRouterStatus, renderSystemdUnit };
 
 const DEFAULT_DEPENDENCIES: CliDependencies = {
-	get client() { return connectJittorClient(); },
+	get client() {
+		return connectJittorClient();
+	},
 	stdout: console.log,
 	stderr: console.error,
 	systemctl,
@@ -27,17 +29,19 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
 };
 
 function usage(stderr: (line: string) => void): number {
-	stderr([
-		"Usage: jittor <command> [options]",
-		"  serve",
-		...SERVICE_USAGE_LINES,
-		...CONTEXT_USAGE_LINES,
-		...BENCHMARKS_USAGE_LINES,
-		...METRICS_USAGE_LINES,
-		...ROUTER_USAGE_LINES,
-		...SESSION_USAGE_LINES,
-		...OP_USAGE_LINES,
-	].join("\n"));
+	stderr(
+		[
+			"Usage: jittor <command> [options]",
+			"  serve",
+			...SERVICE_USAGE_LINES,
+			...CONTEXT_USAGE_LINES,
+			...BENCHMARKS_USAGE_LINES,
+			...METRICS_USAGE_LINES,
+			...ROUTER_USAGE_LINES,
+			...SESSION_USAGE_LINES,
+			...OP_USAGE_LINES,
+		].join("\n"),
+	);
 	return 2;
 }
 
@@ -52,7 +56,10 @@ function usage(stderr: (line: string) => void): number {
 export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEPENDENCIES): Promise<number> {
 	const [command, action, ...rest] = args;
 	const fail = () => usage(deps.stderr);
-	if (command === "serve") { await deps.serve(); return 0; }
+	if (command === "serve") {
+		await deps.serve();
+		return 0;
+	}
 	if (command === "session") return runSessionCommand(action, rest, deps, fail);
 	if (command === "metrics") return runMetricsCommand(action, rest, deps, fail);
 	if (command === "telemetry") return runTelemetryCommand(action, rest, deps, fail);

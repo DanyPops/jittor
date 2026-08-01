@@ -1,8 +1,4 @@
-import type {
-	BenchmarkQuery,
-	BenchmarkQueryResult,
-	BenchmarkRefreshResult,
-} from "../domain/benchmark.ts";
+import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "../domain/benchmark.ts";
 
 export interface BenchmarkController {
 	refresh(force?: boolean): Promise<BenchmarkRefreshResult>;

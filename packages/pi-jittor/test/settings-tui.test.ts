@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderSettingsView, showSettingsPanel, type SettingsSnapshot } from "../extension/src/settings-tui.ts";
 import type { PersistentExtensionControl } from "../extension/src/settings.ts";
+import { renderSettingsView, type SettingsSnapshot, showSettingsPanel } from "../extension/src/settings-tui.ts";
 
 const snapshot: SettingsSnapshot = {
 	enforcementEnabled: true,
@@ -16,13 +16,23 @@ function control(): PersistentExtensionControl & { values: SettingsSnapshot } {
 	return {
 		values,
 		isEnabled: () => values.enforcementEnabled,
-		setEnabled(value) { values.enforcementEnabled = value; },
+		setEnabled(value) {
+			values.enforcementEnabled = value;
+		},
 		isFooterEnabled: () => values.footerEnabled,
-		setFooterEnabled(value) { values.footerEnabled = value; },
+		setFooterEnabled(value) {
+			values.footerEnabled = value;
+		},
 		isCodexRecoveryEnabled: () => values.codexRecoveryEnabled,
-		setCodexRecoveryEnabled(value) { values.codexRecoveryEnabled = value; },
-		getUsageTokenBudget(period) { return values.usageTokenBudgets[period]; },
-		setUsageTokenBudget(period, tokens) { values.usageTokenBudgets[period] = tokens; },
+		setCodexRecoveryEnabled(value) {
+			values.codexRecoveryEnabled = value;
+		},
+		getUsageTokenBudget(period) {
+			return values.usageTokenBudgets[period];
+		},
+		setUsageTokenBudget(period, tokens) {
+			values.usageTokenBudgets[period] = tokens;
+		},
 	};
 }
 
@@ -44,11 +54,7 @@ describe("Jittor settings TUI", () => {
 
 	it("requires confirmation for weaker enforcement and recovery changes", async () => {
 		const settings = control();
-		const actions = [
-			{ kind: "activate", key: "enforcement" },
-			{ kind: "activate", key: "recovery" },
-			{ kind: "close" },
-		];
+		const actions = [{ kind: "activate", key: "enforcement" }, { kind: "activate", key: "recovery" }, { kind: "close" }];
 		const confirmations: string[] = [];
 		const ctx = {
 			mode: "tui",
@@ -58,7 +64,10 @@ describe("Jittor settings TUI", () => {
 					expect(component.render(60).join("\n")).toContain("Jittor Settings");
 					return actions.shift();
 				},
-				async confirm(title: string) { confirmations.push(title); return title.includes("recovery"); },
+				async confirm(title: string) {
+					confirmations.push(title);
+					return title.includes("recovery");
+				},
 			},
 		} as unknown as ExtensionCommandContext;
 		await showSettingsPanel(ctx, settings, settings, settings);
@@ -69,17 +78,17 @@ describe("Jittor settings TUI", () => {
 
 	it("edits and clears user token budgets without touching provider quotas", async () => {
 		const settings = control();
-		const actions = [
-			{ kind: "activate", key: "budget-daily" },
-			{ kind: "activate", key: "budget-hourly" },
-			{ kind: "close" },
-		];
+		const actions = [{ kind: "activate", key: "budget-daily" }, { kind: "activate", key: "budget-hourly" }, { kind: "close" }];
 		const inputs = ["300,000", "off"];
 		const ctx = {
 			mode: "tui",
 			ui: {
-				async custom() { return actions.shift(); },
-				async input() { return inputs.shift(); },
+				async custom() {
+					return actions.shift();
+				},
+				async input() {
+					return inputs.shift();
+				},
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;

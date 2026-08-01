@@ -1,26 +1,26 @@
 import { errorResponse, healthResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
 import { SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "./constants.ts";
-import { InvalidSessionSecretError, SessionIdentity, type RegisterSessionIdentityResult } from "./session-identity-service.ts";
-import { VERSION } from "./version.ts";
-import type { MetricObservation, MetricQuery, StoredMetricObservation } from "./domain/metric.ts";
+import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
 import type { CompactionDurationEstimate, ContextAssessment } from "./domain/context-telemetry.ts";
+import type { MetricObservation, MetricQuery, StoredMetricObservation } from "./domain/metric.ts";
+import type { ModelRankingResult } from "./domain/model-ranking.ts";
+import type { ModelRanker, ModelRecommendationInput } from "./domain/model-ranking-service.ts";
 import type { TaskCostSummary } from "./domain/task-cost.ts";
 import type { UsageAggregateRow } from "./domain/usage.ts";
-import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
-import type { ModelRanker, ModelRecommendationInput } from "./domain/model-ranking-service.ts";
-import type { ModelRankingResult } from "./domain/model-ranking.ts";
-import type { BenchmarkController } from "./ports/benchmark-controller.ts";
-import type { MetricStore } from "./ports/metric-store.ts";
-import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
-import type { PolicyDecision, Route } from "./policy.ts";
-import { metricsOperations } from "./operations/metrics-operations.ts";
 import { benchmarkOperations } from "./operations/benchmark-operations.ts";
 import { contextOperations } from "./operations/context-operations.ts";
-import { routerOperations } from "./operations/router-operations.ts";
+import { metricsOperations } from "./operations/metrics-operations.ts";
 import { modelRankingOperations } from "./operations/model-ranking-operations.ts";
+import { routerOperations } from "./operations/router-operations.ts";
 import { sessionIdentityOperations } from "./operations/session-identity-operations.ts";
 import { routerMutationAuthorizer } from "./operations/session-scope.ts";
 import type { OperationHandlerMap } from "./operations/types.ts";
+import type { PolicyDecision, Route } from "./policy.ts";
+import type { BenchmarkController } from "./ports/benchmark-controller.ts";
+import type { MetricStore } from "./ports/metric-store.ts";
+import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
+import { InvalidSessionSecretError, type RegisterSessionIdentityResult, type SessionIdentity } from "./session-identity-service.ts";
+import { VERSION } from "./version.ts";
 
 export const EXPECTED_OPERATION_NAMES = [
 	"metrics.record",
@@ -50,8 +50,11 @@ export const EXPECTED_OPERATION_NAMES = [
 	"router.available_routes",
 ] as const;
 
-export type OperationName = typeof EXPECTED_OPERATION_NAMES[number];
-interface RouterScopeInput { session_id?: string; session_secret?: string }
+export type OperationName = (typeof EXPECTED_OPERATION_NAMES)[number];
+interface RouterScopeInput {
+	session_id?: string;
+	session_secret?: string;
+}
 export interface OperationInputs {
 	"session.register": { session_id: string };
 	"session.release": { session_id: string; session_secret?: string };
@@ -111,26 +114,66 @@ export class UnknownOperationError extends Error {}
 export { InvalidSessionSecretError };
 
 class UnavailableModelRanker implements ModelRanker {
-	rank(): ModelRankingResult { throw new Error("model ranking is not configured"); }
+	rank(): ModelRankingResult {
+		throw new Error("model ranking is not configured");
+	}
 }
 
 class UnavailableBenchmarkController implements BenchmarkController {
-	async refresh(): Promise<BenchmarkRefreshResult> { return this.status(); }
-	status(): BenchmarkRefreshResult { return { observedAt: Date.now(), sources: [] }; }
-	query(): BenchmarkQueryResult { throw new Error("benchmark evidence is not configured"); }
+	async refresh(): Promise<BenchmarkRefreshResult> {
+		return this.status();
+	}
+	status(): BenchmarkRefreshResult {
+		return { observedAt: Date.now(), sources: [] };
+	}
+	query(): BenchmarkQueryResult {
+		throw new Error("benchmark evidence is not configured");
+	}
 }
 
 class UnavailableRouter implements RouterController {
-	private readonly unavailable: RouterStatus = { ready: false, paused: false, sources: [], lastDecision: null, override: null, currentRoute: null, availableRoutes: [] };
-	async poll(): Promise<TelemetryPollResult> { return { sources: [], observedAt: Date.now() }; }
-	status(): RouterStatus { return structuredClone(this.unavailable); }
-	decide(): PolicyDecision { return { action: "halt", pressure: Number.POSITIVE_INFINITY, reason: "router is not configured", decidedAt: Date.now(), trace: ["fail closed"] }; }
-	pause(): RouterStatus { return this.status(); }
-	resume(): RouterStatus { return this.status(); }
-	setOverride(): RouterStatus { return this.status(); }
-	clearOverride(): RouterStatus { return this.status(); }
-	setCurrentRoute(): RouterStatus { return this.status(); }
-	setAvailableRoutes(): RouterStatus { return this.status(); }
+	private readonly unavailable: RouterStatus = {
+		ready: false,
+		paused: false,
+		sources: [],
+		lastDecision: null,
+		override: null,
+		currentRoute: null,
+		availableRoutes: [],
+	};
+	async poll(): Promise<TelemetryPollResult> {
+		return { sources: [], observedAt: Date.now() };
+	}
+	status(): RouterStatus {
+		return structuredClone(this.unavailable);
+	}
+	decide(): PolicyDecision {
+		return {
+			action: "halt",
+			pressure: Number.POSITIVE_INFINITY,
+			reason: "router is not configured",
+			decidedAt: Date.now(),
+			trace: ["fail closed"],
+		};
+	}
+	pause(): RouterStatus {
+		return this.status();
+	}
+	resume(): RouterStatus {
+		return this.status();
+	}
+	setOverride(): RouterStatus {
+		return this.status();
+	}
+	clearOverride(): RouterStatus {
+		return this.status();
+	}
+	setCurrentRoute(): RouterStatus {
+		return this.status();
+	}
+	setAvailableRoutes(): RouterStatus {
+		return this.status();
+	}
 }
 
 export class JittorService {
@@ -219,9 +262,10 @@ export function createApp(options: JittorAppOptions): { fetch(request: Request):
 			try {
 				const body = JSON.parse(text) as { op?: unknown; input?: unknown };
 				if (typeof body.op !== "string") throw new Error("op is required");
-				const input = typeof body.input === "object" && body.input !== null && !Array.isArray(body.input)
-					? body.input as Record<string, unknown>
-					: {};
+				const input =
+					typeof body.input === "object" && body.input !== null && !Array.isArray(body.input)
+						? (body.input as Record<string, unknown>)
+						: {};
 				return json({ result: await options.service.execute(body.op, input) });
 			} catch (error) {
 				if (error instanceof UnknownOperationError) return json({ error: error.message }, 404);

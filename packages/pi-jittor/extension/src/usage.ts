@@ -1,28 +1,41 @@
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
-	HUMAN_TEXT_FIELD_MAX_CHARACTERS,
-	USAGE_CHART_HEIGHT,
-	USAGE_MAX_DISTINCT_SCOPES,
-	USAGE_RENDER_MAX_SERIES,
-	USAGE_Y_AXIS_WIDTH,
 	buildCostGraph,
 	buildUsageGraph,
-	resolveUsageWindow,
-	USAGE_PERIODS,
-	usagePeriod,
 	type CostGraph,
+	HUMAN_TEXT_FIELD_MAX_CHARACTERS,
+	resolveUsageWindow,
+	USAGE_CHART_HEIGHT,
+	USAGE_MAX_DISTINCT_SCOPES,
+	USAGE_PERIODS,
+	USAGE_RENDER_MAX_SERIES,
+	USAGE_Y_AXIS_WIDTH,
 	type UsageAggregateRow,
 	type UsageGraph,
 	type UsagePeriod,
+	usagePeriod,
 } from "@danypops/jittor";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { UsageBudgetControl } from "./settings.ts";
 import type { JittorPanelClient } from "./tui.ts";
 
 type UsageAction = "period-prev" | "period-next" | "view-next" | "refresh" | "close";
 type UsageColor =
-	| "accent" | "success" | "warning" | "error" | "thinkingText" | "muted" | "dim" | "borderMuted"
-	| "syntaxKeyword" | "syntaxFunction" | "syntaxVariable" | "syntaxString" | "syntaxNumber" | "syntaxType" | "syntaxOperator";
+	| "accent"
+	| "success"
+	| "warning"
+	| "error"
+	| "thinkingText"
+	| "muted"
+	| "dim"
+	| "borderMuted"
+	| "syntaxKeyword"
+	| "syntaxFunction"
+	| "syntaxVariable"
+	| "syntaxString"
+	| "syntaxNumber"
+	| "syntaxType"
+	| "syntaxOperator";
 
 export interface UsageTheme {
 	fg(color: UsageColor, text: string): string;
@@ -53,15 +66,22 @@ export interface UsageTheme {
  * on an additional channel rather than silently reusing an indistinguishable color).
  */
 const SERIES_HUES: UsageColor[] = [
-	"accent", "syntaxFunction", "syntaxString", "syntaxNumber",
-	"syntaxKeyword", "syntaxType", "thinkingText", "syntaxVariable", "syntaxOperator",
+	"accent",
+	"syntaxFunction",
+	"syntaxString",
+	"syntaxNumber",
+	"syntaxKeyword",
+	"syntaxType",
+	"thinkingText",
+	"syntaxVariable",
+	"syntaxOperator",
 ];
 
 /** Returns a style function for the Nth series: cycles hue, then adds bold once the palette wraps. */
 function seriesStyle(index: number, theme: UsageTheme): (text: string) => string {
 	const hue = SERIES_HUES[index % SERIES_HUES.length]!;
 	const useBold = Math.floor(index / SERIES_HUES.length) % 2 === 1;
-	return (text: string) => useBold ? theme.bold(theme.fg(hue, text)) : theme.fg(hue, text);
+	return (text: string) => (useBold ? theme.bold(theme.fg(hue, text)) : theme.fg(hue, text));
 }
 
 const PARTIAL_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -73,16 +93,34 @@ function compact(value: number): string {
 	return String(Math.round(value));
 }
 
-interface RenderableSeries { key: string; provider: string; model: string; total: number }
-interface RenderableBucket { start: number; end: number; total: number; series: Record<string, number> }
-interface RenderableChart { period: UsagePeriod; start: number; end: number; buckets: RenderableBucket[]; series: RenderableSeries[]; total: number; truncated: boolean }
+interface RenderableSeries {
+	key: string;
+	provider: string;
+	model: string;
+	total: number;
+}
+interface RenderableBucket {
+	start: number;
+	end: number;
+	total: number;
+	series: Record<string, number>;
+}
+interface RenderableChart {
+	period: UsagePeriod;
+	start: number;
+	end: number;
+	buckets: RenderableBucket[];
+	series: RenderableSeries[];
+	total: number;
+	truncated: boolean;
+}
 
 function mergeBuckets(buckets: RenderableBucket[], maximum: number): RenderableBucket[] {
 	if (buckets.length <= maximum) return buckets;
 	const result: RenderableBucket[] = [];
 	for (let index = 0; index < maximum; index += 1) {
-		const from = Math.floor(index * buckets.length / maximum);
-		const to = Math.max(from + 1, Math.floor((index + 1) * buckets.length / maximum));
+		const from = Math.floor((index * buckets.length) / maximum);
+		const to = Math.max(from + 1, Math.floor(((index + 1) * buckets.length) / maximum));
 		const selected = buckets.slice(from, to);
 		const series: Record<string, number> = {};
 		for (const bucket of selected) {
@@ -135,7 +173,11 @@ function axisLabels(start: number, end: number, period: UsagePeriod, width: numb
 }
 
 function displayIdentity(value: string): string {
-	return value.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim().slice(0, HUMAN_TEXT_FIELD_MAX_CHARACTERS);
+	return value
+		.replace(/[\r\n\t]/g, " ")
+		.replace(/ +/g, " ")
+		.trim()
+		.slice(0, HUMAN_TEXT_FIELD_MAX_CHARACTERS);
 }
 
 function plainTheme(): UsageTheme {
@@ -170,13 +212,14 @@ function renderChart(chart: RenderableChart, width: number, theme: UsageTheme, o
 	const budget = typeof options.budget === "number" && Number.isFinite(options.budget) && options.budget > 0 ? options.budget : undefined;
 	const maximum = Math.max(chart.total, budget ?? 0);
 	const observed = chart.truncated ? `at least ${formatValue(chart.total)}` : formatValue(chart.total);
-	const budgetState = budget === undefined
-		? `${observed}${unitSuffix} · budget not configured${chart.truncated ? " · query limit reached" : ""}`
-		: chart.total > budget
-			? `${observed}${unitSuffix} / ${formatValue(budget)} budget · OVER BUDGET by ${chart.truncated ? "at least " : ""}${formatValue(chart.total - budget)}`
-			: chart.truncated
-				? `${observed}${unitSuffix} / ${formatValue(budget)} budget · state unknown · query limit reached`
-				: `${observed}${unitSuffix} / ${formatValue(budget)} budget · ${formatValue(budget - chart.total)} remaining`;
+	const budgetState =
+		budget === undefined
+			? `${observed}${unitSuffix} · budget not configured${chart.truncated ? " · query limit reached" : ""}`
+			: chart.total > budget
+				? `${observed}${unitSuffix} / ${formatValue(budget)} budget · OVER BUDGET by ${chart.truncated ? "at least " : ""}${formatValue(chart.total - budget)}`
+				: chart.truncated
+					? `${observed}${unitSuffix} / ${formatValue(budget)} budget · state unknown · query limit reached`
+					: `${observed}${unitSuffix} / ${formatValue(budget)} budget · ${formatValue(budget - chart.total)} remaining`;
 	const lines = [
 		truncateToWidth(theme.bold(options.title), safeWidth, ""),
 		truncateToWidth(budgetState, safeWidth, "…"),
@@ -190,10 +233,16 @@ function renderChart(chart: RenderableChart, width: number, theme: UsageTheme, o
 
 	for (let row = 0; row < USAGE_CHART_HEIGHT; row += 1) {
 		const fromBottom = USAGE_CHART_HEIGHT - row - 1;
-		const lower = maximum * fromBottom / USAGE_CHART_HEIGHT;
-		const upper = maximum * (fromBottom + 1) / USAGE_CHART_HEIGHT;
+		const lower = (maximum * fromBottom) / USAGE_CHART_HEIGHT;
+		const upper = (maximum * (fromBottom + 1)) / USAGE_CHART_HEIGHT;
 		const thresholdRow = budget !== undefined && budget > lower && budget <= upper;
-		const label = thresholdRow ? formatValue(budget) : row === 0 ? formatValue(maximum) : row === Math.floor(USAGE_CHART_HEIGHT / 2) ? formatValue(maximum / 2) : "";
+		const label = thresholdRow
+			? formatValue(budget)
+			: row === 0
+				? formatValue(maximum)
+				: row === Math.floor(USAGE_CHART_HEIGHT / 2)
+					? formatValue(maximum / 2)
+					: "";
 		if (thresholdRow) {
 			const color = chart.total > budget ? "error" : "warning";
 			lines.push(`${label.padStart(USAGE_Y_AXIS_WIDTH - 2)} ${theme.fg("borderMuted", "│")}${theme.fg(color, "┄".repeat(plotWidth))}`);
@@ -201,14 +250,14 @@ function renderChart(chart: RenderableChart, width: number, theme: UsageTheme, o
 		}
 		let plot = "";
 		for (const bucket of buckets) {
-			const scaled = bucket.total / maximum * USAGE_CHART_HEIGHT;
+			const scaled = (bucket.total / maximum) * USAGE_CHART_HEIGHT;
 			const occupancy = Math.max(0, Math.min(1, scaled - fromBottom));
 			if (occupancy <= 0) {
 				plot += " ".repeat(barStep);
 				continue;
 			}
 			const block = PARTIAL_BLOCKS[Math.max(0, Math.ceil(occupancy * PARTIAL_BLOCKS.length) - 1)]!;
-			const valueHeight = Math.min(bucket.total, maximum * (fromBottom + Math.min(occupancy, 0.5)) / USAGE_CHART_HEIGHT);
+			const valueHeight = Math.min(bucket.total, (maximum * (fromBottom + Math.min(occupancy, 0.5))) / USAGE_CHART_HEIGHT);
 			plot += seriesStyle(seriesAt(bucket, chart, valueHeight), theme)(block) + (barStep === 2 ? " " : "");
 		}
 		lines.push(`${label.padStart(USAGE_Y_AXIS_WIDTH - 2)} ${theme.fg("borderMuted", "│")}${plot}`);
@@ -220,16 +269,32 @@ function renderChart(chart: RenderableChart, width: number, theme: UsageTheme, o
 	for (let index = 0; index < displayedSeries.length; index += 1) {
 		const series = displayedSeries[index]!;
 		const bullet = seriesStyle(index, theme)("■");
-		lines.push(truncateToWidth(`${bullet} ${displayIdentity(series.provider)}/${displayIdentity(series.model)}  ${formatValue(series.total)}`, safeWidth, "…"));
+		lines.push(
+			truncateToWidth(
+				`${bullet} ${displayIdentity(series.provider)}/${displayIdentity(series.model)}  ${formatValue(series.total)}`,
+				safeWidth,
+				"…",
+			),
+		);
 	}
-	if (chart.series.length > displayedSeries.length) lines.push(truncateToWidth(theme.fg("muted", `… ${chart.series.length - displayedSeries.length} more series omitted`), safeWidth, "…"));
-	return lines.map((line) => visibleWidth(line) <= safeWidth ? line : truncateToWidth(line, safeWidth, "…"));
+	if (chart.series.length > displayedSeries.length)
+		lines.push(truncateToWidth(theme.fg("muted", `… ${chart.series.length - displayedSeries.length} more series omitted`), safeWidth, "…"));
+	return lines.map((line) => (visibleWidth(line) <= safeWidth ? line : truncateToWidth(line, safeWidth, "…")));
 }
 
 export function renderUsageGraph(chart: UsageGraph, width: number, theme: UsageTheme, tokenBudget?: number): string[] {
 	return renderChart(
-		{ period: chart.period, start: chart.start, end: chart.end, buckets: chart.buckets, series: chart.series, total: chart.totalTokens, truncated: chart.truncated },
-		width, theme,
+		{
+			period: chart.period,
+			start: chart.start,
+			end: chart.end,
+			buckets: chart.buckets,
+			series: chart.series,
+			total: chart.totalTokens,
+			truncated: chart.truncated,
+		},
+		width,
+		theme,
 		{
 			title: `${usagePeriod(chart.period).label} token usage`,
 			formatValue: compact,
@@ -243,8 +308,17 @@ export function renderUsageGraph(chart: UsageGraph, width: number, theme: UsageT
 
 export function renderCostGraph(chart: CostGraph, width: number, theme: UsageTheme, costBudget?: number): string[] {
 	return renderChart(
-		{ period: chart.period, start: chart.start, end: chart.end, buckets: chart.buckets, series: chart.series, total: chart.totalUsd, truncated: chart.truncated },
-		width, theme,
+		{
+			period: chart.period,
+			start: chart.start,
+			end: chart.end,
+			buckets: chart.buckets,
+			series: chart.series,
+			total: chart.totalUsd,
+			truncated: chart.truncated,
+		},
+		width,
+		theme,
 		{
 			title: `${usagePeriod(chart.period).label} cost`,
 			formatValue: formatUsd,
@@ -270,10 +344,18 @@ const USAGE_VIEWS: UsageViewKind[] = ["tokens", "cost"];
  * recent rows alone. Aggregation has no such failure mode: result size scales with (scopes x
  * metrics x buckets), never with raw event count.
  */
-async function loadPiMetrics(client: JittorPanelClient, window: ReturnType<typeof resolveUsageWindow>): Promise<{ rows: UsageAggregateRow[]; truncated: boolean }> {
-	const result = await client.call("metrics.usage_series", {
-		source: "pi", since: window.start, until: window.end, bucketSizeMs: window.bucketSizeMs, bucketCount: window.bucketCount, scopeLimit: USAGE_MAX_DISTINCT_SCOPES,
-	}) as { rows: UsageAggregateRow[]; truncated: boolean };
+async function loadPiMetrics(
+	client: JittorPanelClient,
+	window: ReturnType<typeof resolveUsageWindow>,
+): Promise<{ rows: UsageAggregateRow[]; truncated: boolean }> {
+	const result = (await client.call("metrics.usage_series", {
+		source: "pi",
+		since: window.start,
+		until: window.end,
+		bucketSizeMs: window.bucketSizeMs,
+		bucketCount: window.bucketCount,
+		scopeLimit: USAGE_MAX_DISTINCT_SCOPES,
+	})) as { rows: UsageAggregateRow[]; truncated: boolean };
 	return result;
 }
 

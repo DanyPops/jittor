@@ -76,12 +76,18 @@ const ACTION_SEVERITY: Record<PolicyAction, number> = {
 
 function actionThreshold(action: PolicyAction, thresholds: PolicyThresholds): number {
 	switch (action) {
-		case "continue": return 0;
-		case "throttle": return thresholds.throttle;
-		case "lower-thinking": return thresholds.lowerThinking;
-		case "switch-model": return thresholds.switchModel;
-		case "switch-provider": return thresholds.switchProvider;
-		case "halt": return thresholds.halt;
+		case "continue":
+			return 0;
+		case "throttle":
+			return thresholds.throttle;
+		case "lower-thinking":
+			return thresholds.lowerThinking;
+		case "switch-model":
+			return thresholds.switchModel;
+		case "switch-provider":
+			return thresholds.switchProvider;
+		case "halt":
+			return thresholds.halt;
 	}
 }
 
@@ -145,12 +151,7 @@ function holdPrevious(input: PolicyInput, pressure: number, trace: string[]): Po
 	return undefined;
 }
 
-function decisionFromPrevious(
-	previous: PreviousDecision,
-	pressure: number,
-	trace: string[],
-	reason: string,
-): PolicyDecision {
+function decisionFromPrevious(previous: PreviousDecision, pressure: number, trace: string[], reason: string): PolicyDecision {
 	return {
 		action: previous.action,
 		pressure,
@@ -171,15 +172,19 @@ export function evaluateRoutingPolicy(input: PolicyInput): PolicyDecision {
 	if (input.windows.length === 0) return failClosed(input, "required budget telemetry is missing", trace);
 	for (const window of input.windows) {
 		if (window.freshness !== "fresh") return failClosed(input, `telemetry ${window.id} is ${window.freshness}`, trace, window.id);
-		if (input.now - window.observedAt > input.config.maxTelemetryAgeMs) return failClosed(input, `telemetry ${window.id} is stale`, trace, window.id);
-		if (window.confidence < (input.config.minimumConfidence ?? 0)) return failClosed(input, `telemetry ${window.id} confidence is too low`, trace, window.id);
-		if (window.usedFraction < 0 || window.usedFraction > 1) return failClosed(input, `telemetry ${window.id} has invalid utilization`, trace, window.id);
-		if (window.usedFraction >= input.config.hardStopUsedFraction) return failClosed(input, `hard stop reached for ${window.id}`, trace, window.id);
+		if (input.now - window.observedAt > input.config.maxTelemetryAgeMs)
+			return failClosed(input, `telemetry ${window.id} is stale`, trace, window.id);
+		if (window.confidence < (input.config.minimumConfidence ?? 0))
+			return failClosed(input, `telemetry ${window.id} confidence is too low`, trace, window.id);
+		if (window.usedFraction < 0 || window.usedFraction > 1)
+			return failClosed(input, `telemetry ${window.id} has invalid utilization`, trace, window.id);
+		if (window.usedFraction >= input.config.hardStopUsedFraction)
+			return failClosed(input, `hard stop reached for ${window.id}`, trace, window.id);
 	}
 
 	const pressures = input.windows.map((window) => ({ window, pressure: pressureFor(window, input.now) }));
 	for (const { window, pressure } of pressures) trace.push(`${window.id}: pressure=${pressure.toFixed(3)} sustainable=${pressure <= 1}`);
-	const binding = pressures.reduce((worst, candidate) => candidate.pressure > worst.pressure ? candidate : worst);
+	const binding = pressures.reduce((worst, candidate) => (candidate.pressure > worst.pressure ? candidate : worst));
 	const held = holdPrevious(input, binding.pressure, trace);
 	if (held) return { ...held, windowId: binding.window.id };
 

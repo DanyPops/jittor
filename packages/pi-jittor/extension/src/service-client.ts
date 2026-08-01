@@ -1,5 +1,5 @@
-import { createRetryingClient, type RetryingClient } from "@danypops/vehicle-client/daemon-client";
 import { connectJittorClient, type JittorClient, type OperationInputs, type OperationName, type OperationOutputs } from "@danypops/jittor";
+import { createRetryingClient, type RetryingClient } from "@danypops/vehicle-client/daemon-client";
 
 type JittorConnector = () => Promise<JittorClient>;
 

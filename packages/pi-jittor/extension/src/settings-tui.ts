@@ -1,6 +1,6 @@
+import { USAGE_PERIODS, type UsagePeriod } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { USAGE_PERIODS, type UsagePeriod } from "@danypops/jittor";
 import type { CodexRecoveryControl, EnforcementControl, UsageBudgetControl } from "./settings.ts";
 
 export interface SettingsSnapshot {
@@ -24,12 +24,7 @@ export interface SettingsEffects {
 	setRecovery(enabled: boolean): void | Promise<void>;
 }
 
-const SETTINGS_KEYS: SettingsKey[] = [
-	"enforcement",
-	"footer",
-	"recovery",
-	...USAGE_PERIODS.map(({ id }) => `budget-${id}` as const),
-];
+const SETTINGS_KEYS: SettingsKey[] = ["enforcement", "footer", "recovery", ...USAGE_PERIODS.map(({ id }) => `budget-${id}` as const)];
 
 function state(enabled: boolean, theme: SettingsTheme): string {
 	return enabled ? theme.fg("success", "ON") : theme.fg("muted", "OFF");
@@ -63,18 +58,14 @@ export function settingsSnapshot(
 
 export function renderSettingsView(snapshot: SettingsSnapshot, selected: number, width: number, theme: SettingsTheme): string[] {
 	const safeWidth = Math.max(20, width);
-	const lines = [
-		theme.bold("Jittor Settings"),
-		theme.fg("dim", "Token budgets are user values; provider quotas remain separate."),
-		"",
-	];
+	const lines = [theme.bold("Jittor Settings"), theme.fg("dim", "Token budgets are user values; provider quotas remain separate."), ""];
 	for (let index = 0; index < SETTINGS_KEYS.length; index += 1) {
 		const selectedRow = index === selected;
 		const prefix = selectedRow ? theme.fg("accent", "› ") : "  ";
 		lines.push(`${prefix}${rowText(SETTINGS_KEYS[index]!, snapshot, theme)}`);
 	}
 	lines.push("", theme.fg("dim", "↑/↓ select · Enter edit · Esc close"));
-	return lines.map((line) => visibleWidth(line) <= safeWidth ? line : truncateToWidth(line, safeWidth, "…"));
+	return lines.map((line) => (visibleWidth(line) <= safeWidth ? line : truncateToWidth(line, safeWidth, "…")));
 }
 
 function plainTheme(): SettingsTheme {
@@ -113,7 +104,12 @@ export async function showSettingsPanel(
 	},
 ): Promise<void> {
 	if (ctx.mode !== "tui") {
-		ctx.ui.notify(renderSettingsView(settingsSnapshot(enforcement, recovery, budgets), -1, 100, plainTheme()).slice(0, -2).join("\n"), "info");
+		ctx.ui.notify(
+			renderSettingsView(settingsSnapshot(enforcement, recovery, budgets), -1, 100, plainTheme())
+				.slice(0, -2)
+				.join("\n"),
+			"info",
+		);
 		return;
 	}
 	for (;;) {
@@ -122,19 +118,32 @@ export async function showSettingsPanel(
 			let selected = 0;
 			return {
 				invalidate() {},
-				render(width: number): string[] { return renderSettingsView(snapshot, selected, width, theme); },
+				render(width: number): string[] {
+					return renderSettingsView(snapshot, selected, width, theme);
+				},
 				handleInput(data: string): void {
 					if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c") || data === "q") done({ kind: "close" });
-					else if (matchesKey(data, "up")) { selected = (selected - 1 + SETTINGS_KEYS.length) % SETTINGS_KEYS.length; tui.requestRender(); }
-					else if (matchesKey(data, "down")) { selected = (selected + 1) % SETTINGS_KEYS.length; tui.requestRender(); }
-					else if (matchesKey(data, "return") || matchesKey(data, "enter") || matchesKey(data, "space")) done({ kind: "activate", key: SETTINGS_KEYS[selected]! });
+					else if (matchesKey(data, "up")) {
+						selected = (selected - 1 + SETTINGS_KEYS.length) % SETTINGS_KEYS.length;
+						tui.requestRender();
+					} else if (matchesKey(data, "down")) {
+						selected = (selected + 1) % SETTINGS_KEYS.length;
+						tui.requestRender();
+					} else if (matchesKey(data, "return") || matchesKey(data, "enter") || matchesKey(data, "space"))
+						done({ kind: "activate", key: SETTINGS_KEYS[selected]! });
 				},
 			};
 		});
 		if (!action || action.kind === "close") return;
 		if (action.key === "enforcement") {
 			if (enforcement.isEnabled()) {
-				if (await ctx.ui.confirm("Disable routing enforcement?", "Jittor will remain monitor-only and will no longer block unsafe provider requests.")) await effects.setEnforcement(false);
+				if (
+					await ctx.ui.confirm(
+						"Disable routing enforcement?",
+						"Jittor will remain monitor-only and will no longer block unsafe provider requests.",
+					)
+				)
+					await effects.setEnforcement(false);
 			} else await effects.setEnforcement(true);
 			continue;
 		}
@@ -144,7 +153,13 @@ export async function showSettingsPanel(
 		}
 		if (action.key === "recovery") {
 			if (!recovery.isCodexRecoveryEnabled()) {
-				if (await ctx.ui.confirm("Enable Codex recovery?", "Jittor may start bounded hidden retries only after transient Codex failures fully settle.")) await effects.setRecovery(true);
+				if (
+					await ctx.ui.confirm(
+						"Enable Codex recovery?",
+						"Jittor may start bounded hidden retries only after transient Codex failures fully settle.",
+					)
+				)
+					await effects.setRecovery(true);
 			} else await effects.setRecovery(false);
 			continue;
 		}

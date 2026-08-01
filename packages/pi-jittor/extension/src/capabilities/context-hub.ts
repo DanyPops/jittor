@@ -1,8 +1,4 @@
-import {
-	CONTEXT_HUB_CONTRIBUTION_DEDUP_LIMIT,
-	validateContextContribution,
-	type ContextSegment,
-} from "@danypops/jittor";
+import { CONTEXT_HUB_CONTRIBUTION_DEDUP_LIMIT, type ContextSegment, validateContextContribution } from "@danypops/jittor";
 
 /**
  * Merges Jittor's own directly-computed segments (tool ledger, real usage) with whatever

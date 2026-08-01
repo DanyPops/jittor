@@ -1,22 +1,27 @@
 import { describe, expect, it } from "bun:test";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
 	buildCostGraph,
 	buildUsageGraph,
 	resolveUsageWindow,
-	usageBucketIndex,
 	USAGE_PERIODS,
 	type UsageAggregateRow,
 	type UsageBucketWindow,
 	type UsageGraph,
+	usageBucketIndex,
 } from "@danypops/jittor";
-import { renderCostGraph, renderUsageGraph, showUsagePanel } from "../extension/src/usage.ts";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { registerJittorExtension } from "../extension/src/index.ts";
+import { renderUsageGraph, showUsagePanel } from "../extension/src/usage.ts";
 
 const hour = 60 * 60 * 1_000;
 const now = Date.UTC(2026, 6, 19, 12);
 
-interface RawEvent { observedAt: number; scope: string; metric: string; value: number }
+interface RawEvent {
+	observedAt: number;
+	scope: string;
+	metric: string;
+	value: number;
+}
 
 /** What the daemon's SQL-side GROUP BY does: sums raw events into (scope, metric, bucketIndex) cells for a given window. Used both to build domain-level fixtures and inside fakePiClient below, so both stay provably consistent with the real aggregation contract. */
 function aggregate(events: RawEvent[], window: UsageBucketWindow): UsageAggregateRow[] {
@@ -60,8 +65,16 @@ function fakePiClient(source: RawEvent[]) {
 			const scopeLimit: number = input.scopeLimit ?? scopes.length;
 			const truncated = scopes.length > scopeLimit;
 			const allowedScopes = new Set(scopes.slice(0, scopeLimit));
-			const window: UsageBucketWindow = { start: input.since, end: input.until, bucketCount: input.bucketCount, bucketSizeMs: input.bucketSizeMs };
-			const rows = aggregate(matching.filter((event) => allowedScopes.has(event.scope)), window);
+			const window: UsageBucketWindow = {
+				start: input.since,
+				end: input.until,
+				bucketCount: input.bucketCount,
+				bucketSizeMs: input.bucketSizeMs,
+			};
+			const rows = aggregate(
+				matching.filter((event) => allowedScopes.has(event.scope)),
+				window,
+			);
 			return { rows, truncated };
 		},
 	};
@@ -70,7 +83,11 @@ function fakePiClient(source: RawEvent[]) {
 describe("usage graph projection", () => {
 	it("uses explicit periods, buckets aggregated token sums, and preserves provider/model series", () => {
 		expect(USAGE_PERIODS.map(({ id, label }) => [id, label])).toEqual([
-			["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"], ["monthly", "Monthly"], ["quarterly", "Quarterly"],
+			["hourly", "Hourly"],
+			["daily", "Daily"],
+			["weekly", "Weekly"],
+			["monthly", "Monthly"],
+			["quarterly", "Quarterly"],
 		]);
 		const window = resolveUsageWindow("daily", now, 4);
 		const chart = buildUsageGraph(aggregate(events, window), window, { period: "daily" });
@@ -145,11 +162,15 @@ describe("usage graph TUI", () => {
 		// Command dispatch calls showUsagePanel with the real Date.now(), not the fixed test `now`
 		// constant, so this fixture must actually be recent (unlike the other tests below, which pass
 		// an explicit `now` to showUsagePanel directly and can use the fixed constant).
-		const recentEvents: RawEvent[] = [{ observedAt: Date.now() - 60_000, scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 8_000 }];
+		const recentEvents: RawEvent[] = [
+			{ observedAt: Date.now() - 60_000, scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 8_000 },
+		];
 		const commands = new Map<string, unknown>();
 		const fake = fakePiClient(recentEvents);
 		const pi = {
-			registerCommand(name: string, command: unknown) { commands.set(name, command); },
+			registerCommand(name: string, command: unknown) {
+				commands.set(name, command);
+			},
 			on() {},
 		} as unknown as ExtensionAPI;
 		registerJittorExtension(pi, fake);
@@ -159,7 +180,11 @@ describe("usage graph TUI", () => {
 		const command = commands.get("usage") as { handler(args: string, ctx: ExtensionCommandContext): Promise<void> };
 		await command.handler("", {
 			mode: "print",
-			ui: { notify(message: string) { notifications.push(message); } },
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
 		} as unknown as ExtensionCommandContext);
 		expect(fake.calls.map((call) => call.operation)).toEqual(["metrics.usage_series"]);
 		expect(fake.calls[0]?.input.source).toBe("pi");
@@ -167,7 +192,11 @@ describe("usage graph TUI", () => {
 		notifications.length = 0;
 		await command.handler("cost", {
 			mode: "print",
-			ui: { notify(message: string) { notifications.push(message); } },
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
 		} as unknown as ExtensionCommandContext);
 		expect(notifications.join("\n")).toContain("Hourly cost");
 	});
@@ -175,7 +204,14 @@ describe("usage graph TUI", () => {
 	it("opens directly into the cost view when requested, independent of command dispatch", async () => {
 		const fake = fakePiClient(events);
 		const notifications: string[] = [];
-		const ctx = { mode: "print", ui: { notify(message: string) { notifications.push(message); } } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			mode: "print",
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
+		} as unknown as ExtensionCommandContext;
 		const budgets = { getUsageTokenBudget: () => undefined };
 		await showUsagePanel(ctx, fake, budgets, now, "cost");
 		expect(notifications.join("\n")).toContain("Hourly cost");
@@ -186,12 +222,24 @@ describe("usage graph TUI", () => {
 		// window. With SQL-side aggregation, neither one's history is at risk -- only exceeding the
 		// bounded *distinct scope* discovery could ever truncate now.
 		const heavyScope: RawEvent[] = Array.from({ length: 5_000 }, (_, index) => ({
-			observedAt: now - 50 * 60_000 + index, scope: "anthropic-vertex:claude-sonnet-5", metric: "input-tokens", value: 10,
+			observedAt: now - 50 * 60_000 + index,
+			scope: "anthropic-vertex:claude-sonnet-5",
+			metric: "input-tokens",
+			value: 10,
 		}));
-		const otherScope: RawEvent[] = [{ observedAt: now - 55 * 60_000, scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 8_000 }];
+		const otherScope: RawEvent[] = [
+			{ observedAt: now - 55 * 60_000, scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 8_000 },
+		];
 		const fake = fakePiClient([...heavyScope, ...otherScope]);
 		const notifications: string[] = [];
-		const ctx = { mode: "print", ui: { notify(message: string) { notifications.push(message); } } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			mode: "print",
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
+		} as unknown as ExtensionCommandContext;
 		const budgets = { getUsageTokenBudget: () => undefined };
 		await showUsagePanel(ctx, fake, budgets, now, "tokens");
 		expect(fake.calls).toHaveLength(1);
@@ -227,7 +275,13 @@ describe("usage graph TUI", () => {
 		const chart = buildUsageGraph(aggregate(twoModelEvents, window), window, { period: "daily" });
 		expect(chart.series).toHaveLength(2);
 		const colorCalls: string[] = [];
-		const theme = { fg: (color: string, text: string) => { colorCalls.push(color); return text; }, bold: (text: string) => text };
+		const theme = {
+			fg: (color: string, text: string) => {
+				colorCalls.push(color);
+				return text;
+			},
+			bold: (text: string) => text,
+		};
 		renderUsageGraph(chart, 72, theme, undefined);
 		const seriesColorsUsed = new Set(colorCalls.filter((color) => color !== "borderMuted" && color !== "muted"));
 		expect(seriesColorsUsed.size).toBeGreaterThan(1);
@@ -236,10 +290,19 @@ describe("usage graph TUI", () => {
 
 	it("renders a single-model chart with exactly one series color, since there is nothing to distinguish", () => {
 		const window = resolveUsageWindow("daily", now, 4);
-		const oneModel = aggregate([{ observedAt: now - 4 * hour, scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 4_000 }], window);
+		const oneModel = aggregate(
+			[{ observedAt: now - 4 * hour, scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 4_000 }],
+			window,
+		);
 		const chart = buildUsageGraph(oneModel, window, { period: "daily" });
 		const colorCalls: string[] = [];
-		const theme = { fg: (color: string, text: string) => { colorCalls.push(color); return text; }, bold: (text: string) => text };
+		const theme = {
+			fg: (color: string, text: string) => {
+				colorCalls.push(color);
+				return text;
+			},
+			bold: (text: string) => text,
+		};
 		renderUsageGraph(chart, 72, theme, undefined);
 		const seriesColorsUsed = new Set(colorCalls.filter((color) => color !== "borderMuted" && color !== "muted"));
 		expect(seriesColorsUsed.size).toBe(1);
@@ -247,17 +310,32 @@ describe("usage graph TUI", () => {
 
 	it("adds bold as a second visual channel once the hue palette is exhausted, instead of repeating an indistinguishable color", () => {
 		const seriesCount = 10;
-		const series = Array.from({ length: seriesCount }, (_, index) => ({ key: `p${index}/m${index}`, provider: `p${index}`, model: `m${index}`, total: seriesCount - index }));
+		const series = Array.from({ length: seriesCount }, (_, index) => ({
+			key: `p${index}/m${index}`,
+			provider: `p${index}`,
+			model: `m${index}`,
+			total: seriesCount - index,
+		}));
 		const bucketSeries: Record<string, number> = {};
 		for (const item of series) bucketSeries[item.key] = item.total;
 		const chart: UsageGraph = {
-			period: "daily", start: now - 24 * hour, end: now,
+			period: "daily",
+			start: now - 24 * hour,
+			end: now,
 			buckets: [{ start: now - 24 * hour, end: now, total: series.reduce((sum, item) => sum + item.total, 0), series: bucketSeries }],
-			series, totalTokens: series.reduce((sum, item) => sum + item.total, 0),
-			breakdown: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, truncated: false,
+			series,
+			totalTokens: series.reduce((sum, item) => sum + item.total, 0),
+			breakdown: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			truncated: false,
 		};
 		const boldCalls: string[] = [];
-		const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => { boldCalls.push(text); return text; } };
+		const theme = {
+			fg: (_color: string, text: string) => text,
+			bold: (text: string) => {
+				boldCalls.push(text);
+				return text;
+			},
+		};
 		renderUsageGraph(chart, 100, theme);
 		expect(boldCalls.length).toBeGreaterThan(0);
 	});
@@ -281,13 +359,40 @@ describe("usage graph TUI", () => {
 		const commands = new Map<string, any>();
 		const budgets: Record<string, number | undefined> = {};
 		const control = {
-			isEnabled: () => true, setEnabled() {}, isFooterEnabled: () => true, setFooterEnabled() {},
-			getUsageTokenBudget(period: string) { return budgets[period]; },
-			setUsageTokenBudget(period: string, tokens: number | undefined) { budgets[period] = tokens; },
+			isEnabled: () => true,
+			setEnabled() {},
+			isFooterEnabled: () => true,
+			setFooterEnabled() {},
+			getUsageTokenBudget(period: string) {
+				return budgets[period];
+			},
+			setUsageTokenBudget(period: string, tokens: number | undefined) {
+				budgets[period] = tokens;
+			},
 		};
-		registerJittorExtension({ registerCommand(name: string, command: unknown) { commands.set(name, command); }, on() {} } as unknown as ExtensionAPI, { async call() { return { rows: [], truncated: false }; } }, control);
+		registerJittorExtension(
+			{
+				registerCommand(name: string, command: unknown) {
+					commands.set(name, command);
+				},
+				on() {},
+			} as unknown as ExtensionAPI,
+			{
+				async call() {
+					return { rows: [], truncated: false };
+				},
+			},
+			control,
+		);
 		const notifications: string[] = [];
-		const ctx = { mode: "print", ui: { notify(message: string) { notifications.push(message); } } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			mode: "print",
+			ui: {
+				notify(message: string) {
+					notifications.push(message);
+				},
+			},
+		} as unknown as ExtensionCommandContext;
 		await commands.get("usage").handler("budget daily 250,000", ctx);
 		expect(budgets.daily).toBe(250_000);
 		await commands.get("usage").handler("budget", ctx);
@@ -302,16 +407,27 @@ describe("usage graph TUI", () => {
 		let panel = 0;
 		const ctx = {
 			mode: "tui",
-			ui: { async custom(factory: Function) {
-				let doneValue: string | undefined;
-				const component = factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, (value: string) => { doneValue = value; });
-				renders.push(component.render(80).join("\n"));
-				if (panel === 0) component.handleInput("\t"); // Tab -> next time frame
-				else if (panel === 1) component.handleInput("\x1b[Z"); // Shift+Tab -> previous time frame
-				else component.handleInput("\x1b"); // Escape -> close
-				panel += 1;
-				return doneValue;
-			} },
+			ui: {
+				async custom(factory: Function) {
+					let doneValue: string | undefined;
+					const component = factory(
+						{},
+						{ fg: (_color: string, text: string) => text, bold: (text: string) => text },
+						{},
+						(value: string) => {
+							doneValue = value;
+						},
+					);
+					renders.push(component.render(80).join("\n"));
+					if (panel === 0)
+						component.handleInput("\t"); // Tab -> next time frame
+					else if (panel === 1)
+						component.handleInput("\x1b[Z"); // Shift+Tab -> previous time frame
+					else component.handleInput("\x1b"); // Escape -> close
+					panel += 1;
+					return doneValue;
+				},
+			},
 		} as unknown as ExtensionCommandContext;
 		const budgets = { getUsageTokenBudget: () => undefined };
 		await showUsagePanel(ctx, client, budgets, now);
@@ -326,13 +442,19 @@ describe("usage graph TUI", () => {
 		let panels = 0;
 		const ctx = {
 			mode: "tui",
-			ui: { async custom(factory: Function) {
-				const component = factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
-				expect(component.render(80).join("\n")).toContain(panels === 0 ? "Hourly token usage" : "Daily token usage");
-				return panels++ === 0 ? "period-next" : "close";
-			} },
+			ui: {
+				async custom(factory: Function) {
+					const component = factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
+					expect(component.render(80).join("\n")).toContain(panels === 0 ? "Hourly token usage" : "Daily token usage");
+					return panels++ === 0 ? "period-next" : "close";
+				},
+			},
 		} as unknown as ExtensionCommandContext;
-		const budgets = { getUsageTokenBudget(period: string) { return period === "daily" ? 20_000 : undefined; } };
+		const budgets = {
+			getUsageTokenBudget(period: string) {
+				return period === "daily" ? 20_000 : undefined;
+			},
+		};
 		await showUsagePanel(ctx, client, budgets, now);
 		// One "metrics.usage_series" call per period shown (Hourly, then Daily) -- a single bounded
 		// round trip each, not a distinct_scopes call plus one metrics.query per discovered scope.

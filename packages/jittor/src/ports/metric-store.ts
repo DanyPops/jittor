@@ -1,5 +1,5 @@
-import type { UsageAggregateRow } from "../domain/usage.ts";
 import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../domain/metric.ts";
+import type { UsageAggregateRow } from "../domain/usage.ts";
 
 export interface DistinctScopesFilter {
 	source: string;

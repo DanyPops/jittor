@@ -43,6 +43,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
       - run: bun install
+      - run: bun run lint:ci
       - run: bun test
       - run: bun run typecheck
 

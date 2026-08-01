@@ -1,9 +1,15 @@
 import { MODEL_AGGREGATE_MAX_ROWS, MODEL_OBSERVATION_FRESH_MS, MODEL_RANKING_MAX_SOURCES } from "../constants.ts";
 import type { BenchmarkStore } from "../ports/benchmark-store.ts";
 import type { MetricStore } from "../ports/metric-store.ts";
-import { aggregateModelMetrics } from "./model-observation.ts";
-import { rankModelCandidates, type ModelCandidate, type ModelRankingResult, type ScopeAuthority, type UtilityWeights } from "./model-ranking.ts";
 import type { ModelTaskDomain, ModelTaskType } from "./model-observation.ts";
+import { aggregateModelMetrics } from "./model-observation.ts";
+import {
+	type ModelCandidate,
+	type ModelRankingResult,
+	rankModelCandidates,
+	type ScopeAuthority,
+	type UtilityWeights,
+} from "./model-ranking.ts";
 
 export interface ModelRecommendationInput {
 	candidates: ModelCandidate[];
@@ -27,7 +33,11 @@ export class EvidenceModelRanker implements ModelRanker {
 	) {}
 
 	rank(input: ModelRecommendationInput): ModelRankingResult {
-		if (!Array.isArray(input.sourceIds) || input.sourceIds.length > MODEL_RANKING_MAX_SOURCES || !input.sourceIds.every((sourceId) => typeof sourceId === "string" && sourceId.length > 0 && sourceId.length <= 160)) {
+		if (
+			!Array.isArray(input.sourceIds) ||
+			input.sourceIds.length > MODEL_RANKING_MAX_SOURCES ||
+			!input.sourceIds.every((sourceId) => typeof sourceId === "string" && sourceId.length > 0 && sourceId.length <= 160)
+		) {
 			throw new Error("benchmark source selection is invalid");
 		}
 		const sourceIds = [...new Set(input.sourceIds)];

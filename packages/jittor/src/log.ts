@@ -8,7 +8,7 @@
  * four daemons. `component`/`level`/`timestamp` and credential-safety (callers still must pass
  * only bounded, non-sensitive fields) are unchanged.
  */
-import { createLogger, type LogLevel as VehicleLogLevel, type Logger } from "@danypops/vehicle-server/logging";
+import { createLogger, type Logger, type LogLevel as VehicleLogLevel } from "@danypops/vehicle-server/logging";
 
 export type LogLevel = Extract<VehicleLogLevel, "info" | "warn" | "error">;
 
@@ -19,7 +19,12 @@ export type LogLevel = Extract<VehicleLogLevel, "info" | "warn" | "error">;
  * `console.error` entirely) so existing tooling/tests that intercept `console.error` keep working.
  */
 export const logger: Logger = createLogger("jittor-daemon", {
-	destination: { write: (chunk: string) => { console.error(chunk.replace(/\n$/, "")); return true; } },
+	destination: {
+		write: (chunk: string) => {
+			console.error(chunk.replace(/\n$/, ""));
+			return true;
+		},
+	},
 });
 
 /** Credential-safe structured daemon event. Callers must pass bounded, non-sensitive fields. */

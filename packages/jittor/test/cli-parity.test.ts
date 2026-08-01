@@ -12,12 +12,60 @@ const routeArg = "openai/gpt-5.4@high";
 const cases: Case[] = [
 	{ args: ["session", "register", "--session-id", "s", "--json"], operation: "session.register" },
 	{ args: ["session", "release", "--session-id", "s", "--json"], operation: "session.release" },
-	{ args: ["metrics", "record", "--source", "s", "--scope", "sc", "--metric", "m", "--value", "1", "--unit", "count", "--observed-at", "1000", "--json"], operation: "metrics.record" },
-	{ args: ["metrics", "record-batch", "--observations", JSON.stringify([{ source: "s", scope: "sc", metric: "m", value: 1, unit: "count", observedAt: 1000 }]), "--json"], operation: "metrics.record_batch" },
+	{
+		args: [
+			"metrics",
+			"record",
+			"--source",
+			"s",
+			"--scope",
+			"sc",
+			"--metric",
+			"m",
+			"--value",
+			"1",
+			"--unit",
+			"count",
+			"--observed-at",
+			"1000",
+			"--json",
+		],
+		operation: "metrics.record",
+	},
+	{
+		args: [
+			"metrics",
+			"record-batch",
+			"--observations",
+			JSON.stringify([{ source: "s", scope: "sc", metric: "m", value: 1, unit: "count", observedAt: 1000 }]),
+			"--json",
+		],
+		operation: "metrics.record_batch",
+	},
 	{ args: ["metrics", "query", "--source", "s", "--json"], operation: "metrics.query" },
 	{ args: ["metrics", "prune", "--before", "1000", "--json"], operation: "metrics.prune" },
-	{ args: ["metrics", "distinct-scopes", "--source", "pi", "--since", "0", "--until", "1000", "--json"], operation: "metrics.distinct_scopes" },
-	{ args: ["metrics", "usage-series", "--source", "pi", "--since", "0", "--until", "1000", "--bucket-size-ms", "100", "--bucket-count", "10", "--json"], operation: "metrics.usage_series" },
+	{
+		args: ["metrics", "distinct-scopes", "--source", "pi", "--since", "0", "--until", "1000", "--json"],
+		operation: "metrics.distinct_scopes",
+	},
+	{
+		args: [
+			"metrics",
+			"usage-series",
+			"--source",
+			"pi",
+			"--since",
+			"0",
+			"--until",
+			"1000",
+			"--bucket-size-ms",
+			"100",
+			"--bucket-count",
+			"10",
+			"--json",
+		],
+		operation: "metrics.usage_series",
+	},
 	{ args: ["metrics", "cost-by-task", "--since", "0", "--until", "1000", "--json"], operation: "metrics.cost_by_task" },
 	{ args: ["benchmarks", "refresh", "--json"], operation: "benchmark.refresh" },
 	{ args: ["benchmarks", "status", "--json"], operation: "benchmark.status" },
@@ -39,8 +87,17 @@ const cases: Case[] = [
 
 function fakeDeps(calls: Array<{ operation: string; input: unknown }>, result: unknown = {}) {
 	return {
-		client: { async call(operation: string, input: unknown) { calls.push({ operation, input }); return result; } } as never,
-		stdout: () => {}, stderr: () => {}, systemctl: () => {}, installService: () => {}, serve: async () => {},
+		client: {
+			async call(operation: string, input: unknown) {
+				calls.push({ operation, input });
+				return result;
+			},
+		} as never,
+		stdout: () => {},
+		stderr: () => {},
+		systemctl: () => {},
+		installService: () => {},
+		serve: async () => {},
 	};
 }
 
@@ -53,9 +110,24 @@ describe("Jittor CLI operation parity", () => {
 	it("invokes the exact typed operation the daemon expects for each command", async () => {
 		for (const testCase of cases) {
 			const calls: Array<{ operation: string; input: unknown }> = [];
-			const code = await runCli(testCase.args, fakeDeps(calls, {
-				deleted: 0, ranked: [], sources: [], observations: [], observedAt: 1, availableRoutes: [], ready: true, paused: false, lastDecision: null, override: null, currentRoute: null, rows: [], truncated: false,
-			}));
+			const code = await runCli(
+				testCase.args,
+				fakeDeps(calls, {
+					deleted: 0,
+					ranked: [],
+					sources: [],
+					observations: [],
+					observedAt: 1,
+					availableRoutes: [],
+					ready: true,
+					paused: false,
+					lastDecision: null,
+					override: null,
+					currentRoute: null,
+					rows: [],
+					truncated: false,
+				}),
+			);
 			expect(code).toBe(0);
 			expect(calls).toHaveLength(1);
 			expect(calls[0]?.operation).toBe(testCase.operation);

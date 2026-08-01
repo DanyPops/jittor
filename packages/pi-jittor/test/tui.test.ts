@@ -1,19 +1,31 @@
 import { describe, expect, it } from "bun:test";
-import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import { buildStatusView, showJittorPanel, type JittorPanelClient } from "../extension/src/tui.ts";
 import type { RouterStatus } from "@danypops/jittor";
+import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import { buildStatusView, type JittorPanelClient, showJittorPanel } from "../extension/src/tui.ts";
 
 const status: RouterStatus = {
 	ready: true,
 	paused: false,
-	sources: [{ id: "codex-subscription", provider: "openai-codex", ok: true, metrics: 7 }, { id: "openrouter", provider: "openrouter", ok: true, metrics: 4 }],
+	sources: [
+		{ id: "codex-subscription", provider: "openai-codex", ok: true, metrics: 7 },
+		{ id: "openrouter", provider: "openrouter", ok: true, metrics: 4 },
+	],
 	lastDecision: { action: "throttle", pressure: 1.1, reason: "pressure", decidedAt: 1000, trace: [] },
 	override: null,
 	currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
 	availableRoutes: [],
 };
 const metrics = [
-	{ source: "codex-subscription", scope: "codex:secondary", metric: "used-fraction", value: 0.42, unit: "ratio", observedAt: 1000, id: 1, attributes: { windowSeconds: 604_800, resetsAt: 1_800_000_000 } },
+	{
+		source: "codex-subscription",
+		scope: "codex:secondary",
+		metric: "used-fraction",
+		value: 0.42,
+		unit: "ratio",
+		observedAt: 1000,
+		id: 1,
+		attributes: { windowSeconds: 604_800, resetsAt: 1_800_000_000 },
+	},
 	{ source: "openrouter", scope: "key:default", metric: "usage", value: 12.3456, unit: "usd", observedAt: 1000, id: 2, attributes: {} },
 ] as any[];
 
@@ -29,7 +41,10 @@ describe("Jittor status TUI", () => {
 	});
 
 	it("shows the Anthropic tokens bucket remaining when it is the active route", () => {
-		const anthropicStatus: RouterStatus = { ...status, currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" } };
+		const anthropicStatus: RouterStatus = {
+			...status,
+			currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" },
+		};
 		const anthropicMetrics = [
 			...metrics,
 			{ source: "anthropic", scope: "tokens", metric: "used-fraction", value: 0.3, unit: "ratio", observedAt: 1000, id: 3, attributes: {} },
@@ -51,7 +66,8 @@ describe("Jittor status TUI", () => {
 			},
 		};
 		const ctx = {
-			mode: "tui", hasUI: true,
+			mode: "tui",
+			hasUI: true,
 			sessionManager: { getSessionId: () => "test-session" },
 			ui: {
 				async custom(factory: any) {
@@ -60,7 +76,9 @@ describe("Jittor status TUI", () => {
 					component.render(100);
 					return panels === 1 ? "pause" : "close";
 				},
-				async confirm() { return true; },
+				async confirm() {
+					return true;
+				},
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;

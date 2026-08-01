@@ -5,7 +5,7 @@ import type { OperationHandlerMap } from "./types.ts";
 /** benchmark.* -- every operation whose only collaborator is the benchmark-controller port. */
 export function benchmarkOperations(benchmarks: BenchmarkController): OperationHandlerMap {
 	return {
-		"benchmark.refresh": (input) => benchmarks.refresh(input["force"] === true),
+		"benchmark.refresh": (input) => benchmarks.refresh(input.force === true),
 		"benchmark.status": () => benchmarks.status(),
 		"benchmark.query": (input) => benchmarks.query(input as unknown as BenchmarkQuery),
 	};

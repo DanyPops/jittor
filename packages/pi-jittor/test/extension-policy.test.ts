@@ -1,9 +1,15 @@
 import { describe, expect, it } from "bun:test";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { formatFooterStatus, registerJittorExtension, routesFromPi, type CodexRecoveryRuntime, type JittorExtensionClient } from "../extension/src/index.ts";
-import { buildFooterBudget } from "../extension/src/tui.ts";
-import type { EnforcementControl } from "../extension/src/settings.ts";
 import type { PolicyDecision, RouterStatus } from "@danypops/jittor";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+	type CodexRecoveryRuntime,
+	formatFooterStatus,
+	type JittorExtensionClient,
+	registerJittorExtension,
+	routesFromPi,
+} from "../extension/src/index.ts";
+import type { EnforcementControl } from "../extension/src/settings.ts";
+import { buildFooterBudget } from "../extension/src/tui.ts";
 
 function decision(overrides: Partial<PolicyDecision> = {}): PolicyDecision {
 	return { action: "continue", pressure: 0.5, reason: "ok", decidedAt: 1000, trace: [], ...overrides };
@@ -11,16 +17,31 @@ function decision(overrides: Partial<PolicyDecision> = {}): PolicyDecision {
 
 /** recordMetrics() always batches through metrics.record_batch now, even for a single metric -- flatten every batch call's observations to inspect them the same way tests used to inspect individual metrics.record calls. */
 function recordedMetrics(client: FakeClient): Array<Record<string, unknown>> {
-	return client.calls.filter((call) => call.operation === "metrics.record_batch").flatMap((call) => (call.input as { observations: Record<string, unknown>[] }).observations);
+	return client.calls
+		.filter((call) => call.operation === "metrics.record_batch")
+		.flatMap((call) => (call.input as { observations: Record<string, unknown>[] }).observations);
 }
 
 class FakeClient implements JittorExtensionClient {
 	calls: Array<{ operation: string; input: unknown }> = [];
 	decision = decision();
 	decisionQueue: PolicyDecision[] = [];
-	status: RouterStatus = { ready: true, paused: false, sources: [], lastDecision: this.decision, override: null, currentRoute: null, availableRoutes: [] };
+	status: RouterStatus = {
+		ready: true,
+		paused: false,
+		sources: [],
+		lastDecision: this.decision,
+		override: null,
+		currentRoute: null,
+		availableRoutes: [],
+	};
 	metrics: any[] = [];
-	compactionEstimate: { ms: number | null; confidence: "cold-start" | "learned"; sampleSize: number; observedAt: number } = { ms: null, confidence: "cold-start", sampleSize: 0, observedAt: 0 };
+	compactionEstimate: { ms: number | null; confidence: "cold-start" | "learned"; sampleSize: number; observedAt: number } = {
+		ms: null,
+		confidence: "cold-start",
+		sampleSize: 0,
+		observedAt: 0,
+	};
 	async call(operation: string, input: unknown): Promise<any> {
 		this.calls.push({ operation, input });
 		if (operation === "compaction.estimate") return this.compactionEstimate;
@@ -37,9 +58,23 @@ class FakeClient implements JittorExtensionClient {
 		if (operation === "router.status") return this.status;
 		if (operation === "metrics.query") return this.metrics;
 		if (operation === "metrics.record") return { id: this.calls.length, ...(input as object) };
-		if (operation === "metrics.record_batch") return (input as { observations: object[] }).observations.map((observation) => ({ id: this.calls.length, ...observation }));
-		if (operation === "models.rank") return { scopeAuthority: "available-models", scopeWarning: "exact session scope unavailable", domain: "coding", type: "general", completeness: "insufficient-evidence", ranked: [], automaticSelection: null };
-		if (operation === "session.register") return { sessionId: (input as { session_id: string }).session_id, secret: `secret-for-${(input as { session_id: string }).session_id}` };
+		if (operation === "metrics.record_batch")
+			return (input as { observations: object[] }).observations.map((observation) => ({ id: this.calls.length, ...observation }));
+		if (operation === "models.rank")
+			return {
+				scopeAuthority: "available-models",
+				scopeWarning: "exact session scope unavailable",
+				domain: "coding",
+				type: "general",
+				completeness: "insufficient-evidence",
+				ranked: [],
+				automaticSelection: null,
+			};
+		if (operation === "session.register")
+			return {
+				sessionId: (input as { session_id: string }).session_id,
+				secret: `secret-for-${(input as { session_id: string }).session_id}`,
+			};
 		if (operation === "session.release") return { released: true };
 		return {};
 	}
@@ -58,8 +93,12 @@ class FakeRecoveryRuntime implements CodexRecoveryRuntime {
 		this.timers.set(id, callback);
 		return id;
 	};
-	clearTimeout = (handle: unknown): void => { this.timers.delete(handle as number); };
-	pendingCount(): number { return this.timers.size; }
+	clearTimeout = (handle: unknown): void => {
+		this.timers.delete(handle as number);
+	};
+	pendingCount(): number {
+		return this.timers.size;
+	}
 	async runNext(): Promise<void> {
 		const entry = this.timers.entries().next().value as [number, () => void | Promise<void>] | undefined;
 		if (!entry) throw new Error("no recovery timer");
@@ -78,9 +117,13 @@ function harness(
 	let footerEnabled = true;
 	const control = enforcement ?? {
 		isEnabled: () => defaultEnabled,
-		setEnabled(value: boolean) { defaultEnabled = value; },
+		setEnabled(value: boolean) {
+			defaultEnabled = value;
+		},
 		isFooterEnabled: () => footerEnabled,
-		setFooterEnabled(value: boolean) { footerEnabled = value; },
+		setFooterEnabled(value: boolean) {
+			footerEnabled = value;
+		},
 	};
 	const handlers = new Map<string, Function[]>();
 	const sharedEvents = new Map<string, Set<(payload: unknown) => void>>();
@@ -88,11 +131,22 @@ function harness(
 	const modelChanges: unknown[] = [];
 	const thinkingChanges: string[] = [];
 	const pi = {
-		on(name: string, handler: Function) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
-		registerCommand(name: string, command: unknown) { commands.set(name, command); },
-		async setModel(model: unknown) { modelChanges.push(model); return true; },
-		setThinkingLevel(level: string) { thinkingChanges.push(level); },
-		getThinkingLevel() { return "high"; },
+		on(name: string, handler: Function) {
+			handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+		},
+		registerCommand(name: string, command: unknown) {
+			commands.set(name, command);
+		},
+		async setModel(model: unknown) {
+			modelChanges.push(model);
+			return true;
+		},
+		setThinkingLevel(level: string) {
+			thinkingChanges.push(level);
+		},
+		getThinkingLevel() {
+			return "high";
+		},
 		events: {
 			on(channel: string, handler: (payload: unknown) => void) {
 				const listeners = sharedEvents.get(channel) ?? new Set();
@@ -100,16 +154,28 @@ function harness(
 				sharedEvents.set(channel, listeners);
 				return () => listeners.delete(handler);
 			},
-			emit(channel: string, payload: unknown) { for (const handler of sharedEvents.get(channel) ?? []) handler(payload); },
+			emit(channel: string, payload: unknown) {
+				for (const handler of sharedEvents.get(channel) ?? []) handler(payload);
+			},
 		},
 	} as unknown as ExtensionAPI;
 	const sentMessages: Array<{ message: unknown; options: unknown }> = [];
 	let recoveryEnabled = recovery.enabled;
-	(pi as unknown as { sendMessage(message: unknown, options: unknown): void }).sendMessage = (message, options) => { sentMessages.push({ message, options }); };
-	registerJittorExtension(pi, client, control, {
-		isCodexRecoveryEnabled: () => recoveryEnabled,
-		setCodexRecoveryEnabled(value: boolean) { recoveryEnabled = value; },
-	}, recovery.runtime);
+	(pi as unknown as { sendMessage(message: unknown, options: unknown): void }).sendMessage = (message, options) => {
+		sentMessages.push({ message, options });
+	};
+	registerJittorExtension(
+		pi,
+		client,
+		control,
+		{
+			isCodexRecoveryEnabled: () => recoveryEnabled,
+			setCodexRecoveryEnabled(value: boolean) {
+				recoveryEnabled = value;
+			},
+		},
+		recovery.runtime,
+	);
 	const statuses: Array<string | undefined> = [];
 	const footers: unknown[] = [];
 	const notifications: string[] = [];
@@ -118,7 +184,9 @@ function harness(
 	let pendingMessages = false;
 	const model = modelOverride ?? { provider: "openai-codex", id: "gpt-5.3-codex" };
 	const ctx = {
-		mode: "tui", hasUI: true, model,
+		mode: "tui",
+		hasUI: true,
+		model,
 		modelRegistry: {
 			find: (provider: string, id: string) => ({ provider, id }),
 			getAvailable: () => [
@@ -128,23 +196,51 @@ function harness(
 				{ provider: "openrouter", id: "openai/gpt-4.1-mini" },
 			],
 		},
-		abort() { aborted = true; },
-		isIdle() { return idle; },
-		hasPendingMessages() { return pendingMessages; },
-		getContextUsage() { return { tokens: 190_000, contextWindow: 200_000, percent: 95 }; },
+		abort() {
+			aborted = true;
+		},
+		isIdle() {
+			return idle;
+		},
+		hasPendingMessages() {
+			return pendingMessages;
+		},
+		getContextUsage() {
+			return { tokens: 190_000, contextWindow: 200_000, percent: 95 };
+		},
 		sessionManager: { getSessionId: () => "test-session" },
 		ui: {
-			setStatus(_key: string, value: string | undefined) { statuses.push(value); },
-			setFooter(footer: unknown) { footers.push(footer); },
-			notify(message: string) { notifications.push(message); },
+			setStatus(_key: string, value: string | undefined) {
+				statuses.push(value);
+			},
+			setFooter(footer: unknown) {
+				footers.push(footer);
+			},
+			notify(message: string) {
+				notifications.push(message);
+			},
 		},
 	} as unknown as ExtensionContext;
 	return {
-		handlers, commands, modelChanges, thinkingChanges, statuses, footers, notifications, sentMessages, ctx,
-		emit(channel: string, payload: unknown) { for (const handler of sharedEvents.get(channel) ?? []) handler(payload); },
+		handlers,
+		commands,
+		modelChanges,
+		thinkingChanges,
+		statuses,
+		footers,
+		notifications,
+		sentMessages,
+		ctx,
+		emit(channel: string, payload: unknown) {
+			for (const handler of sharedEvents.get(channel) ?? []) handler(payload);
+		},
 		aborted: () => aborted,
-		setIdle(value: boolean) { idle = value; },
-		setPendingMessages(value: boolean) { pendingMessages = value; },
+		setIdle(value: boolean) {
+			idle = value;
+		},
+		setPendingMessages(value: boolean) {
+			pendingMessages = value;
+		},
 		recoveryEnabled: () => recoveryEnabled,
 	};
 }
@@ -163,10 +259,19 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client);
 		const now = Date.now();
 		app.emit("papyrus.context-injection.v1", {
-			schema: "papyrus.context-injection/v1", observedAt: now, sequence: 1, producerId: "123e4567-e89b-42d3-a456-426614174000",
-			before: { characters: 1_000, bytes: 1_000 }, rules: { characters: 100, bytes: 100, count: 1 },
-			tasks: { characters: 200, bytes: 200 }, injected: { characters: 300, bytes: 300 }, after: { characters: 1_300, bytes: 1_300 },
-			estimatedTokens: 75, share: 300 / 1_300, fingerprint: "a".repeat(64), unchanged: false,
+			schema: "papyrus.context-injection/v1",
+			observedAt: now,
+			sequence: 1,
+			producerId: "123e4567-e89b-42d3-a456-426614174000",
+			before: { characters: 1_000, bytes: 1_000 },
+			rules: { characters: 100, bytes: 100, count: 1 },
+			tasks: { characters: 200, bytes: 200 },
+			injected: { characters: 300, bytes: 300 },
+			after: { characters: 1_300, bytes: 1_300 },
+			estimatedTokens: 75,
+			share: 300 / 1_300,
+			fingerprint: "a".repeat(64),
+			unchanged: false,
 		});
 		await Promise.resolve();
 		const signal = new AbortController().signal;
@@ -174,7 +279,11 @@ describe("Jittor Pi actuator", () => {
 		await app.handlers.get("session_compact")![0]!({ reason: "threshold", willRetry: false }, app.ctx);
 		const recorded = recordedMetrics(client) as Array<{ source: string; metric: string; attributes?: Record<string, unknown> }>;
 		expect(recorded.some((metric) => metric.source === "papyrus-context" && metric.metric === "injected-characters")).toBe(true);
-		expect(recorded.some((metric) => metric.source === "pi-context" && metric.metric === "compaction-duration" && metric.attributes?.reason === "threshold")).toBe(true);
+		expect(
+			recorded.some(
+				(metric) => metric.source === "pi-context" && metric.metric === "compaction-duration" && metric.attributes?.reason === "threshold",
+			),
+		).toBe(true);
 	});
 
 	it("fetches a compaction duration estimate once per compaction without polling on every render tick", async () => {
@@ -196,7 +305,10 @@ describe("Jittor Pi actuator", () => {
 		let resolveEstimate: ((value: unknown) => void) | undefined;
 		client.call = async (operation: string, input: unknown) => {
 			client.calls.push({ operation, input });
-			if (operation === "compaction.estimate") return new Promise((resolve) => { resolveEstimate = resolve; });
+			if (operation === "compaction.estimate")
+				return new Promise((resolve) => {
+					resolveEstimate = resolve;
+				});
 			return { ready: true, paused: false, sources: [], lastDecision: null, override: null, currentRoute: null, availableRoutes: [] };
 		};
 		const app = harness(client);
@@ -216,18 +328,30 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client);
 		await app.handlers.get("session_start")![0]!({}, app.ctx);
 		const now = Date.now();
-		const emitFocus = (overrides: Record<string, unknown>) => app.emit("papyrus.task-focus.v1", {
-			schema: "papyrus.task-focus/v1", sessionId: "test-session", observedAt: now, ...overrides,
-		});
+		const emitFocus = (overrides: Record<string, unknown>) =>
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				sessionId: "test-session",
+				observedAt: now,
+				...overrides,
+			});
 		const endTurnWithUsage = async () => {
-			await app.handlers.get("message_end")![0]!({ message: {
-				role: "assistant", provider: "anthropic", model: "claude-sonnet-5",
-				usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
-			} }, app.ctx);
+			await app.handlers.get("message_end")![0]!(
+				{
+					message: {
+						role: "assistant",
+						provider: "anthropic",
+						model: "claude-sonnet-5",
+						usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+					},
+				},
+				app.ctx,
+			);
 		};
-		const recordedTaskIds = () => recordedMetrics(client)
-			.filter((metric) => metric["metric"] === "cost")
-			.map((metric) => (metric["attributes"] as Record<string, unknown> | undefined)?.["taskId"]);
+		const recordedTaskIds = () =>
+			recordedMetrics(client)
+				.filter((metric) => metric.metric === "cost")
+				.map((metric) => (metric.attributes as Record<string, unknown> | undefined)?.taskId);
 
 		// Nothing focused yet: no taskId attribute at all (not null, not empty string).
 		await endTurnWithUsage();
@@ -257,11 +381,18 @@ describe("Jittor Pi actuator", () => {
 	it("tags recorded token/cost metrics with the current thinking level, from pi.getThinkingLevel not the message", async () => {
 		const client = new FakeClient();
 		const app = harness(client);
-		await app.handlers.get("message_end")![0]!({ message: {
-			role: "assistant", provider: "anthropic", model: "claude-sonnet-5",
-			usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
-		} }, app.ctx);
-		const recorded = recordedMetrics(client).filter((metric) => metric["metric"] === "cost") as any[];
+		await app.handlers.get("message_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "anthropic",
+					model: "claude-sonnet-5",
+					usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+				},
+			},
+			app.ctx,
+		);
+		const recorded = recordedMetrics(client).filter((metric) => metric.metric === "cost") as any[];
 		expect(recorded[0]?.attributes?.thinking).toBe("high");
 	});
 
@@ -269,35 +400,58 @@ describe("Jittor Pi actuator", () => {
 		const client = new FakeClient();
 		const app = harness(client);
 		const now = Date.now();
-		expect(() => app.emit("papyrus.task-focus.v1", { schema: "papyrus.task-focus/v1", sessionId: "a-different-session", taskId: "other-task", status: "focused", observedAt: now })).not.toThrow();
+		expect(() =>
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				sessionId: "a-different-session",
+				taskId: "other-task",
+				status: "focused",
+				observedAt: now,
+			}),
+		).not.toThrow();
 		expect(() => app.emit("papyrus.task-focus.v1", { schema: "v2", taskId: "x", status: "focused", observedAt: now })).not.toThrow();
 		await Promise.resolve();
-		await app.handlers.get("message_end")![0]!({ message: {
-			role: "assistant", provider: "anthropic", model: "claude-sonnet-5",
-			usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
-		} }, app.ctx);
-		const recorded = recordedMetrics(client).filter((metric) => metric["metric"] === "cost") as any[];
+		await app.handlers.get("message_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "anthropic",
+					model: "claude-sonnet-5",
+					usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+				},
+			},
+			app.ctx,
+		);
+		const recorded = recordedMetrics(client).filter((metric) => metric.metric === "cost") as any[];
 		expect(recorded[0]?.attributes?.taskId).toBeUndefined();
 	});
 
 	it("derives deterministic fallback routes from Pi's full authenticated model catalog", () => {
 		const current = { provider: "provider-a", id: "current-model", reasoning: true, cost: { input: 4, output: 8 } };
-		const routes = routesFromPi([
+		const routes = routesFromPi(
+			[
+				current,
+				{ provider: "provider-a", id: "cheaper-model", reasoning: true, cost: { input: 1, output: 2 } },
+				{ provider: "provider-b", id: "other-provider", reasoning: true, cost: { input: 0, output: 0 } },
+			],
 			current,
-			{ provider: "provider-a", id: "cheaper-model", reasoning: true, cost: { input: 1, output: 2 } },
-			{ provider: "provider-b", id: "other-provider", reasoning: true, cost: { input: 0, output: 0 } },
-		], current, "high");
+			"high",
+		);
 		expect(routes[0]).toEqual({ provider: "provider-a", model: "current-model", thinking: "high" });
 		expect(routes.some((route) => route.model === "current-model" && route.thinking === "medium")).toBe(true);
 		expect(routes.some((route) => route.model === "cheaper-model")).toBe(true);
 		expect(new Set(routes.map((route) => route.provider))).toEqual(new Set(["provider-a", "provider-b"]));
-		expect(routes.findIndex((route) => route.provider === "provider-b")).toBeGreaterThan(routes.findIndex((route) => route.model === "cheaper-model"));
+		expect(routes.findIndex((route) => route.provider === "provider-b")).toBeGreaterThan(
+			routes.findIndex((route) => route.model === "cheaper-model"),
+		);
 	});
 
 	it("allows Codex, OpenRouter, Anthropic, and Vertex when the daemon returns an intentional continue decision", async () => {
 		for (const provider of ["openai-codex", "openrouter", "anthropic", "google-vertex"]) {
 			const client = new FakeClient();
-			client.decision = decision({ reason: provider === "openai-codex" ? "budget sustainable" : "provider has no enforceable budget window; monitor-only" });
+			client.decision = decision({
+				reason: provider === "openai-codex" ? "budget sustainable" : "provider has no enforceable budget window; monitor-only",
+			});
 			const app = harness(client, undefined, undefined, { provider, id: `${provider}-model` });
 			expect(await app.handlers.get("input")![0]!({ source: "interactive", text: "go" }, app.ctx)).toEqual({ action: "continue" });
 			expect(app.aborted()).toBe(false);
@@ -318,7 +472,12 @@ describe("Jittor Pi actuator", () => {
 		let opened = 0;
 		(app.ctx.ui as any).custom = async (factory: Function) => {
 			opened += 1;
-			const component = factory({ requestRender() {} }, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
+			const component = factory(
+				{ requestRender() {} },
+				{ fg: (_color: string, text: string) => text, bold: (text: string) => text },
+				{},
+				() => undefined,
+			);
 			expect(component.render(50).join("\n")).toContain("Jittor Settings");
 			return { kind: "close" };
 		};
@@ -331,7 +490,10 @@ describe("Jittor Pi actuator", () => {
 		const client = new FakeClient();
 		const app = harness(client);
 		let opened = false;
-		(app.ctx.ui as any).custom = async () => { opened = true; return "close"; };
+		(app.ctx.ui as any).custom = async () => {
+			opened = true;
+			return "close";
+		};
 		await app.commands.get("jittor").handler("status", app.ctx);
 		expect(opened).toBe(true);
 	});
@@ -349,25 +511,39 @@ describe("Jittor Pi actuator", () => {
 		const call = client.calls.find((candidate) => candidate.operation === "models.rank")!;
 		expect(call.input).toMatchObject({ scopeAuthority: "available-models", domain: "coding", type: "general" });
 		expect((call.input as any).candidates).toHaveLength(4);
-		expect((call.input as any).candidates.map((candidate: any) => `${candidate.provider}/${candidate.model}`)).toContain("openrouter/openai/gpt-4.1-mini");
+		expect((call.input as any).candidates.map((candidate: any) => `${candidate.provider}/${candidate.model}`)).toContain(
+			"openrouter/openai/gpt-4.1-mini",
+		);
 		expect(rendered).toContain("ADVISORY");
 	});
 
 	it("resolves domain and type from /jittor benchmarks as two independent, order-free positional words", async () => {
 		const client = new FakeClient();
 		const app = harness(client);
-		(app.ctx.ui as any).custom = async (factory: Function) => { factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined); return "close"; };
+		(app.ctx.ui as any).custom = async (factory: Function) => {
+			factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
+			return "close";
+		};
 
 		await app.commands.get("jittor").handler("benchmarks research", app.ctx);
-		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({ domain: "general", type: "research" });
+		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({
+			domain: "general",
+			type: "research",
+		});
 		client.calls.length = 0;
 
 		await app.commands.get("jittor").handler("benchmarks research coding", app.ctx);
-		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({ domain: "coding", type: "research" });
+		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({
+			domain: "coding",
+			type: "research",
+		});
 		client.calls.length = 0;
 
 		await app.commands.get("jittor").handler("benchmarks coding research", app.ctx);
-		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({ domain: "coding", type: "research" });
+		expect(client.calls.find((candidate) => candidate.operation === "models.rank")!.input).toMatchObject({
+			domain: "coding",
+			type: "research",
+		});
 	});
 
 	it("refuses a malformed /jittor benchmarks request instead of guessing -- two words for the same axis, or an unrecognized word", async () => {
@@ -388,9 +564,13 @@ describe("Jittor Pi actuator", () => {
 		let footerEnabled = true;
 		const enforcement: EnforcementControl = {
 			isEnabled: () => enabled,
-			setEnabled(value) { enabled = value; },
+			setEnabled(value) {
+				enabled = value;
+			},
 			isFooterEnabled: () => footerEnabled,
-			setFooterEnabled(value) { footerEnabled = value; },
+			setFooterEnabled(value) {
+				footerEnabled = value;
+			},
 		};
 		const client = new FakeClient();
 		const app = harness(client, enforcement);
@@ -409,9 +589,13 @@ describe("Jittor Pi actuator", () => {
 		let footerEnabled = true;
 		const enforcement: EnforcementControl = {
 			isEnabled: () => enabled,
-			setEnabled(value) { enabled = value; },
+			setEnabled(value) {
+				enabled = value;
+			},
 			isFooterEnabled: () => footerEnabled,
-			setFooterEnabled(value) { footerEnabled = value; },
+			setFooterEnabled(value) {
+				footerEnabled = value;
+			},
 		};
 		const app = harness(new FakeClient(), enforcement);
 		await app.commands.get("jittor").handler("footer off", app.ctx);
@@ -430,9 +614,9 @@ describe("Jittor Pi actuator", () => {
 		await app.handlers.get("input")![0]!({ source: "interactive", text: "work" }, app.ctx);
 
 		const routerCalls = client.calls.filter((call) => call.operation.startsWith("router."));
-		expect(routerCalls.map((call) => call.operation)).toEqual(expect.arrayContaining([
-			"router.current_route", "router.available_routes", "router.status", "router.decide",
-		]));
+		expect(routerCalls.map((call) => call.operation)).toEqual(
+			expect.arrayContaining(["router.current_route", "router.available_routes", "router.status", "router.decide"]),
+		);
 		expect(routerCalls.every((call) => (call.input as Record<string, unknown>).session_id === "test-session")).toBe(true);
 	});
 
@@ -442,12 +626,17 @@ describe("Jittor Pi actuator", () => {
 
 		await app.handlers.get("session_start")![0]!({}, app.ctx);
 		expect(client.calls).toContainEqual({ operation: "session.register", input: { session_id: "test-session" } });
-		const mutations = client.calls.filter((call) => call.operation === "router.current_route" || call.operation === "router.available_routes");
+		const mutations = client.calls.filter(
+			(call) => call.operation === "router.current_route" || call.operation === "router.available_routes",
+		);
 		expect(mutations.length).toBeGreaterThan(0);
 		expect(mutations.every((call) => (call.input as Record<string, unknown>).session_secret === "secret-for-test-session")).toBe(true);
 
 		await app.handlers.get("session_shutdown")![0]!({}, app.ctx);
-		expect(client.calls).toContainEqual({ operation: "session.release", input: { session_id: "test-session", session_secret: "secret-for-test-session" } });
+		expect(client.calls).toContainEqual({
+			operation: "session.release",
+			input: { session_id: "test-session", session_secret: "secret-for-test-session" },
+		});
 	});
 
 	it("resynchronizes the route and footer after a daemon restart while monitor-only", async () => {
@@ -512,15 +701,30 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client);
 		const startedAt = Date.now() - 1_000;
 		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: startedAt }, app.ctx);
-		await app.handlers.get("message_update")![0]!({ assistantMessageEvent: { type: "text_delta", delta: "private response must not persist" } }, app.ctx);
+		await app.handlers.get("message_update")![0]!(
+			{ assistantMessageEvent: { type: "text_delta", delta: "private response must not persist" } },
+			app.ctx,
+		);
 		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {} }, app.ctx);
-		await app.handlers.get("tool_execution_end")![0]!({ toolCallId: "tool-1", toolName: "edit", args: { secret: "private" }, result: { private: true }, isError: false }, app.ctx);
-		await app.handlers.get("turn_end")![0]!({ message: {
-			role: "assistant", provider: "openai-codex", model: "gpt-5.4", stopReason: "stop",
-			usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 0, cost: { total: 0.004 } },
-		}, toolResults: [{ content: "private tool output" }] }, app.ctx);
+		await app.handlers.get("tool_execution_end")![0]!(
+			{ toolCallId: "tool-1", toolName: "edit", args: { secret: "private" }, result: { private: true }, isError: false },
+			app.ctx,
+		);
+		await app.handlers.get("turn_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "openai-codex",
+					model: "gpt-5.4",
+					stopReason: "stop",
+					usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 0, cost: { total: 0.004 } },
+				},
+				toolResults: [{ content: "private tool output" }],
+			},
+			app.ctx,
+		);
 		await app.commands.get("jittor").handler("outcome accepted", app.ctx);
-		const local = recordedMetrics(client).filter((metric) => metric["source"] === "local-model") as any[];
+		const local = recordedMetrics(client).filter((metric) => metric.source === "local-model") as any[];
 		expect(local.map((metric) => metric.metric)).toContain("ttft");
 		expect(local.map((metric) => metric.metric)).toContain("tool-calls");
 		expect(local.some((metric) => metric.metric === "outcome-accepted" && metric.value === 1)).toBe(true);
@@ -531,16 +735,31 @@ describe("Jittor Pi actuator", () => {
 	it("records Codex response headers and finalized assistant usage through the daemon", async () => {
 		const client = new FakeClient();
 		const app = harness(client);
-		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {
-			"x-codex-primary-used-percent": "20", "x-codex-primary-window-minutes": "300", "x-codex-primary-reset-at": "1800000000",
-		} }, app.ctx);
-		await app.handlers.get("message_end")![0]!({ message: {
-			role: "assistant", provider: "openrouter", model: "openai/gpt-4.1-mini",
-			usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 0, cost: { total: 0.004 } },
-		} }, app.ctx);
+		await app.handlers.get("after_provider_response")![0]!(
+			{
+				status: 200,
+				headers: {
+					"x-codex-primary-used-percent": "20",
+					"x-codex-primary-window-minutes": "300",
+					"x-codex-primary-reset-at": "1800000000",
+				},
+			},
+			app.ctx,
+		);
+		await app.handlers.get("message_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "openrouter",
+					model: "openai/gpt-4.1-mini",
+					usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 0, cost: { total: 0.004 } },
+				},
+			},
+			app.ctx,
+		);
 		const records = recordedMetrics(client);
-		expect(records.some((record) => record["source"] === "codex-subscription")).toBe(true);
-		expect(records.some((record) => record["metric"] === "cost" && record["value"] === 0.004)).toBe(true);
+		expect(records.some((record) => record.source === "codex-subscription")).toBe(true);
+		expect(records.some((record) => record.metric === "cost" && record.value === 0.004)).toBe(true);
 	});
 
 	it("records and reloads official Anthropic rate-limit response headers for the active route", async () => {
@@ -548,33 +767,60 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client, undefined, undefined, { provider: "anthropic", id: "claude-sonnet-5" });
 		await app.handlers.get("session_start")![0]!({}, app.ctx);
 		client.calls.length = 0;
-		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {
-			"anthropic-ratelimit-tokens-limit": "2000000",
-			"anthropic-ratelimit-tokens-remaining": "1500000",
-			"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
-		} }, app.ctx);
+		await app.handlers.get("after_provider_response")![0]!(
+			{
+				status: 200,
+				headers: {
+					"anthropic-ratelimit-tokens-limit": "2000000",
+					"anthropic-ratelimit-tokens-remaining": "1500000",
+					"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
+				},
+			},
+			app.ctx,
+		);
 		const records = recordedMetrics(client);
-		expect(records.some((record) => record["source"] === "anthropic" && record["scope"] === "tokens" && record["metric"] === "used-fraction" && record["value"] === 0.25)).toBe(true);
-		expect(client.calls).toContainEqual({ operation: "metrics.query", input: { source: "anthropic", metric: "used-fraction", limit: 20, order: "desc" } });
+		expect(
+			records.some(
+				(record) =>
+					record.source === "anthropic" && record.scope === "tokens" && record.metric === "used-fraction" && record.value === 0.25,
+			),
+		).toBe(true);
+		expect(client.calls).toContainEqual({
+			operation: "metrics.query",
+			input: { source: "anthropic", metric: "used-fraction", limit: 20, order: "desc" },
+		});
 	});
 
 	it("notifies instead of silently dropping telemetry on Anthropic header schema drift", async () => {
 		const client = new FakeClient();
 		const app = harness(client, undefined, undefined, { provider: "anthropic", id: "claude-sonnet-5" });
-		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: { "anthropic-ratelimit-requests-limit": "not-a-number" } }, app.ctx);
+		await app.handlers.get("after_provider_response")![0]!(
+			{ status: 200, headers: { "anthropic-ratelimit-requests-limit": "not-a-number" } },
+			app.ctx,
+		);
 		expect(app.notifications.at(-1)).toContain("Anthropic telemetry schema drift");
-		expect(recordedMetrics(client).some((metric) => metric["source"] === "anthropic")).toBe(false);
+		expect(recordedMetrics(client).some((metric) => metric.source === "anthropic")).toBe(false);
 	});
 
 	it("classifies a failed Google Vertex response as a bounded failure-count metric, never a fabricated budget", async () => {
 		const client = new FakeClient();
 		const app = harness(client, undefined, undefined, { provider: "google-vertex", id: "gemini-3-pro" });
 		await app.handlers.get("after_provider_response")![0]!({ status: 429, headers: {} }, app.ctx);
-		await app.handlers.get("message_end")![0]!({ message: {
-			role: "assistant", provider: "google-vertex", stopReason: "error", errorMessage: "429 RESOURCE_EXHAUSTED. Quota exceeded",
-		} }, app.ctx);
+		await app.handlers.get("message_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "google-vertex",
+					stopReason: "error",
+					errorMessage: "429 RESOURCE_EXHAUSTED. Quota exceeded",
+				},
+			},
+			app.ctx,
+		);
 		const records = recordedMetrics(client) as any[];
-		expect(records).toContainEqual(expect.objectContaining({ source: "google-vertex", scope: "failure", metric: "quota", value: 1, unit: "count" }));
+		expect(records).toContainEqual(
+			expect.objectContaining({ source: "google-vertex", scope: "failure", metric: "quota", value: 1, unit: "count" }),
+		);
 		expect(records.some((record) => record.unit === "ratio")).toBe(false);
 		expect(JSON.stringify(records)).not.toContain("Quota exceeded");
 	});
@@ -586,12 +832,21 @@ describe("Jittor Pi actuator", () => {
 		const client = new FakeClient();
 		const app = harness(client, undefined, undefined, { provider: "anthropic-vertex", id: "claude-sonnet-5" });
 		await app.handlers.get("after_provider_response")![0]!({ status: 429, headers: {} }, app.ctx);
-		await app.handlers.get("message_end")![0]!({ message: {
-			role: "assistant", provider: "anthropic-vertex", stopReason: "error",
-			errorMessage: "429 - Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model",
-		} }, app.ctx);
+		await app.handlers.get("message_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "anthropic-vertex",
+					stopReason: "error",
+					errorMessage: "429 - Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model",
+				},
+			},
+			app.ctx,
+		);
 		const records = recordedMetrics(client) as any[];
-		expect(records).toContainEqual(expect.objectContaining({ source: "anthropic-vertex", scope: "failure", metric: "quota", value: 1, unit: "count" }));
+		expect(records).toContainEqual(
+			expect.objectContaining({ source: "anthropic-vertex", scope: "failure", metric: "quota", value: 1, unit: "count" }),
+		);
 		expect(records.some((record) => record.source === "google-vertex")).toBe(false);
 	});
 
@@ -600,35 +855,54 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client, undefined, undefined, { provider: "anthropic-vertex", id: "claude-sonnet-5" });
 		await app.handlers.get("session_start")![0]!({}, app.ctx);
 		client.calls.length = 0;
-		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: {
-			"anthropic-ratelimit-tokens-limit": "2000000",
-			"anthropic-ratelimit-tokens-remaining": "800000",
-			"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
-		} }, app.ctx);
+		await app.handlers.get("after_provider_response")![0]!(
+			{
+				status: 200,
+				headers: {
+					"anthropic-ratelimit-tokens-limit": "2000000",
+					"anthropic-ratelimit-tokens-remaining": "800000",
+					"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
+				},
+			},
+			app.ctx,
+		);
 		const records = recordedMetrics(client) as any[];
-		expect(records).toContainEqual(expect.objectContaining({ source: "anthropic-vertex", scope: "tokens", metric: "used-fraction", value: 0.6 }));
+		expect(records).toContainEqual(
+			expect.objectContaining({ source: "anthropic-vertex", scope: "tokens", metric: "used-fraction", value: 0.6 }),
+		);
 		expect(records.some((record) => record.source === "anthropic")).toBe(false);
-		expect(client.calls).toContainEqual({ operation: "metrics.query", input: { source: "anthropic-vertex", metric: "used-fraction", limit: 20, order: "desc" } });
+		expect(client.calls).toContainEqual({
+			operation: "metrics.query",
+			input: { source: "anthropic-vertex", metric: "used-fraction", limit: 20, order: "desc" },
+		});
 	});
 
 	it("notifies instead of silently dropping telemetry on anthropic-vertex header schema drift", async () => {
 		const client = new FakeClient();
 		const app = harness(client, undefined, undefined, { provider: "anthropic-vertex", id: "claude-sonnet-5" });
-		await app.handlers.get("after_provider_response")![0]!({ status: 200, headers: { "anthropic-ratelimit-requests-limit": "not-a-number" } }, app.ctx);
+		await app.handlers.get("after_provider_response")![0]!(
+			{ status: 200, headers: { "anthropic-ratelimit-requests-limit": "not-a-number" } },
+			app.ctx,
+		);
 		expect(app.notifications.at(-1)).toContain("Anthropic-on-Vertex telemetry schema drift");
-		expect(recordedMetrics(client).some((metric) => metric["source"] === "anthropic-vertex")).toBe(false);
+		expect(recordedMetrics(client).some((metric) => metric.source === "anthropic-vertex")).toBe(false);
 	});
 });
 
 describe("Jittor Codex settled-turn recovery", () => {
 	async function failCodex(app: ReturnType<typeof harness>): Promise<void> {
 		await app.handlers.get("after_provider_response")![0]!({ status: 429, headers: { "retry-after": "12" } }, app.ctx);
-		await app.handlers.get("message_end")![0]!({ message: {
-			role: "assistant",
-			provider: "openai-codex",
-			stopReason: "error",
-			errorMessage: "Too many concurrent requests",
-		} }, app.ctx);
+		await app.handlers.get("message_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "openai-codex",
+					stopReason: "error",
+					errorMessage: "Too many concurrent requests",
+				},
+			},
+			app.ctx,
+		);
 	}
 
 	it("waits for agent_settled before scheduling one opted-in hidden retry", async () => {
@@ -710,18 +984,89 @@ describe("Jittor Codex settled-turn recovery", () => {
 
 describe("Jittor footer status", () => {
 	const metrics = [
-		{ source: "codex-subscription", scope: "codex:primary", metric: "used-fraction", value: 0.2, unit: "ratio", observedAt: 1, id: 1, attributes: { windowSeconds: 18_000 } },
-		{ source: "codex-subscription", scope: "codex:secondary", metric: "used-fraction", value: 0.42, unit: "ratio", observedAt: 2, id: 2, attributes: { limitId: "codex", windowSeconds: 604_800, resetsAt: 1_800_000_000 } },
-		{ source: "codex-subscription", scope: "codex_bengalfox:primary", metric: "used-fraction", value: 0, unit: "ratio", observedAt: 3, id: 3, attributes: { limitId: "codex_bengalfox", limitName: "GPT-5.3-Codex-Spark", windowSeconds: 604_800, resetsAt: 1_800_100_000 } },
-		{ source: "openrouter", scope: "key:default", metric: "remaining-fraction", value: 0.4, unit: "ratio", observedAt: 5, id: 5, attributes: { limit: 100, remaining: 40, reset: "monthly" } },
+		{
+			source: "codex-subscription",
+			scope: "codex:primary",
+			metric: "used-fraction",
+			value: 0.2,
+			unit: "ratio",
+			observedAt: 1,
+			id: 1,
+			attributes: { windowSeconds: 18_000 },
+		},
+		{
+			source: "codex-subscription",
+			scope: "codex:secondary",
+			metric: "used-fraction",
+			value: 0.42,
+			unit: "ratio",
+			observedAt: 2,
+			id: 2,
+			attributes: { limitId: "codex", windowSeconds: 604_800, resetsAt: 1_800_000_000 },
+		},
+		{
+			source: "codex-subscription",
+			scope: "codex_bengalfox:primary",
+			metric: "used-fraction",
+			value: 0,
+			unit: "ratio",
+			observedAt: 3,
+			id: 3,
+			attributes: { limitId: "codex_bengalfox", limitName: "GPT-5.3-Codex-Spark", windowSeconds: 604_800, resetsAt: 1_800_100_000 },
+		},
+		{
+			source: "openrouter",
+			scope: "key:default",
+			metric: "remaining-fraction",
+			value: 0.4,
+			unit: "ratio",
+			observedAt: 5,
+			id: 5,
+			attributes: { limit: 100, remaining: 40, reset: "monthly" },
+		},
 		{ source: "openrouter", scope: "key:default", metric: "usage", value: 60, unit: "usd", observedAt: 4, id: 4, attributes: {} },
-		{ source: "anthropic", scope: "requests", metric: "used-fraction", value: 0.1, unit: "ratio", observedAt: 6, id: 6, attributes: { resetsAt: 1_800_000_000_000 } },
-		{ source: "anthropic", scope: "tokens", metric: "used-fraction", value: 0.25, unit: "ratio", observedAt: 7, id: 7, attributes: { resetsAt: 1_800_050_000_000 } },
-		{ source: "anthropic-vertex", scope: "tokens", metric: "used-fraction", value: 0.6, unit: "ratio", observedAt: 8, id: 8, attributes: { resetsAt: 1_800_090_000_000 } },
+		{
+			source: "anthropic",
+			scope: "requests",
+			metric: "used-fraction",
+			value: 0.1,
+			unit: "ratio",
+			observedAt: 6,
+			id: 6,
+			attributes: { resetsAt: 1_800_000_000_000 },
+		},
+		{
+			source: "anthropic",
+			scope: "tokens",
+			metric: "used-fraction",
+			value: 0.25,
+			unit: "ratio",
+			observedAt: 7,
+			id: 7,
+			attributes: { resetsAt: 1_800_050_000_000 },
+		},
+		{
+			source: "anthropic-vertex",
+			scope: "tokens",
+			metric: "used-fraction",
+			value: 0.6,
+			unit: "ratio",
+			observedAt: 8,
+			id: 8,
+			attributes: { resetsAt: 1_800_090_000_000 },
+		},
 	] as any[];
 
 	it("shows the default Codex budget remaining instead of a same-duration additional model limit", () => {
-		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" }, availableRoutes: [] };
+		const routeStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: decision(),
+			override: null,
+			currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+			availableRoutes: [],
+		};
 		const budget = buildFooterBudget(routeStatus, metrics);
 		expect(budget).toMatchObject({ kind: "bounded", label: "W", resetsAt: 1_800_000_000_000 });
 		expect(budget?.kind === "bounded" ? budget.remainingFraction : null).toBeCloseTo(0.58);
@@ -730,38 +1075,92 @@ describe("Jittor footer status", () => {
 
 	it("selects a named additional Codex limit only for its matching model", () => {
 		const budget = buildFooterBudget(
-			{ ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openai-codex", model: "gpt-5.3-codex-spark", thinking: "high" }, availableRoutes: [] },
+			{
+				ready: true,
+				paused: false,
+				sources: [],
+				lastDecision: decision(),
+				override: null,
+				currentRoute: { provider: "openai-codex", model: "gpt-5.3-codex-spark", thinking: "high" },
+				availableRoutes: [],
+			},
 			metrics,
 		);
 		expect(budget).toMatchObject({ kind: "bounded", label: "W", remainingFraction: 1, resetsAt: 1_800_100_000_000 });
 	});
 
 	it("shows a draining remaining-budget value for an officially bounded OpenRouter key", () => {
-		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "medium" }, availableRoutes: [] };
+		const routeStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: decision(),
+			override: null,
+			currentRoute: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "medium" },
+			availableRoutes: [],
+		};
 		expect(buildFooterBudget(routeStatus, metrics)).toMatchObject({
-			kind: "bounded", label: "OR", remainingFraction: 0.4, resetText: "monthly reset",
+			kind: "bounded",
+			label: "OR",
+			remainingFraction: 0.4,
+			resetText: "monthly reset",
 		});
 		expect(formatFooterStatus(routeStatus, metrics)).toBe("OR 40.0% left");
 	});
 
 	it("prefers the Anthropic tokens bucket over requests, since it reflects the most restrictive limit in effect", () => {
-		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
+		const routeStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: decision(),
+			override: null,
+			currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" },
+			availableRoutes: [],
+		};
 		expect(buildFooterBudget(routeStatus, metrics)).toMatchObject({
-			kind: "bounded", label: "tok", remainingFraction: 0.75, resetsAt: 1_800_050_000_000,
+			kind: "bounded",
+			label: "tok",
+			remainingFraction: 0.75,
+			resetsAt: 1_800_050_000_000,
 		});
 		expect(formatFooterStatus(routeStatus, metrics)).toBe("tok 75.0% left");
 	});
 
 	it("falls back to the Anthropic requests bucket when no tokens bucket was observed", () => {
-		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
-		expect(buildFooterBudget(routeStatus, metrics.filter((metric) => metric.scope !== "tokens"))).toMatchObject({
-			kind: "bounded", label: "req", remainingFraction: 0.9, resetsAt: 1_800_000_000_000,
+		const routeStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: decision(),
+			override: null,
+			currentRoute: { provider: "anthropic", model: "claude-sonnet-5", thinking: "high" },
+			availableRoutes: [],
+		};
+		expect(
+			buildFooterBudget(
+				routeStatus,
+				metrics.filter((metric) => metric.scope !== "tokens"),
+			),
+		).toMatchObject({
+			kind: "bounded",
+			label: "req",
+			remainingFraction: 0.9,
+			resetsAt: 1_800_000_000_000,
 		});
 	});
 
 	it("keeps OpenRouter spend text-only when the key has no official limit", () => {
 		const text = formatFooterStatus(
-			{ ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "medium" }, availableRoutes: [] },
+			{
+				ready: true,
+				paused: false,
+				sources: [],
+				lastDecision: decision(),
+				override: null,
+				currentRoute: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "medium" },
+				availableRoutes: [],
+			},
 			metrics.filter((metric) => metric.metric !== "remaining-fraction"),
 		);
 		expect(text).toBe("$60.000");
@@ -770,15 +1169,34 @@ describe("Jittor footer status", () => {
 	it("reports undefined (never displayable), not null (not yet known), for a provider with no possible budget signal at all", () => {
 		// Google Vertex has no documented rate-limit/quota header or endpoint (see google-vertex-contracts.ts):
 		// there is nothing that could ever populate this, so it must be distinguishable from "not yet observed".
-		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "google-vertex", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
+		const routeStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: decision(),
+			override: null,
+			currentRoute: { provider: "google-vertex", model: "claude-sonnet-5", thinking: "high" },
+			availableRoutes: [],
+		};
 		expect(buildFooterBudget(routeStatus, metrics)).toBeUndefined();
 		expect(formatFooterStatus(routeStatus, metrics)).toBe("");
 	});
 
 	it("shows a distinctly labeled bounded budget for anthropic-vertex when Anthropic-style headers were actually observed on that passthrough", () => {
-		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "anthropic-vertex", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
+		const routeStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: decision(),
+			override: null,
+			currentRoute: { provider: "anthropic-vertex", model: "claude-sonnet-5", thinking: "high" },
+			availableRoutes: [],
+		};
 		expect(buildFooterBudget(routeStatus, metrics)).toMatchObject({
-			kind: "bounded", label: "vtok", remainingFraction: 0.4, resetsAt: 1_800_090_000_000,
+			kind: "bounded",
+			label: "vtok",
+			remainingFraction: 0.4,
+			resetsAt: 1_800_090_000_000,
 		});
 		// Never blended with direct Anthropic's own "tok" bucket, even though both are present here.
 		expect(formatFooterStatus(routeStatus, metrics)).toBe("vtok 40.0% left");
@@ -787,7 +1205,20 @@ describe("Jittor footer status", () => {
 	it("reports null (not yet known, may still resolve), not undefined, for anthropic-vertex before any header has ever been observed", () => {
 		// Unlike google-vertex, this transport has not been shown to structurally lack the signal --
 		// only that it hasn't been seen yet on this route, which could change.
-		const routeStatus = { ready: true, paused: false, sources: [], lastDecision: decision(), override: null, currentRoute: { provider: "anthropic-vertex", model: "claude-sonnet-5", thinking: "high" }, availableRoutes: [] };
-		expect(buildFooterBudget(routeStatus, metrics.filter((row) => row.source !== "anthropic-vertex"))).toBeNull();
+		const routeStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: decision(),
+			override: null,
+			currentRoute: { provider: "anthropic-vertex", model: "claude-sonnet-5", thinking: "high" },
+			availableRoutes: [],
+		};
+		expect(
+			buildFooterBudget(
+				routeStatus,
+				metrics.filter((row) => row.source !== "anthropic-vertex"),
+			),
+		).toBeNull();
 	});
 });

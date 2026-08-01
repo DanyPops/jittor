@@ -1,7 +1,15 @@
-import type { ExtensionCommandContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth, type TUI } from "@earendil-works/pi-tui";
-import { buildContextRows, renderContextRowLines, renderContextUsageBar, type ContextBarTheme, type ContextRow, type ContextRowsTheme, type ContextSegment as MalevichContextSegment } from "malevich-tui-components";
 import type { ContextSegment } from "@danypops/jittor";
+import type { ExtensionCommandContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
+import { matchesKey, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
+import {
+	buildContextRows,
+	type ContextBarTheme,
+	type ContextRow,
+	type ContextRowsTheme,
+	type ContextSegment as MalevichContextSegment,
+	renderContextRowLines,
+	renderContextUsageBar,
+} from "malevich-tui-components";
 import type { ContextBreakdown } from "./context-breakdown.ts";
 import { buildContextReport } from "./context-report.ts";
 
@@ -32,7 +40,13 @@ function percentOf(part: number, whole: number): string {
 
 /** Folds each segment's confidence tier into its label so it survives Malevich's confidence-unaware row builder. */
 function withConfidenceLabel(segment: ContextSegment): MalevichContextSegment {
-	return { key: segment.key, label: `${segment.label} [${segment.confidence}]`, estimatedTokens: segment.estimatedTokens, items: segment.items, unknown: segment.unknown };
+	return {
+		key: segment.key,
+		label: `${segment.label} [${segment.confidence}]`,
+		estimatedTokens: segment.estimatedTokens,
+		items: segment.items,
+		unknown: segment.unknown,
+	};
 }
 
 class ContextViewport {
@@ -62,7 +76,13 @@ class ContextViewport {
 
 		const { totalTokens, effectiveBudget } = this.breakdown;
 		if (totalTokens !== null && effectiveBudget !== null) {
-			lines.push(truncateToWidth(`${formatTokenCount(totalTokens)} / ${formatTokenCount(effectiveBudget)} tokens (${percentOf(totalTokens, effectiveBudget)} of usable budget)`, contentWidth, ""));
+			lines.push(
+				truncateToWidth(
+					`${formatTokenCount(totalTokens)} / ${formatTokenCount(effectiveBudget)} tokens (${percentOf(totalTokens, effectiveBudget)} of usable budget)`,
+					contentWidth,
+					"",
+				),
+			);
 		} else if (totalTokens !== null) {
 			lines.push(truncateToWidth(`${formatTokenCount(totalTokens)} tokens (model context window unknown)`, contentWidth, ""));
 		} else {
@@ -73,7 +93,16 @@ class ContextViewport {
 		const barTheme: ContextBarTheme = { colorFor, empty: (s) => theme.fg("dim", s) };
 		lines.push(renderContextUsageBar(barTheme, this.segments, contentWidth, effectiveBudget ?? undefined, totalTokens ?? undefined));
 		if (this.breakdown.overshootTokens > 0) {
-			lines.push(truncateToWidth(theme.fg("warning", `Estimates exceed real total by ~${this.breakdown.overshootTokens} tok — sizes below are approximate, not exact`), contentWidth, ""));
+			lines.push(
+				truncateToWidth(
+					theme.fg(
+						"warning",
+						`Estimates exceed real total by ~${this.breakdown.overshootTokens} tok — sizes below are approximate, not exact`,
+					),
+					contentWidth,
+					"",
+				),
+			);
 		}
 		lines.push("");
 
@@ -90,7 +119,10 @@ class ContextViewport {
 	}
 
 	handleInput(data: string): void {
-		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) { this.close(); return; }
+		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+			this.close();
+			return;
+		}
 		if (matchesKey(data, "up")) this.offsetY = Math.max(0, this.offsetY - 1);
 		else if (matchesKey(data, "down")) this.offsetY = Math.min(Math.max(0, this.rows.length - VISIBLE_ROWS), this.offsetY + 1);
 		else return;

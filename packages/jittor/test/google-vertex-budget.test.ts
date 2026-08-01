@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
+import { GoogleVertexBudgetTelemetryAdapter } from "../src/providers/google-vertex-budget.ts";
 import {
+	type GoogleVertexBudgetNotification,
 	googleVertexBudgetMetrics,
 	googleVertexBudgetWindow,
 	parseGoogleVertexBudgetNotification,
-	type GoogleVertexBudgetNotification,
 } from "../src/providers/google-vertex-budget-contracts.ts";
-import { GoogleVertexBudgetTelemetryAdapter } from "../src/providers/google-vertex-budget.ts";
 import { GoogleVertexBudgetTelemetrySource } from "../src/providers/telemetry-sources.ts";
 
 /** Google's own worked test fixture from docs.cloud.google.com/billing/docs/how-to/listen-to-notifications. */
@@ -14,17 +14,23 @@ const GOOGLE_FIXTURE_DATA = {
 	alertThresholdExceeded: 1.0,
 	costAmount: 100.01,
 	costIntervalStart: "2019-01-01T00:00:00Z",
-	budgetAmount: 100.00,
+	budgetAmount: 100.0,
 	budgetAmountType: "SPECIFIED_AMOUNT",
 	currencyCode: "USD",
 };
-const GOOGLE_FIXTURE_ATTRIBUTES = { billingAccountId: "01D4EE-079462-DFD6EC", budgetId: "de72f49d-779b-4945-a127-4d6ce8def0bb", schemaVersion: "1.0" };
+const GOOGLE_FIXTURE_ATTRIBUTES = {
+	billingAccountId: "01D4EE-079462-DFD6EC",
+	budgetId: "de72f49d-779b-4945-a127-4d6ce8def0bb",
+	schemaVersion: "1.0",
+};
 
 function base64(value: unknown): string {
 	return Buffer.from(JSON.stringify(value), "utf8").toString("base64");
 }
 
-function pullResponse(messages: Array<{ ackId: string; data: unknown; publishTime: string; attributes?: Record<string, unknown> }>): Response {
+function pullResponse(
+	messages: Array<{ ackId: string; data: unknown; publishTime: string; attributes?: Record<string, unknown> }>,
+): Response {
 	return Response.json({
 		receivedMessages: messages.map((entry) => ({
 			ackId: entry.ackId,
@@ -35,7 +41,11 @@ function pullResponse(messages: Array<{ ackId: string; data: unknown; publishTim
 
 describe("Google Vertex budget notification parsing", () => {
 	it("parses Google's own documented fixture", () => {
-		const notification = parseGoogleVertexBudgetNotification(GOOGLE_FIXTURE_DATA, GOOGLE_FIXTURE_ATTRIBUTES, Date.parse("2019-01-01T06:00:00Z"));
+		const notification = parseGoogleVertexBudgetNotification(
+			GOOGLE_FIXTURE_DATA,
+			GOOGLE_FIXTURE_ATTRIBUTES,
+			Date.parse("2019-01-01T06:00:00Z"),
+		);
 		expect(notification).toEqual({
 			billingAccountId: "01D4EE-079462-DFD6EC",
 			budgetId: "de72f49d-779b-4945-a127-4d6ce8def0bb",
@@ -43,7 +53,7 @@ describe("Google Vertex budget notification parsing", () => {
 			budgetDisplayName: "name-of-budget",
 			costAmount: 100.01,
 			costIntervalStart: Date.parse("2019-01-01T00:00:00Z"),
-			budgetAmount: 100.00,
+			budgetAmount: 100.0,
 			budgetAmountType: "SPECIFIED_AMOUNT",
 			currencyCode: "USD",
 			alertThresholdExceeded: 1.0,
@@ -53,18 +63,22 @@ describe("Google Vertex budget notification parsing", () => {
 	});
 
 	it("fails closed when budgetAmountType drifts to an unrecognized value", () => {
-		expect(() => parseGoogleVertexBudgetNotification({ ...GOOGLE_FIXTURE_DATA, budgetAmountType: "SOMETHING_NEW" }, GOOGLE_FIXTURE_ATTRIBUTES, 1_000))
-			.toThrow(/schema changed: budgetAmountType/);
+		expect(() =>
+			parseGoogleVertexBudgetNotification({ ...GOOGLE_FIXTURE_DATA, budgetAmountType: "SOMETHING_NEW" }, GOOGLE_FIXTURE_ATTRIBUTES, 1_000),
+		).toThrow(/schema changed: budgetAmountType/);
 	});
 
 	it("fails closed when a required field is missing", () => {
 		const { costAmount, ...withoutCostAmount } = GOOGLE_FIXTURE_DATA;
-		expect(() => parseGoogleVertexBudgetNotification(withoutCostAmount, GOOGLE_FIXTURE_ATTRIBUTES, 1_000)).toThrow(/schema changed: costAmount/);
+		expect(() => parseGoogleVertexBudgetNotification(withoutCostAmount, GOOGLE_FIXTURE_ATTRIBUTES, 1_000)).toThrow(
+			/schema changed: costAmount/,
+		);
 	});
 
 	it("fails closed when costIntervalStart is not RFC 3339", () => {
-		expect(() => parseGoogleVertexBudgetNotification({ ...GOOGLE_FIXTURE_DATA, costIntervalStart: "not-a-date" }, GOOGLE_FIXTURE_ATTRIBUTES, 1_000))
-			.toThrow(/costIntervalStart is not RFC 3339/);
+		expect(() =>
+			parseGoogleVertexBudgetNotification({ ...GOOGLE_FIXTURE_DATA, costIntervalStart: "not-a-date" }, GOOGLE_FIXTURE_ATTRIBUTES, 1_000),
+		).toThrow(/costIntervalStart is not RFC 3339/);
 	});
 
 	it("fails closed when Pub/Sub attributes are missing", () => {
@@ -79,10 +93,14 @@ describe("Google Vertex budget metrics and window", () => {
 		const metrics = googleVertexBudgetMetrics(notification, 2_000);
 		expect(metrics.map((metric) => [metric.source, metric.scope, metric.metric, metric.value, metric.unit])).toEqual([
 			["google-vertex", "budget", "spend", 100.01, "usd"],
-			["google-vertex", "budget", "cap", 100.00, "usd"],
-			["google-vertex", "budget", "spend-fraction", 100.01 / 100.00, "ratio"],
+			["google-vertex", "budget", "cap", 100.0, "usd"],
+			["google-vertex", "budget", "spend-fraction", 100.01 / 100.0, "ratio"],
 		]);
-		expect(metrics[0]?.attributes).toMatchObject({ budgetId: "de72f49d-779b-4945-a127-4d6ce8def0bb", currencyCode: "USD", alertThresholdExceeded: 1.0 });
+		expect(metrics[0]?.attributes).toMatchObject({
+			budgetId: "de72f49d-779b-4945-a127-4d6ce8def0bb",
+			currencyCode: "USD",
+			alertThresholdExceeded: 1.0,
+		});
 	});
 
 	it("tags the anthropic-vertex source distinctly from the native google-vertex source", () => {
@@ -146,7 +164,11 @@ describe("GoogleVertexBudgetTelemetryAdapter", () => {
 	});
 
 	it("returns null when the subscription has no pending messages", async () => {
-		const adapter = new GoogleVertexBudgetTelemetryAdapter("projects/p/subscriptions/s", async () => "token", async () => Response.json({}));
+		const adapter = new GoogleVertexBudgetTelemetryAdapter(
+			"projects/p/subscriptions/s",
+			async () => "token",
+			async () => Response.json({}),
+		);
 		expect(await adapter.pull(1_000)).toBeNull();
 	});
 
@@ -157,7 +179,8 @@ describe("GoogleVertexBudgetTelemetryAdapter", () => {
 			async () => "token",
 			async (request) => {
 				requests.push(request);
-				if (request.url.endsWith(":pull")) return pullResponse([{ ackId: "ack-bad", data: { not: "a budget notification" }, publishTime: "2026-07-01T00:00:00Z" }]);
+				if (request.url.endsWith(":pull"))
+					return pullResponse([{ ackId: "ack-bad", data: { not: "a budget notification" }, publishTime: "2026-07-01T00:00:00Z" }]);
 				return Response.json({});
 			},
 		);
@@ -167,7 +190,11 @@ describe("GoogleVertexBudgetTelemetryAdapter", () => {
 	});
 
 	it("throws when Pub/Sub responds with a non-2xx status", async () => {
-		const adapter = new GoogleVertexBudgetTelemetryAdapter("projects/p/subscriptions/s", async () => "token", async () => new Response("nope", { status: 403 }));
+		const adapter = new GoogleVertexBudgetTelemetryAdapter(
+			"projects/p/subscriptions/s",
+			async () => "token",
+			async () => new Response("nope", { status: 403 }),
+		);
 		await expect(adapter.pull(1_000)).rejects.toThrow(/HTTP 403/);
 	});
 });
@@ -178,7 +205,10 @@ describe("GoogleVertexBudgetTelemetrySource", () => {
 			"projects/p/subscriptions/s",
 			async () => "token",
 			() => 9_000,
-			async (request) => (request.url.endsWith(":pull") ? pullResponse([{ ackId: "a", data: GOOGLE_FIXTURE_DATA, publishTime: "2026-07-01T00:00:00Z" }]) : Response.json({})),
+			async (request) =>
+				request.url.endsWith(":pull")
+					? pullResponse([{ ackId: "a", data: GOOGLE_FIXTURE_DATA, publishTime: "2026-07-01T00:00:00Z" }])
+					: Response.json({}),
 		);
 
 		const batch = await source.poll();
@@ -192,14 +222,23 @@ describe("GoogleVertexBudgetTelemetrySource", () => {
 
 	it("uses the configured metric source as its route-provider identity", () => {
 		const source = new GoogleVertexBudgetTelemetrySource(
-			"projects/p/subscriptions/s", async () => "token", () => 1_000, async () => Response.json({}), "anthropic-vertex",
+			"projects/p/subscriptions/s",
+			async () => "token",
+			() => 1_000,
+			async () => Response.json({}),
+			"anthropic-vertex",
 		);
 		expect(source.provider).toBe("anthropic-vertex");
 		expect(source.id).toBe("google-vertex-budget:anthropic-vertex");
 	});
 
 	it("returns an empty batch, not an error, when nothing is pending", async () => {
-		const source = new GoogleVertexBudgetTelemetrySource("projects/p/subscriptions/s", async () => "token", () => 1_000, async () => Response.json({}));
+		const source = new GoogleVertexBudgetTelemetrySource(
+			"projects/p/subscriptions/s",
+			async () => "token",
+			() => 1_000,
+			async () => Response.json({}),
+		);
 		const batch = await source.poll();
 		expect(batch).toEqual({ observedAt: 1_000, metrics: [], windows: [] });
 	});

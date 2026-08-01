@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { evaluateRoutingPolicy, type BudgetWindow, type PolicyInput, type Route } from "../src/policy.ts";
 import { DEFAULT_POLICY } from "../src/config.ts";
+import { type BudgetWindow, evaluateRoutingPolicy, type PolicyInput, type Route } from "../src/policy.ts";
 
 const now = 1_700_000_000_000;
 const current: Route = { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" };
@@ -16,12 +16,21 @@ function atPressure(pressure: number, overrides: Partial<BudgetWindow> = {}): Po
 	const remainingSeconds = 14_400;
 	return {
 		now,
-		windows: [{
-			id: "codex:primary@calibration", source: "codex-subscription", scope: "codex:primary",
-			usedFraction: 0.2, observedBurnPerSecond: pressure * (remainingFraction / remainingSeconds),
-			windowSeconds: 18_000, resetsAt: now + remainingSeconds * 1_000,
-			observedAt: now, freshness: "fresh", confidence: 0.8, ...overrides,
-		}],
+		windows: [
+			{
+				id: "codex:primary@calibration",
+				source: "codex-subscription",
+				scope: "codex:primary",
+				usedFraction: 0.2,
+				observedBurnPerSecond: pressure * (remainingFraction / remainingSeconds),
+				windowSeconds: 18_000,
+				resetsAt: now + remainingSeconds * 1_000,
+				observedAt: now,
+				freshness: "fresh",
+				confidence: 0.8,
+				...overrides,
+			},
+		],
 		currentRoute: current,
 		routes,
 		config: DEFAULT_POLICY,
@@ -46,7 +55,10 @@ describe("calibrated routing scenarios", () => {
 	it("holds a degraded route during cooldown to prevent oscillation", () => {
 		const input = atPressure(0.9);
 		input.previousDecision = {
-			action: "lower-thinking", pressure: 1.3, decidedAt: now - 60_000, route: routes[1],
+			action: "lower-thinking",
+			pressure: 1.3,
+			decidedAt: now - 60_000,
+			route: routes[1],
 		};
 		expect(evaluateRoutingPolicy(input)).toMatchObject({ action: "lower-thinking", route: routes[1] });
 	});

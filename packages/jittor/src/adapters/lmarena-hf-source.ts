@@ -1,5 +1,10 @@
 import { BENCHMARK_MAX_MODELS_PER_SOURCE, BENCHMARK_REFRESH_INTERVAL_MS, BENCHMARK_SOURCE_MAX_RESPONSE_BYTES } from "../constants.ts";
-import { normalizeModelIdentity, validateBenchmarkObservation, type BenchmarkObservation, type BenchmarkSourceSnapshot } from "../domain/benchmark.ts";
+import {
+	type BenchmarkObservation,
+	type BenchmarkSourceSnapshot,
+	normalizeModelIdentity,
+	validateBenchmarkObservation,
+} from "../domain/benchmark.ts";
 import type { BenchmarkSource } from "../ports/benchmark-source.ts";
 import { contractRecord } from "../providers/openrouter-contracts.ts";
 
@@ -46,7 +51,10 @@ function requiredNumber(value: unknown, name: string): number {
  */
 function bestEffortIdentity(organization: string, displayName: string): { provider: string; model: string; aliases: string[] } {
 	const base = displayName.replace(THINKING_SUFFIX, "").trim();
-	const slug = base.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-+|-+$/g, "");
+	const slug = base
+		.toLowerCase()
+		.replace(/[^a-z0-9.]+/g, "-")
+		.replace(/^-+|-+$/g, "");
 	return { provider: organization, model: slug, aliases: [displayName.toLowerCase()] };
 }
 
@@ -63,32 +71,44 @@ export class LmArenaHfSource implements BenchmarkSource {
 		if (!Number.isSafeInteger(retrievedAt) || retrievedAt <= 0) throw new Error("benchmark retrieval time is invalid");
 		const perArena = await Promise.all(ARENAS.map((arena) => this.fetchArena(arena, retrievedAt)));
 		const observations = perArena.flatMap((page) => page.observations).slice(0, BENCHMARK_MAX_MODELS_PER_SOURCE * ARENAS.length);
-		const asOf = perArena.map((page) => page.asOf).sort().at(-1) ?? "unknown";
+		const asOf =
+			perArena
+				.map((page) => page.asOf)
+				.sort()
+				.at(-1) ?? "unknown";
 		return { sourceId: this.id, snapshotId: `${this.id}:${asOf}`, retrievedAt, observations };
 	}
 
-	private async fetchArena(arena: { config: string; dimension: string; unit: "ratio" }, retrievedAt: number): Promise<{ asOf: string; observations: BenchmarkObservation[] }> {
+	private async fetchArena(
+		arena: { config: string; dimension: string; unit: "ratio" },
+		retrievedAt: number,
+	): Promise<{ asOf: string; observations: BenchmarkObservation[] }> {
 		const url = `${BASE_URL}?dataset=lmarena-ai%2Fleaderboard-dataset&config=${arena.config}&split=latest&length=${HF_ROWS_PER_PAGE}`;
 		const response = await this.transport(new Request(url));
 		if (!response.ok) throw new Error(`LMArena benchmark fetch failed with HTTP ${response.status}`);
 		const text = await response.text();
-		if (new TextEncoder().encode(text).byteLength > BENCHMARK_SOURCE_MAX_RESPONSE_BYTES) throw new Error("LMArena benchmark response exceeds the size limit");
+		if (new TextEncoder().encode(text).byteLength > BENCHMARK_SOURCE_MAX_RESPONSE_BYTES)
+			throw new Error("LMArena benchmark response exceeds the size limit");
 		let payload: unknown;
-		try { payload = JSON.parse(text); } catch { throw new Error("LMArena benchmark response is not valid JSON"); }
+		try {
+			payload = JSON.parse(text);
+		} catch {
+			throw new Error("LMArena benchmark response is not valid JSON");
+		}
 		const root = contractRecord(payload, "benchmark response");
-		if (!Array.isArray(root["rows"]) || root["rows"].length > HF_ROWS_PER_PAGE) throw new Error("LMArena benchmark row count is invalid");
+		if (!Array.isArray(root.rows) || root.rows.length > HF_ROWS_PER_PAGE) throw new Error("LMArena benchmark row count is invalid");
 		let asOf = "";
-		const observations = root["rows"].flatMap((entry): BenchmarkObservation[] => {
+		const observations = root.rows.flatMap((entry): BenchmarkObservation[] => {
 			const wrapper = contractRecord(entry, "benchmark row wrapper");
-			const row = contractRecord(wrapper["row"], "benchmark row");
-			const publishDate = requiredText(row["leaderboard_publish_date"], "publish date");
+			const row = contractRecord(wrapper.row, "benchmark row");
+			const publishDate = requiredText(row.leaderboard_publish_date, "publish date");
 			if (publishDate > asOf) asOf = publishDate;
 			// Skip finer per-category splits, if any exist for this config -- out of scope for now.
-			if (requiredText(row["category"], "category") !== "overall") return [];
-			const scoreValue = row["rating"] ?? row["score"];
+			if (requiredText(row.category, "category") !== "overall") return [];
+			const scoreValue = row.rating ?? row.score;
 			const value = requiredNumber(scoreValue, "score");
-			const organization = requiredText(row["organization"], "organization");
-			const displayName = requiredText(row["model_name"], "model name");
+			const organization = requiredText(row.organization, "organization");
+			const displayName = requiredText(row.model_name, "model name");
 			const guessed = bestEffortIdentity(organization, displayName);
 			const identity = normalizeModelIdentity(guessed.provider, guessed.model, guessed.aliases);
 			const provenance = {
@@ -104,7 +124,9 @@ export class LmArenaHfSource implements BenchmarkSource {
 				confidence: 0.6,
 			};
 			const methodology = { basis: "LMArena human-preference battles", arena: arena.config, displayName, publishDate };
-			return [validateBenchmarkObservation({ model: identity, dimension: arena.dimension, value, unit: arena.unit, provenance, methodology })];
+			return [
+				validateBenchmarkObservation({ model: identity, dimension: arena.dimension, value, unit: arena.unit, provenance, methodology }),
+			];
 		});
 		return { asOf, observations };
 	}

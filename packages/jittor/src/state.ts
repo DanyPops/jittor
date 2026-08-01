@@ -6,22 +6,16 @@
  * client.ts, cli.ts, and their tests) is untouched by this migration.
  */
 import {
+	type DaemonHandle,
+	type DaemonPaths,
 	ensureAuthToken as ensureVehicleAuthToken,
+	type PathEnvironment,
 	readDaemonHandle as readVehicleHandle,
 	removeDaemonHandle as removeVehicleHandle,
 	resolveDaemonPaths,
 	writeDaemonHandle as writeVehicleHandle,
-	type DaemonHandle,
-	type DaemonPaths,
-	type PathEnvironment,
 } from "@danypops/vehicle-server/paths";
-import {
-	DATABASE_FILENAME,
-	HANDLE_FILENAME,
-	JITTOR_STATE_DIRECTORY,
-	SYSTEMD_UNIT_NAME,
-	TOKEN_FILENAME,
-} from "./constants.ts";
+import { DATABASE_FILENAME, HANDLE_FILENAME, JITTOR_STATE_DIRECTORY, SYSTEMD_UNIT_NAME, TOKEN_FILENAME } from "./constants.ts";
 
 export type JittorPaths = DaemonPaths;
 export type { DaemonHandle, PathEnvironment };

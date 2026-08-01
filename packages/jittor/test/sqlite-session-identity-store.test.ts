@@ -24,9 +24,9 @@ describe("SQLiteSessionIdentityStore (via SessionIdentity)", () => {
 		const db = openJittorDb(":memory:");
 		const identity = new SessionIdentity(new SQLiteSessionIdentityStore(db));
 		identity.register("session-a");
-		const row = db.query("SELECT session_id, secret_hash, registered_at, last_seen_at FROM session_identities WHERE session_id = ?").get("session-a") as
-			| { session_id: string; secret_hash: string; registered_at: string; last_seen_at: string }
-			| null;
+		const row = db
+			.query("SELECT session_id, secret_hash, registered_at, last_seen_at FROM session_identities WHERE session_id = ?")
+			.get("session-a") as { session_id: string; secret_hash: string; registered_at: string; last_seen_at: string } | null;
 		expect(row).not.toBeNull();
 		expect(row!.secret_hash).toMatch(/^[a-f0-9]{64}$/);
 		expect(row!.secret_hash).not.toBe(identity.register("session-a").secret);

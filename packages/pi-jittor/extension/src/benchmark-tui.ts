@@ -1,5 +1,3 @@
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import {
 	BENCHMARK_TUI_MAX_CANDIDATES,
 	BENCHMARK_TUI_MAX_PROVENANCE_PER_CANDIDATE,
@@ -15,6 +13,8 @@ import {
 	type RankedModel,
 	type UtilityComponentName,
 } from "@danypops/jittor";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { sessionSecretField } from "./session-identity.ts";
 
 export interface BenchmarkPanelClient {
@@ -31,13 +31,18 @@ type BenchmarkPanelAction = "refresh" | "close";
 const COMPONENT_LABELS: Record<UtilityComponentName, string> = { quality: "Q", cost: "$", latency: "L", context: "C", reliability: "R" };
 
 function componentText(item: RankedModel): string {
-	return item.components.map((component) => `${COMPONENT_LABELS[component.name]} ${component.score === null ? "?" : component.score.toFixed(3)}`).join(" · ");
+	return item.components
+		.map((component) => `${COMPONENT_LABELS[component.name]} ${component.score === null ? "?" : component.score.toFixed(3)}`)
+		.join(" · ");
 }
 
 function candidateLines(item: RankedModel, index: number, currentIdentity: string): string[] {
 	const current = item.identity.startsWith(`${currentIdentity}:`);
 	const localSamples = item.components.find((component) => component.name === "reliability")?.evidenceCount ?? 0;
-	const provenance = item.provenance.slice(0, BENCHMARK_TUI_MAX_PROVENANCE_PER_CANDIDATE).map((source) => `${source.sourceId}@${source.revision} ${source.freshness}`).join(" · ");
+	const provenance = item.provenance
+		.slice(0, BENCHMARK_TUI_MAX_PROVENANCE_PER_CANDIDATE)
+		.map((source) => `${source.sourceId}@${source.revision} ${source.freshness}`)
+		.join(" · ");
 	return [
 		` ${index + 1}. ${item.identity}${index === 0 ? "  recommended" : ""}${current ? "  current" : ""}`,
 		`    utility ${item.utility === null ? "?" : item.utility.toFixed(3)} · confidence ${(item.confidence * 100).toFixed(0)}% · ${componentText(item)}`,
@@ -50,13 +55,18 @@ export function renderBenchmarkView(result: ModelRankingResult, currentIdentity:
 	const shown = result.ranked.slice(0, BENCHMARK_TUI_MAX_CANDIDATES);
 	const currentIndex = result.ranked.findIndex((item) => item.identity.startsWith(`${currentIdentity}:`));
 	const recommended = result.ranked[0];
-	const reason = recommended && currentIndex > 0
-		? `Recommendation differs from current: ${recommended.identity} ranks #1; current ranks #${currentIndex + 1}.`
-		: recommended && currentIndex === 0 ? "Current model is the top recommendation." : "Current model is outside the ranked candidates.";
+	const reason =
+		recommended && currentIndex > 0
+			? `Recommendation differs from current: ${recommended.identity} ranks #1; current ranks #${currentIndex + 1}.`
+			: recommended && currentIndex === 0
+				? "Current model is the top recommendation."
+				: "Current model is outside the ranked candidates.";
 	const lines = [
 		theme.fg("borderMuted", "─".repeat(safeWidth)),
 		theme.bold("Jittor Benchmark Recommendations"),
-		result.scopeAuthority === "exact-session" ? "Scope: exact session" : "Scope: available models · ADVISORY (exact session scope unavailable)",
+		result.scopeAuthority === "exact-session"
+			? "Scope: exact session"
+			: "Scope: available models · ADVISORY (exact session scope unavailable)",
 		`Domain: ${result.domain} · Type: ${result.type} · evidence ${result.completeness}`,
 		reason,
 		...shown.flatMap((item, index) => candidateLines(item, index, currentIdentity)),
@@ -78,7 +88,7 @@ export async function showBenchmarkPanel(
 ): Promise<void> {
 	for (;;) {
 		const session_id = ctx.sessionManager.getSessionId();
-		const result = await client.call("models.rank", {
+		const result = (await client.call("models.rank", {
 			candidates,
 			session_id,
 			...sessionSecretField(session_id),
@@ -94,14 +104,19 @@ export async function showBenchmarkPanel(
 				reliability: MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
 			},
 			sourceIds: ["openrouter-models", "lmarena-hf", "artificial-analysis-direct", "openrouter-design-arena"],
-		}) as ModelRankingResult;
+		})) as ModelRankingResult;
 		if (ctx.mode !== "tui") {
-			ctx.ui.notify(renderBenchmarkView(result, currentIdentity, 100, { fg: (_color, text) => text, bold: (text) => text }).join("\n"), "info");
+			ctx.ui.notify(
+				renderBenchmarkView(result, currentIdentity, 100, { fg: (_color, text) => text, bold: (text) => text }).join("\n"),
+				"info",
+			);
 			return;
 		}
 		const action = await ctx.ui.custom<BenchmarkPanelAction>((_tui, theme, _keybindings, done) => ({
 			invalidate() {},
-			render(width: number): string[] { return renderBenchmarkView(result, currentIdentity, width, theme); },
+			render(width: number): string[] {
+				return renderBenchmarkView(result, currentIdentity, width, theme);
+			},
 			handleInput(data: string): void {
 				if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) done("close");
 				else if (data === "r") done("refresh");

@@ -1,6 +1,6 @@
 import type { SessionIdentity } from "../session-identity-service.ts";
-import type { OperationHandlerMap } from "./types.ts";
 import { requiredString, routerSessionSecret } from "./session-scope.ts";
+import type { OperationHandlerMap } from "./types.ts";
 
 /** session.register and session.release -- the only two operations that mutate SessionIdentity itself, distinct from the router mutations it later authorizes. */
 export function sessionIdentityOperations(sessionIdentity: SessionIdentity | undefined): OperationHandlerMap {

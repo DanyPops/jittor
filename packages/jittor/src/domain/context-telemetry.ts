@@ -8,7 +8,10 @@ import {
 } from "../constants.ts";
 import type { MetricObservation, StoredMetricObservation } from "./metric.ts";
 
-interface PayloadSize { characters: number; bytes: number }
+interface PayloadSize {
+	characters: number;
+	bytes: number;
+}
 
 export interface PapyrusContextInjection {
 	schema: typeof PAPYRUS_CONTEXT_INJECTION_SCHEMA;
@@ -26,7 +29,21 @@ export interface PapyrusContextInjection {
 	unchanged: boolean;
 }
 
-const TOP_LEVEL_FIELDS = new Set(["schema", "observedAt", "sequence", "producerId", "before", "rules", "tasks", "injected", "after", "estimatedTokens", "share", "fingerprint", "unchanged"]);
+const TOP_LEVEL_FIELDS = new Set([
+	"schema",
+	"observedAt",
+	"sequence",
+	"producerId",
+	"before",
+	"rules",
+	"tasks",
+	"injected",
+	"after",
+	"estimatedTokens",
+	"share",
+	"fingerprint",
+	"unchanged",
+]);
 const SIZE_FIELDS = new Set(["characters", "bytes"]);
 const RULE_SIZE_FIELDS = new Set(["characters", "bytes", "count"]);
 
@@ -38,44 +55,46 @@ function record(value: unknown, name: string, fields: Set<string>): Record<strin
 }
 
 function integer(value: unknown, name: string, maximum = Number.MAX_SAFE_INTEGER): number {
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum) throw new Error(`${name} must be a bounded non-negative integer`);
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > maximum)
+		throw new Error(`${name} must be a bounded non-negative integer`);
 	return value;
 }
 
 function size(value: unknown, name: string, fields = SIZE_FIELDS): PayloadSize {
 	const input = record(value, name, fields);
 	return {
-		characters: integer(input["characters"], `${name}.characters`, CONTEXT_OBSERVATION_MAX_CHARACTERS),
-		bytes: integer(input["bytes"], `${name}.bytes`, CONTEXT_OBSERVATION_MAX_CHARACTERS * 4),
+		characters: integer(input.characters, `${name}.characters`, CONTEXT_OBSERVATION_MAX_CHARACTERS),
+		bytes: integer(input.bytes, `${name}.bytes`, CONTEXT_OBSERVATION_MAX_CHARACTERS * 4),
 	};
 }
 
 export function validatePapyrusContextInjection(value: unknown, now = Date.now()): PapyrusContextInjection {
 	const input = record(value, "context injection", TOP_LEVEL_FIELDS);
-	if (input["schema"] !== PAPYRUS_CONTEXT_INJECTION_SCHEMA) throw new Error("context injection schema is not supported");
-	const observedAt = integer(input["observedAt"], "observedAt");
+	if (input.schema !== PAPYRUS_CONTEXT_INJECTION_SCHEMA) throw new Error("context injection schema is not supported");
+	const observedAt = integer(input.observedAt, "observedAt");
 	if (Math.abs(now - observedAt) > CONTEXT_OBSERVATION_MAX_AGE_MS) throw new Error("context injection observation is stale");
-	const producerId = input["producerId"];
-	if (typeof producerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(producerId)) throw new Error("producerId must be a UUID");
-	const before = size(input["before"], "before");
-	const rulesInput = record(input["rules"], "rules", RULE_SIZE_FIELDS);
-	const rules = { ...size(rulesInput, "rules", RULE_SIZE_FIELDS), count: integer(rulesInput["count"], "rules.count") };
-	const tasks = size(input["tasks"], "tasks");
-	const injected = size(input["injected"], "injected");
-	const after = size(input["after"], "after");
+	const producerId = input.producerId;
+	if (typeof producerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(producerId))
+		throw new Error("producerId must be a UUID");
+	const before = size(input.before, "before");
+	const rulesInput = record(input.rules, "rules", RULE_SIZE_FIELDS);
+	const rules = { ...size(rulesInput, "rules", RULE_SIZE_FIELDS), count: integer(rulesInput.count, "rules.count") };
+	const tasks = size(input.tasks, "tasks");
+	const injected = size(input.injected, "injected");
+	const after = size(input.after, "after");
 	if (injected.characters !== rules.characters + tasks.characters || after.characters !== before.characters + injected.characters) {
 		throw new Error("context injection sizes are inconsistent");
 	}
-	const estimatedTokens = integer(input["estimatedTokens"], "estimatedTokens", CONTEXT_OBSERVATION_MAX_CHARACTERS);
-	const share = input["share"];
+	const estimatedTokens = integer(input.estimatedTokens, "estimatedTokens", CONTEXT_OBSERVATION_MAX_CHARACTERS);
+	const share = input.share;
 	if (typeof share !== "number" || !Number.isFinite(share) || share < 0 || share > 1) throw new Error("share must be a ratio");
-	const fingerprint = input["fingerprint"];
+	const fingerprint = input.fingerprint;
 	if (typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error("fingerprint must be a SHA-256 hex digest");
-	if (typeof input["unchanged"] !== "boolean") throw new Error("unchanged must be boolean");
+	if (typeof input.unchanged !== "boolean") throw new Error("unchanged must be boolean");
 	return {
 		schema: PAPYRUS_CONTEXT_INJECTION_SCHEMA,
 		observedAt,
-		sequence: integer(input["sequence"], "sequence"),
+		sequence: integer(input.sequence, "sequence"),
 		producerId,
 		before,
 		rules,
@@ -85,7 +104,7 @@ export function validatePapyrusContextInjection(value: unknown, now = Date.now()
 		estimatedTokens,
 		share,
 		fingerprint,
-		unchanged: input["unchanged"],
+		unchanged: input.unchanged,
 	};
 }
 
@@ -121,7 +140,9 @@ export interface CompactionStart {
 	contextTokens?: number;
 }
 
-interface OpenCompaction extends CompactionStart { startedAt: number }
+interface OpenCompaction extends CompactionStart {
+	startedAt: number;
+}
 interface UsageCounters {
 	turns: number;
 	injectedCharacters: number;
@@ -140,8 +161,12 @@ export class CompactionTelemetry {
 	private counters = emptyCounters();
 	private previousCompletedAt: number | undefined;
 
-	hasOpenCompaction(): boolean { return this.open !== undefined; }
-	observeTurn(): void { this.counters.turns += 1; }
+	hasOpenCompaction(): boolean {
+		return this.open !== undefined;
+	}
+	observeTurn(): void {
+		this.counters.turns += 1;
+	}
 	observeInjection(characters: number, estimatedTokens: number): void {
 		this.counters.injectedCharacters += Math.max(0, characters);
 		this.counters.estimatedInjectedTokens += Math.max(0, estimatedTokens);
@@ -154,26 +179,68 @@ export class CompactionTelemetry {
 
 	begin(input: CompactionStart, now = Date.now()): MetricObservation {
 		this.open = { ...input, startedAt: now };
-		return { source: "pi-context", scope: "compaction", metric: "compaction-started", value: 1, unit: "count", observedAt: now, attributes: { ...input } };
+		return {
+			source: "pi-context",
+			scope: "compaction",
+			metric: "compaction-started",
+			value: 1,
+			unit: "count",
+			observedAt: now,
+			attributes: { ...input },
+		};
 	}
 
 	complete(input: Pick<CompactionStart, "reason" | "willRetry">, now = Date.now()): MetricObservation {
-		if (!this.open) return { source: "pi-context", scope: "compaction", metric: "compaction-unmatched", value: 1, unit: "count", observedAt: now, attributes: { ...input } };
+		if (!this.open)
+			return {
+				source: "pi-context",
+				scope: "compaction",
+				metric: "compaction-unmatched",
+				value: 1,
+				unit: "count",
+				observedAt: now,
+				attributes: { ...input },
+			};
 		const open = this.open;
 		this.open = undefined;
 		const attributes = this.intervalAttributes(open, now);
 		this.previousCompletedAt = now;
 		this.counters = emptyCounters();
-		return { source: "pi-context", scope: "compaction", metric: "compaction-duration", value: Math.max(0, now - open.startedAt), unit: "milliseconds", observedAt: now, attributes: { ...attributes, reason: input.reason, willRetry: input.willRetry } };
+		return {
+			source: "pi-context",
+			scope: "compaction",
+			metric: "compaction-duration",
+			value: Math.max(0, now - open.startedAt),
+			unit: "milliseconds",
+			observedAt: now,
+			attributes: { ...attributes, reason: input.reason, willRetry: input.willRetry },
+		};
 	}
 
 	abort(now = Date.now(), abortReason = "aborted"): MetricObservation {
 		const open = this.open;
 		this.open = undefined;
-		if (!open) return { source: "pi-context", scope: "compaction", metric: "compaction-unmatched", value: 1, unit: "count", observedAt: now, attributes: { abortReason } };
+		if (!open)
+			return {
+				source: "pi-context",
+				scope: "compaction",
+				metric: "compaction-unmatched",
+				value: 1,
+				unit: "count",
+				observedAt: now,
+				attributes: { abortReason },
+			};
 		const attributes = this.intervalAttributes(open, now);
 		this.counters = emptyCounters();
-		return { source: "pi-context", scope: "compaction", metric: "compaction-aborted", value: 1, unit: "count", observedAt: now, attributes: { ...attributes, reason: open.reason, abortReason, durationMs: Math.max(0, now - open.startedAt) } };
+		return {
+			source: "pi-context",
+			scope: "compaction",
+			metric: "compaction-aborted",
+			value: 1,
+			unit: "count",
+			observedAt: now,
+			attributes: { ...attributes, reason: open.reason, abortReason, durationMs: Math.max(0, now - open.startedAt) },
+		};
 	}
 
 	private intervalAttributes(open: OpenCompaction, now: number): Record<string, unknown> {
@@ -226,8 +293,12 @@ function numericAttribute(row: StoredMetricObservation, key: string): number | n
 	const value = row.attributes[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
-function average(values: number[]): number | null { return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length; }
-function sum(values: number[]): number { return values.reduce((total, value) => total + value, 0); }
+function average(values: number[]): number | null {
+	return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+function sum(values: number[]): number {
+	return values.reduce((total, value) => total + value, 0);
+}
 function percentile(values: number[], percentage: number): number | null {
 	if (values.length === 0) return null;
 	const sorted = [...values].sort((left, right) => left - right);
@@ -239,14 +310,14 @@ export function assessContextTelemetry(
 	compactions: StoredMetricObservation[],
 	options: { since: number; until: number; truncated: boolean },
 ): ContextAssessment {
-	const injectionValues = injections.flatMap((row) => typeof row.value === "number" ? [row.value] : []);
+	const injectionValues = injections.flatMap((row) => (typeof row.value === "number" ? [row.value] : []));
 	const shares = injections.flatMap((row) => numericAttribute(row, "share") ?? []);
-	const unchanged = injections.filter((row) => row.attributes["unchanged"] === true).length;
+	const unchanged = injections.filter((row) => row.attributes.unchanged === true).length;
 	const completed = compactions.filter((row) => row.metric === "compaction-duration" && typeof row.value === "number");
 	const aborted = compactions.filter((row) => row.metric === "compaction-aborted");
 	const reasons = { manual: 0, threshold: 0, overflow: 0 };
 	for (const row of completed) {
-		const reason = row.attributes["reason"];
+		const reason = row.attributes.reason;
 		if (reason === "manual" || reason === "threshold" || reason === "overflow") reasons[reason] += 1;
 	}
 	const windowMs = Math.max(0, options.until - options.since);
@@ -302,7 +373,7 @@ export function estimateCompactionDuration(compactions: StoredMetricObservation[
 		.filter((row) => row.source === "pi-context" && row.scope === "compaction" && row.metric === "compaction-duration")
 		.sort((left, right) => right.observedAt - left.observedAt || right.id - left.id)
 		.slice(0, COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES)
-		.flatMap((row) => typeof row.value === "number" && Number.isFinite(row.value) && row.value >= 0 ? [row.value] : []);
+		.flatMap((row) => (typeof row.value === "number" && Number.isFinite(row.value) && row.value >= 0 ? [row.value] : []));
 	if (durations.length < COMPACTION_DURATION_ESTIMATE_MIN_SAMPLES) {
 		return { ms: null, confidence: "cold-start", sampleSize: durations.length, observedAt: now };
 	}

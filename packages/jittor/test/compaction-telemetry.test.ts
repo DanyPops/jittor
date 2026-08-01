@@ -1,10 +1,19 @@
 import { describe, expect, it } from "bun:test";
-import { CompactionTelemetry, estimateCompactionDuration } from "../src/domain/context-telemetry.ts";
 import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES } from "../src/constants.ts";
+import { CompactionTelemetry, estimateCompactionDuration } from "../src/domain/context-telemetry.ts";
 import type { StoredMetricObservation } from "../src/domain/metric.ts";
 
 function durationRow(value: number, observedAt: number, id: number, attributes: Record<string, unknown> = {}): StoredMetricObservation {
-	return { source: "pi-context", scope: "compaction", metric: "compaction-duration", value, unit: "milliseconds", observedAt, id, attributes };
+	return {
+		source: "pi-context",
+		scope: "compaction",
+		metric: "compaction-duration",
+		value,
+		unit: "milliseconds",
+		observedAt,
+		id,
+		attributes,
+	};
 }
 
 describe("Pi compaction telemetry", () => {
@@ -19,15 +28,22 @@ describe("Pi compaction telemetry", () => {
 		const completed = telemetry.complete({ reason: "threshold", willRetry: false }, 2_500);
 		expect(completed).toMatchObject({ metric: "compaction-duration", value: 1_500, unit: "milliseconds" });
 		expect(completed.attributes).toMatchObject({
-			reason: "threshold", willRetry: false, turnsSincePrevious: 2,
-			injectedCharactersSincePrevious: 400, estimatedInjectedTokensSincePrevious: 100,
-			providerTokensSincePrevious: 2_500, cacheReadTokensSincePrevious: 1_000,
+			reason: "threshold",
+			willRetry: false,
+			turnsSincePrevious: 2,
+			injectedCharactersSincePrevious: 400,
+			estimatedInjectedTokensSincePrevious: 100,
+			providerTokensSincePrevious: 2_500,
+			cacheReadTokensSincePrevious: 1_000,
 		});
 
 		telemetry.begin({ reason: "manual", willRetry: false }, 4_000);
 		expect(telemetry.complete({ reason: "manual", willRetry: false }, 4_500).attributes?.reason).toBe("manual");
 		telemetry.begin({ reason: "overflow", willRetry: true }, 5_000);
-		expect(telemetry.complete({ reason: "overflow", willRetry: true }, 5_250).attributes).toMatchObject({ reason: "overflow", willRetry: true });
+		expect(telemetry.complete({ reason: "overflow", willRetry: true }, 5_250).attributes).toMatchObject({
+			reason: "overflow",
+			willRetry: true,
+		});
 	});
 
 	it("keeps aborted and unfinished compactions distinct from success", () => {
@@ -69,10 +85,46 @@ describe("Compaction duration estimate", () => {
 			durationRow(4_000, 100, 1),
 			durationRow(4_100, 200, 2),
 			durationRow(3_900, 300, 3),
-			{ source: "pi-context", scope: "compaction", metric: "compaction-duration", value: null, unit: "milliseconds", observedAt: 400, id: 4, attributes: {} },
-			{ source: "pi-context", scope: "compaction", metric: "compaction-duration", value: -500, unit: "milliseconds", observedAt: 500, id: 5, attributes: {} },
-			{ source: "pi-context", scope: "compaction", metric: "compaction-aborted", value: 1, unit: "count", observedAt: 600, id: 6, attributes: {} },
-			{ source: "openrouter", scope: "compaction", metric: "compaction-duration", value: 4_500, unit: "milliseconds", observedAt: 700, id: 7, attributes: {} },
+			{
+				source: "pi-context",
+				scope: "compaction",
+				metric: "compaction-duration",
+				value: null,
+				unit: "milliseconds",
+				observedAt: 400,
+				id: 4,
+				attributes: {},
+			},
+			{
+				source: "pi-context",
+				scope: "compaction",
+				metric: "compaction-duration",
+				value: -500,
+				unit: "milliseconds",
+				observedAt: 500,
+				id: 5,
+				attributes: {},
+			},
+			{
+				source: "pi-context",
+				scope: "compaction",
+				metric: "compaction-aborted",
+				value: 1,
+				unit: "count",
+				observedAt: 600,
+				id: 6,
+				attributes: {},
+			},
+			{
+				source: "openrouter",
+				scope: "compaction",
+				metric: "compaction-duration",
+				value: 4_500,
+				unit: "milliseconds",
+				observedAt: 700,
+				id: 7,
+				attributes: {},
+			},
 		];
 		expect(() => estimateCompactionDuration(rows, 1_000)).not.toThrow();
 		const estimate = estimateCompactionDuration(rows, 1_000);

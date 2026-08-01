@@ -101,10 +101,10 @@ function parseWindow(value: unknown, name: string): CodexWindow | null {
 	const window = optionalRecord(value, name);
 	if (!window) return null;
 	return {
-		usedPercent: percent(window["used_percent"], name),
-		windowSeconds: integer(window["limit_window_seconds"], `${name} window seconds`),
-		resetAfterSeconds: integer(window["reset_after_seconds"], `${name} reset after seconds`),
-		resetsAt: integer(window["reset_at"], `${name} reset at`),
+		usedPercent: percent(window.used_percent, name),
+		windowSeconds: integer(window.limit_window_seconds, `${name} window seconds`),
+		resetAfterSeconds: integer(window.reset_after_seconds, `${name} reset after seconds`),
+		resetsAt: integer(window.reset_at, `${name} reset at`),
 	};
 }
 
@@ -112,9 +112,9 @@ function parseCredits(value: unknown): CodexCredits | null {
 	const credits = optionalRecord(value, "credits");
 	if (!credits) return null;
 	return {
-		hasCredits: boolean(credits["has_credits"], "credits has_credits"),
-		unlimited: boolean(credits["unlimited"], "credits unlimited"),
-		balance: optionalString(credits["balance"], "credits balance"),
+		hasCredits: boolean(credits.has_credits, "credits has_credits"),
+		unlimited: boolean(credits.unlimited, "credits unlimited"),
+		balance: optionalString(credits.balance, "credits balance"),
 	};
 }
 
@@ -132,10 +132,10 @@ function parseRateLimit(
 	const snapshot: CodexRateLimitSnapshot = {
 		limitId,
 		limitName,
-		allowed: boolean(rateLimit["allowed"], `${limitId} allowed`),
-		limitReached: boolean(rateLimit["limit_reached"], `${limitId} limit_reached`),
-		primary: parseWindow(rateLimit["primary_window"], `${limitId} primary`),
-		secondary: parseWindow(rateLimit["secondary_window"], `${limitId} secondary`),
+		allowed: boolean(rateLimit.allowed, `${limitId} allowed`),
+		limitReached: boolean(rateLimit.limit_reached, `${limitId} limit_reached`),
+		primary: parseWindow(rateLimit.primary_window, `${limitId} primary`),
+		secondary: parseWindow(rateLimit.secondary_window, `${limitId} secondary`),
 		credits,
 		observedAt,
 		metrics: [],
@@ -158,68 +158,73 @@ function metric(
 function windowMetrics(snapshot: CodexRateLimitSnapshot, name: "primary" | "secondary", window: CodexWindow | null): MetricObservation[] {
 	if (!window) return [];
 	const scope = snapshot.limitId === "codex" ? `codex:${name}` : `${snapshot.limitId}:${name}`;
-	return [metric(scope, "used-fraction", window.usedPercent / 100, "ratio", snapshot.observedAt, {
-		limitId: snapshot.limitId,
-		limitName: snapshot.limitName,
-		windowSeconds: window.windowSeconds,
-		resetAfterSeconds: window.resetAfterSeconds,
-		resetsAt: window.resetsAt,
-	})];
+	return [
+		metric(scope, "used-fraction", window.usedPercent / 100, "ratio", snapshot.observedAt, {
+			limitId: snapshot.limitId,
+			limitName: snapshot.limitName,
+			windowSeconds: window.windowSeconds,
+			resetAfterSeconds: window.resetAfterSeconds,
+			resetsAt: window.resetsAt,
+		}),
+	];
 }
 
 export function rateLimitMetrics(snapshot: CodexRateLimitSnapshot): MetricObservation[] {
-	const metrics = [
-		...windowMetrics(snapshot, "primary", snapshot.primary),
-		...windowMetrics(snapshot, "secondary", snapshot.secondary),
-	];
+	const metrics = [...windowMetrics(snapshot, "primary", snapshot.primary), ...windowMetrics(snapshot, "secondary", snapshot.secondary)];
 	if (snapshot.allowed !== null) metrics.push(metric(snapshot.limitId, "allowed", snapshot.allowed ? 1 : 0, "count", snapshot.observedAt));
-	if (snapshot.limitReached !== null) metrics.push(metric(snapshot.limitId, "limit-reached", snapshot.limitReached ? 1 : 0, "count", snapshot.observedAt));
+	if (snapshot.limitReached !== null)
+		metrics.push(metric(snapshot.limitId, "limit-reached", snapshot.limitReached ? 1 : 0, "count", snapshot.observedAt));
 	return metrics;
 }
 
 function parseSpendControl(value: unknown): CodexSpendControl | null {
 	const spend = optionalRecord(value, "spend control");
 	if (!spend) return null;
-	const limit = optionalRecord(spend["individual_limit"], "spend individual limit");
+	const limit = optionalRecord(spend.individual_limit, "spend individual limit");
 	return {
-		reached: boolean(spend["reached"], "spend control reached"),
-		individualLimit: limit ? {
-			source: optionalString(limit["source"], "spend source"),
-			limit: string(limit["limit"], "spend limit"),
-			used: string(limit["used"], "spend used"),
-			remaining: string(limit["remaining"], "spend remaining"),
-			usedPercent: percent(limit["used_percent"], "spend"),
-			remainingPercent: percent(limit["remaining_percent"], "spend remaining"),
-			resetAfterSeconds: integer(limit["reset_after_seconds"], "spend reset after"),
-			resetsAt: integer(limit["reset_at"], "spend reset at"),
-		} : null,
+		reached: boolean(spend.reached, "spend control reached"),
+		individualLimit: limit
+			? {
+					source: optionalString(limit.source, "spend source"),
+					limit: string(limit.limit, "spend limit"),
+					used: string(limit.used, "spend used"),
+					remaining: string(limit.remaining, "spend remaining"),
+					usedPercent: percent(limit.used_percent, "spend"),
+					remainingPercent: percent(limit.remaining_percent, "spend remaining"),
+					resetAfterSeconds: integer(limit.reset_after_seconds, "spend reset after"),
+					resetsAt: integer(limit.reset_at, "spend reset at"),
+				}
+			: null,
 	};
 }
 
 export function parseCodexUsage(value: unknown, observedAt = Date.now()): CodexUsageSnapshot {
 	const payload = record(value, "payload");
-	const planType = string(payload["plan_type"], "plan_type");
-	const credits = parseCredits(payload["credits"]);
-	const defaultLimit = parseRateLimit(payload["rate_limit"], "codex", null, credits, observedAt);
-	const additionalValue = payload["additional_rate_limits"];
-	if (additionalValue !== undefined && additionalValue !== null && !Array.isArray(additionalValue)) schema("additional_rate_limits must be an array");
-	const additionalLimits = (additionalValue as unknown[] | null | undefined ?? []).map((entry) => {
+	const planType = string(payload.plan_type, "plan_type");
+	const credits = parseCredits(payload.credits);
+	const defaultLimit = parseRateLimit(payload.rate_limit, "codex", null, credits, observedAt);
+	const additionalValue = payload.additional_rate_limits;
+	if (additionalValue !== undefined && additionalValue !== null && !Array.isArray(additionalValue))
+		schema("additional_rate_limits must be an array");
+	const additionalLimits = ((additionalValue as unknown[] | null | undefined) ?? []).map((entry) => {
 		const additional = record(entry, "additional rate limit");
-		const limitName = string(additional["limit_name"], "additional limit_name");
-		const limitId = string(additional["metered_feature"], "additional metered_feature").trim().toLowerCase().replaceAll("-", "_");
-		return parseRateLimit(additional["rate_limit"], limitId, limitName, credits, observedAt);
+		const limitName = string(additional.limit_name, "additional limit_name");
+		const limitId = string(additional.metered_feature, "additional metered_feature").trim().toLowerCase().replaceAll("-", "_");
+		return parseRateLimit(additional.rate_limit, limitId, limitName, credits, observedAt);
 	});
-	const reached = optionalRecord(payload["rate_limit_reached_type"], "rate limit reached type");
-	const spendControl = parseSpendControl(payload["spend_control"]);
+	const reached = optionalRecord(payload.rate_limit_reached_type, "rate limit reached type");
+	const spendControl = parseSpendControl(payload.spend_control);
 	const metrics = [...defaultLimit.metrics, ...additionalLimits.flatMap((limit) => limit.metrics)];
 	if (credits?.balance !== null && credits?.balance !== undefined) {
 		const balance = Number(credits.balance);
 		if (Number.isFinite(balance)) metrics.push(metric("codex:credits", "balance", balance, "count", observedAt));
 	}
 	if (spendControl?.individualLimit) {
-		metrics.push(metric("codex:spend-control", "used-fraction", spendControl.individualLimit.usedPercent / 100, "ratio", observedAt, {
-			resetsAt: spendControl.individualLimit.resetsAt,
-		}));
+		metrics.push(
+			metric("codex:spend-control", "used-fraction", spendControl.individualLimit.usedPercent / 100, "ratio", observedAt, {
+				resetsAt: spendControl.individualLimit.resetsAt,
+			}),
+		);
 	}
 	return {
 		stability: "experimental",
@@ -228,7 +233,7 @@ export function parseCodexUsage(value: unknown, observedAt = Date.now()): CodexU
 		additionalLimits,
 		credits,
 		spendControl,
-		rateLimitReachedType: reached ? string(reached["type"], "rate limit reached type") : null,
+		rateLimitReachedType: reached ? string(reached.type, "rate limit reached type") : null,
 		observedAt,
 		metrics,
 	};
@@ -238,7 +243,8 @@ function headerNumber(headers: Headers, name: string, integerOnly = false): numb
 	const raw = headers.get(name);
 	if (raw === null) return null;
 	const value = Number(raw);
-	if (!Number.isFinite(value) || (integerOnly && !Number.isSafeInteger(value))) throw new Error(`Codex experimental header schema changed: ${name}`);
+	if (!Number.isFinite(value) || (integerOnly && !Number.isSafeInteger(value)))
+		throw new Error(`Codex experimental header schema changed: ${name}`);
 	return value;
 }
 
@@ -282,7 +288,9 @@ export function parseCodexRateLimitHeaders(headers: Headers, observedAt = Date.n
 	}
 	const credits = parseHeaderCredits(headers);
 	const snapshots: CodexRateLimitSnapshot[] = [];
-	for (const prefix of [...prefixes].sort((left, right) => left === "x-codex" ? -1 : right === "x-codex" ? 1 : left.localeCompare(right))) {
+	for (const prefix of [...prefixes].sort((left, right) =>
+		left === "x-codex" ? -1 : right === "x-codex" ? 1 : left.localeCompare(right),
+	)) {
 		const normalized = prefix.slice(2).replaceAll("-", "_");
 		const primary = parseHeaderWindow(headers, prefix, "primary");
 		const secondary = parseHeaderWindow(headers, prefix, "secondary");

@@ -1,13 +1,10 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { ProgressBar } from "malevich-tui-components";
 import {
 	FOOTER_BAR_MAX_WIDTH,
 	FOOTER_BAR_MIN_WIDTH,
+	FOOTER_COMPACTION_BLINK_HALF_PERIOD_MS,
 	FOOTER_CONTEXT_ACCENT_FRACTION,
 	FOOTER_CONTEXT_ERROR_FRACTION,
-	FOOTER_COMPACTION_BLINK_HALF_PERIOD_MS,
 	FOOTER_CONTEXT_WARNING_FRACTION,
 	FOOTER_WIDE_TERMINAL_WIDTH,
 	MILLISECONDS_PER_DAY,
@@ -15,6 +12,9 @@ import {
 	MILLISECONDS_PER_MINUTE,
 	TELEMETRY_STALE_AFTER_MS,
 } from "@danypops/jittor";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { ProgressBar } from "malevich-tui-components";
 
 type FooterColor = "accent" | "dim" | "warning" | "error";
 
@@ -48,19 +48,21 @@ interface FooterContext {
 }
 
 /** A bounded quota is explicitly remaining; unbounded values never receive a fabricated bar. */
-export type ProviderBudget = {
-	kind: "bounded";
-	label: string;
-	remainingFraction: number;
-	observedAt?: number;
-	resetsAt?: number;
-	resetText?: string;
-} | {
-	kind: "unbounded";
-	label: string;
-	valueText: string;
-	observedAt?: number;
-};
+export type ProviderBudget =
+	| {
+			kind: "bounded";
+			label: string;
+			remainingFraction: number;
+			observedAt?: number;
+			resetsAt?: number;
+			resetText?: string;
+	  }
+	| {
+			kind: "unbounded";
+			label: string;
+			valueText: string;
+			observedAt?: number;
+	  };
 
 export interface CompactionProgress {
 	startedAt: number;
@@ -92,17 +94,25 @@ function footerCwd(cwd: string, home: string | undefined): string {
 	const resolvedCwd = resolve(cwd);
 	const resolvedHome = resolve(home);
 	const relativeToHome = relative(resolvedHome, resolvedCwd);
-	const inside = relativeToHome === "" || (relativeToHome !== ".." && !relativeToHome.startsWith(`..${sep}`) && !isAbsolute(relativeToHome));
+	const inside =
+		relativeToHome === "" || (relativeToHome !== ".." && !relativeToHome.startsWith(`..${sep}`) && !isAbsolute(relativeToHome));
 	if (!inside) return cwd;
 	return relativeToHome === "" ? "~" : `~${sep}${relativeToHome}`;
 }
 
 function sanitize(value: string): string {
-	return value.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim();
+	return value
+		.replace(/[\r\n\t]/g, " ")
+		.replace(/ +/g, " ")
+		.trim();
 }
 
 function usageTotals(context: FooterContext): UsageTotals {
-	let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
+	let input = 0,
+		output = 0,
+		cacheRead = 0,
+		cacheWrite = 0,
+		cost = 0;
 	for (const entry of context.sessionManager.getEntries()) {
 		if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
 		const usage = entry.message.usage;
@@ -113,7 +123,7 @@ function usageTotals(context: FooterContext): UsageTotals {
 		cost += usage?.cost?.total ?? 0;
 	}
 	const prompt = input + cacheRead + cacheWrite;
-	return { input, output, cacheRead, cacheWrite, cost, ...(prompt > 0 ? { cacheHit: cacheRead / prompt * 100 } : {}) };
+	return { input, output, cacheRead, cacheWrite, cost, ...(prompt > 0 ? { cacheHit: (cacheRead / prompt) * 100 } : {}) };
 }
 
 function barWidth(width: number): number {
@@ -201,7 +211,13 @@ function resetLabel(resetsAt: number | undefined, now: number): string | undefin
  * the segment is omitted entirely rather than showing a placeholder that could never resolve.
  * `null` means not known yet but might resolve, which still earns the `?` placeholder.
  */
-function budgetSegment(budget: ProviderBudget | null | undefined, theme: FooterTheme, width: number, compact: boolean, now: number): string | undefined {
+function budgetSegment(
+	budget: ProviderBudget | null | undefined,
+	theme: FooterTheme,
+	width: number,
+	compact: boolean,
+	now: number,
+): string | undefined {
 	if (budget === undefined) return undefined;
 	const w = barWidth(width);
 	if (!budget) return `budget ${theme.fg("dim", progressBar(null, w))} ?`;
@@ -210,8 +226,8 @@ function budgetSegment(budget: ProviderBudget | null | undefined, theme: FooterT
 	if (budget.kind === "unbounded") return `${budget.label} ${budget.valueText}${staleText}`;
 	const remaining = Math.min(1, Math.max(0, budget.remainingFraction));
 	const bar = theme.fg(fillColor(1 - remaining), progressBar(remaining, w));
-	const value = `${(compact ? Math.round(remaining * 100) : (remaining * 100).toFixed(1))}% left`;
-	const reset = compact ? undefined : resetLabel(budget.resetsAt, now) ?? budget.resetText;
+	const value = `${compact ? Math.round(remaining * 100) : (remaining * 100).toFixed(1)}% left`;
+	const reset = compact ? undefined : (resetLabel(budget.resetsAt, now) ?? budget.resetText);
 	return `${budget.label} ${bar} ${value}${reset ? ` · ${reset}` : ""}${staleText}`;
 }
 
@@ -238,7 +254,12 @@ function repositorySegment(context: FooterContext, footerData: FooterData, theme
 	return theme.fg("dim", cwd);
 }
 
-function modelSegments(context: FooterContext, footerData: FooterData, theme: FooterTheme, thinkingLevel: string): { full: string; compact: string } {
+function modelSegments(
+	context: FooterContext,
+	footerData: FooterData,
+	theme: FooterTheme,
+	thinkingLevel: string,
+): { full: string; compact: string } {
 	const model = context.model;
 	const modelName = theme.bold(model?.id ?? "no-model");
 	const provider = model && footerData.getAvailableProviderCount() > 1 ? `(${model.provider}) ` : "";
@@ -312,7 +333,16 @@ export function installIntegratedFooter(ctx: ExtensionContext, state: Integrated
 		return {
 			invalidate() {},
 			render(width: number): string[] {
-				return renderFooterLines(ctx as unknown as FooterContext, footerData, theme, state.providerBudget, getThinkingLevel(), width, Date.now(), state.compaction);
+				return renderFooterLines(
+					ctx as unknown as FooterContext,
+					footerData,
+					theme,
+					state.providerBudget,
+					getThinkingLevel(),
+					width,
+					Date.now(),
+					state.compaction,
+				);
 			},
 			dispose() {
 				unsubscribe?.();

@@ -1,4 +1,4 @@
-import { classifyTaskFromTools, modelRunMetrics, type MetricObservation, type ModelRunObservation } from "@danypops/jittor";
+import { classifyTaskFromTools, type MetricObservation, type ModelRunObservation, modelRunMetrics } from "@danypops/jittor";
 
 export interface ActiveLocalModelRun {
 	runId: string;
@@ -59,18 +59,22 @@ export class LocalRunTelemetry {
 		this.active = undefined;
 		if (!active || typeof message !== "object" || message === null || Array.isArray(message)) return [];
 		const value = message as Record<string, unknown>;
-		if (value["role"] !== "assistant" || typeof value["provider"] !== "string" || typeof value["model"] !== "string") return [];
-		const usage = typeof value["usage"] === "object" && value["usage"] !== null ? value["usage"] as Record<string, unknown> : {};
-		const amount = (name: string): number => typeof usage[name] === "number" && Number.isFinite(usage[name]) ? usage[name] as number : 0;
-		const cost = typeof usage["cost"] === "object" && usage["cost"] !== null && typeof (usage["cost"] as Record<string, unknown>)["total"] === "number"
-			? (usage["cost"] as Record<string, number>)["total"] ?? 0 : 0;
-		const stopReason = ["stop", "length", "toolUse", "error", "aborted"].includes(String(value["stopReason"]))
-			? value["stopReason"] as ModelRunObservation["stopReason"] : "unknown";
+		if (value.role !== "assistant" || typeof value.provider !== "string" || typeof value.model !== "string") return [];
+		const usage = typeof value.usage === "object" && value.usage !== null ? (value.usage as Record<string, unknown>) : {};
+		const amount = (name: string): number =>
+			typeof usage[name] === "number" && Number.isFinite(usage[name]) ? (usage[name] as number) : 0;
+		const cost =
+			typeof usage.cost === "object" && usage.cost !== null && typeof (usage.cost as Record<string, unknown>).total === "number"
+				? ((usage.cost as Record<string, number>).total ?? 0)
+				: 0;
+		const stopReason = ["stop", "length", "toolUse", "error", "aborted"].includes(String(value.stopReason))
+			? (value.stopReason as ModelRunObservation["stopReason"])
+			: "unknown";
 		const completedAt = Math.max(Date.now(), active.firstTokenAt ?? active.startedAt, active.startedAt);
 		this.lastCompleted = {
 			runId: active.runId,
-			provider: value["provider"],
-			model: value["model"],
+			provider: value.provider,
+			model: value.model,
 			thinking: thinkingLevel,
 			...classifyTaskFromTools(active.toolNames),
 			startedAt: active.startedAt,

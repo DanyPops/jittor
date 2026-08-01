@@ -99,21 +99,18 @@ function metric(
 
 export function parseOpenRouterUsage(value: unknown): OpenRouterUsage {
 	const usage = contractRecord(value, "usage");
-	const promptDetails = usage["prompt_tokens_details"] === undefined
-		? {}
-		: contractRecord(usage["prompt_tokens_details"], "prompt token details");
-	const costDetails = usage["cost_details"] === undefined
-		? {}
-		: contractRecord(usage["cost_details"], "cost details");
+	const promptDetails =
+		usage.prompt_tokens_details === undefined ? {} : contractRecord(usage.prompt_tokens_details, "prompt token details");
+	const costDetails = usage.cost_details === undefined ? {} : contractRecord(usage.cost_details, "cost details");
 	return {
-		promptTokens: finite(usage["prompt_tokens"], "prompt tokens"),
-		completionTokens: finite(usage["completion_tokens"], "completion tokens"),
-		totalTokens: finite(usage["total_tokens"], "total tokens"),
-		reasoningTokens: optionalFinite(usage["reasoning_tokens"], "reasoning tokens") ?? 0,
-		cachedReadTokens: optionalFinite(promptDetails["cached_tokens"], "cached tokens") ?? 0,
-		cachedWriteTokens: optionalFinite(promptDetails["cache_write_tokens"], "cache write tokens") ?? 0,
-		cost: finite(usage["cost"], "cost"),
-		upstreamCost: optionalFinite(costDetails["upstream_inference_cost"], "upstream inference cost") ?? 0,
+		promptTokens: finite(usage.prompt_tokens, "prompt tokens"),
+		completionTokens: finite(usage.completion_tokens, "completion tokens"),
+		totalTokens: finite(usage.total_tokens, "total tokens"),
+		reasoningTokens: optionalFinite(usage.reasoning_tokens, "reasoning tokens") ?? 0,
+		cachedReadTokens: optionalFinite(promptDetails.cached_tokens, "cached tokens") ?? 0,
+		cachedWriteTokens: optionalFinite(promptDetails.cache_write_tokens, "cache write tokens") ?? 0,
+		cost: finite(usage.cost, "cost"),
+		upstreamCost: optionalFinite(costDetails.upstream_inference_cost, "upstream inference cost") ?? 0,
 	};
 }
 
@@ -134,23 +131,23 @@ export function openRouterUsageMetrics(usage: OpenRouterUsage, context: OpenRout
 
 export function parseOpenRouterKey(rootValue: unknown, observedAt: number): OpenRouterKeySnapshot {
 	const root = contractRecord(rootValue, "key response");
-	const data = contractRecord(root["data"], "key data");
-	const label = optionalText(data["label"], "key label");
-	const limit = optionalFinite(data["limit"], "key limit");
-	const remaining = optionalFinite(data["limit_remaining"], "key limit remaining");
-	const usage = finite(data["usage"], "key usage");
+	const data = contractRecord(root.data, "key data");
+	const label = optionalText(data.label, "key label");
+	const limit = optionalFinite(data.limit, "key limit");
+	const remaining = optionalFinite(data.limit_remaining, "key limit remaining");
+	const usage = finite(data.usage, "key usage");
 	const snapshot: OpenRouterKeySnapshot = {
 		label,
 		limit,
 		remaining,
-		reset: optionalText(data["limit_reset"], "key limit reset"),
+		reset: optionalText(data.limit_reset, "key limit reset"),
 		usage,
-		usageDaily: optionalFinite(data["usage_daily"], "daily usage"),
-		usageWeekly: optionalFinite(data["usage_weekly"], "weekly usage"),
-		usageMonthly: optionalFinite(data["usage_monthly"], "monthly usage"),
-		management: data["is_management_key"] === true,
-		provisioning: data["is_provisioning_key"] === true,
-		rateLimit: data["rate_limit"] === undefined || data["rate_limit"] === null ? null : contractRecord(data["rate_limit"], "rate limit"),
+		usageDaily: optionalFinite(data.usage_daily, "daily usage"),
+		usageWeekly: optionalFinite(data.usage_weekly, "weekly usage"),
+		usageMonthly: optionalFinite(data.usage_monthly, "monthly usage"),
+		management: data.is_management_key === true,
+		provisioning: data.is_provisioning_key === true,
+		rateLimit: data.rate_limit === undefined || data.rate_limit === null ? null : contractRecord(data.rate_limit, "rate limit"),
 		observedAt,
 		metrics: [],
 	};
@@ -166,7 +163,8 @@ export function parseOpenRouterKey(rootValue: unknown, observedAt: number): Open
 	add("limit-remaining", remaining);
 	if (limit !== null && limit > 0 && remaining !== null) {
 		const remainingFraction = remaining / limit;
-		if (remainingFraction < 0 || remainingFraction > 1) throw new Error("OpenRouter key remaining fraction is outside its configured limit");
+		if (remainingFraction < 0 || remainingFraction > 1)
+			throw new Error("OpenRouter key remaining fraction is outside its configured limit");
 		const attributes = { limit, remaining, reset: snapshot.reset };
 		snapshot.metrics.push(metric(scope, "remaining-fraction", remainingFraction, "ratio", observedAt, attributes));
 		snapshot.metrics.push(metric(scope, "used-fraction", 1 - remainingFraction, "ratio", observedAt, attributes));
@@ -176,49 +174,49 @@ export function parseOpenRouterKey(rootValue: unknown, observedAt: number): Open
 
 export function parseOpenRouterModels(rootValue: unknown): OpenRouterModel[] {
 	const root = contractRecord(rootValue, "models response");
-	if (!Array.isArray(root["data"])) throw new Error("OpenRouter models schema changed");
-	return root["data"].map((value) => {
+	if (!Array.isArray(root.data)) throw new Error("OpenRouter models schema changed");
+	return root.data.map((value) => {
 		const model = contractRecord(value, "model");
-		const pricing = contractRecord(model["pricing"], "model pricing");
-		const provider = contractRecord(model["top_provider"], "top provider");
-		if (!Array.isArray(model["supported_parameters"]) || !model["supported_parameters"].every((parameter) => typeof parameter === "string")) {
+		const pricing = contractRecord(model.pricing, "model pricing");
+		const provider = contractRecord(model.top_provider, "top provider");
+		if (!Array.isArray(model.supported_parameters) || !model.supported_parameters.every((parameter) => typeof parameter === "string")) {
 			throw new Error("OpenRouter supported parameters schema changed");
 		}
 		return {
-			id: text(model["id"], "model id"),
-			canonicalSlug: text(model["canonical_slug"], "canonical slug"),
-			name: text(model["name"], "model name"),
-			contextLength: finite(model["context_length"], "context length"),
+			id: text(model.id, "model id"),
+			canonicalSlug: text(model.canonical_slug, "canonical slug"),
+			name: text(model.name, "model name"),
+			contextLength: finite(model.context_length, "context length"),
 			pricing: {
-				prompt: price(pricing["prompt"], "prompt pricing"),
-				completion: price(pricing["completion"], "completion pricing"),
-				request: price(pricing["request"], "request pricing"),
+				prompt: price(pricing.prompt, "prompt pricing"),
+				completion: price(pricing.completion, "completion pricing"),
+				request: price(pricing.request, "request pricing"),
 			},
-			supportedParameters: model["supported_parameters"] as string[],
-			maxCompletionTokens: optionalFinite(provider["max_completion_tokens"], "max completion tokens"),
-			expiresAt: optionalText(model["expiration_date"], "expiration date"),
+			supportedParameters: model.supported_parameters as string[],
+			maxCompletionTokens: optionalFinite(provider.max_completion_tokens, "max completion tokens"),
+			expiresAt: optionalText(model.expiration_date, "expiration date"),
 		};
 	});
 }
 
 export function parseOpenRouterGeneration(rootValue: unknown): OpenRouterGeneration {
 	const root = contractRecord(rootValue, "generation response");
-	const data = contractRecord(root["data"], "generation data");
+	const data = contractRecord(root.data, "generation data");
 	return {
-		id: text(data["id"], "generation id"),
-		totalCost: finite(data["total_cost"], "generation cost"),
-		promptTokens: finite(data["tokens_prompt"], "generation prompt tokens"),
-		completionTokens: finite(data["tokens_completion"], "generation completion tokens"),
+		id: text(data.id, "generation id"),
+		totalCost: finite(data.total_cost, "generation cost"),
+		promptTokens: finite(data.tokens_prompt, "generation prompt tokens"),
+		completionTokens: finite(data.tokens_completion, "generation completion tokens"),
 		raw: data,
 	};
 }
 
 export function parseOpenRouterAnalytics(rootValue: unknown): OpenRouterAnalyticsResult {
 	const root = contractRecord(rootValue, "analytics response");
-	if (!Array.isArray(root["data"]) || !root["data"].every((row) => typeof row === "object" && row !== null && !Array.isArray(row))) {
+	if (!Array.isArray(root.data) || !root.data.every((row) => typeof row === "object" && row !== null && !Array.isArray(row))) {
 		throw new Error("OpenRouter analytics data schema changed");
 	}
-	const metadata = contractRecord(root["metadata"], "analytics metadata");
-	if (typeof metadata["truncated"] !== "boolean") throw new Error("OpenRouter analytics metadata schema changed");
-	return { data: root["data"] as Array<Record<string, unknown>>, metadata: metadata as OpenRouterAnalyticsResult["metadata"] };
+	const metadata = contractRecord(root.metadata, "analytics metadata");
+	if (typeof metadata.truncated !== "boolean") throw new Error("OpenRouter analytics metadata schema changed");
+	return { data: root.data as Array<Record<string, unknown>>, metadata: metadata as OpenRouterAnalyticsResult["metadata"] };
 }

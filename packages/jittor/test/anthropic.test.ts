@@ -25,12 +25,24 @@ describe("Anthropic official rate-limit response headers", () => {
 		expect(snapshot.outputTokens).toEqual({ limit: 400_000, remaining: 100_000, resetsAt: Date.parse("2026-07-21T12:00:00Z") });
 		expect(snapshot.priorityInputTokens).toBeNull();
 		expect(snapshot.retryAfterMs).toBe(30_000);
-		expect(snapshot.metrics).toContainEqual(expect.objectContaining({
-			source: "anthropic", scope: "requests", metric: "used-fraction", value: 0.25, unit: "ratio",
-		}));
-		expect(snapshot.metrics).toContainEqual(expect.objectContaining({
-			source: "anthropic", scope: "output-tokens", metric: "used-fraction", value: 0.75, unit: "ratio",
-		}));
+		expect(snapshot.metrics).toContainEqual(
+			expect.objectContaining({
+				source: "anthropic",
+				scope: "requests",
+				metric: "used-fraction",
+				value: 0.25,
+				unit: "ratio",
+			}),
+		);
+		expect(snapshot.metrics).toContainEqual(
+			expect.objectContaining({
+				source: "anthropic",
+				scope: "output-tokens",
+				metric: "used-fraction",
+				value: 0.75,
+				unit: "ratio",
+			}),
+		);
 		expect(snapshot.metrics).toHaveLength(8);
 	});
 
@@ -38,7 +50,14 @@ describe("Anthropic official rate-limit response headers", () => {
 		const headers = new Headers({ "content-type": "application/json" });
 		expect(hasAnthropicRateLimitHeaders(headers)).toBe(false);
 		const snapshot = parseAnthropicRateLimitHeaders(headers, 1_000);
-		expect(snapshot).toMatchObject({ requests: null, tokens: null, inputTokens: null, outputTokens: null, retryAfterMs: null, metrics: [] });
+		expect(snapshot).toMatchObject({
+			requests: null,
+			tokens: null,
+			inputTokens: null,
+			outputTokens: null,
+			retryAfterMs: null,
+			metrics: [],
+		});
 	});
 
 	it("detects optional Priority Tier headers only when present", () => {
@@ -57,22 +76,36 @@ describe("Anthropic official rate-limit response headers", () => {
 	});
 
 	it("fails closed on schema drift instead of guessing", () => {
-		expect(() => parseAnthropicRateLimitHeaders(new Headers({ "anthropic-ratelimit-requests-limit": "not-a-number" }), 1_000))
-			.toThrow("header schema changed");
-		expect(() => parseAnthropicRateLimitHeaders(new Headers({ "anthropic-ratelimit-requests-reset": "not-a-date" }), 1_000))
-			.toThrow("not RFC 3339");
-		expect(() => parseAnthropicRateLimitHeaders(new Headers({
-			"anthropic-ratelimit-requests-limit": "10", "anthropic-ratelimit-requests-remaining": "11",
-		}), 1_000)).toThrow("remaining exceeds its configured limit");
+		expect(() => parseAnthropicRateLimitHeaders(new Headers({ "anthropic-ratelimit-requests-limit": "not-a-number" }), 1_000)).toThrow(
+			"header schema changed",
+		);
+		expect(() => parseAnthropicRateLimitHeaders(new Headers({ "anthropic-ratelimit-requests-reset": "not-a-date" }), 1_000)).toThrow(
+			"not RFC 3339",
+		);
+		expect(() =>
+			parseAnthropicRateLimitHeaders(
+				new Headers({
+					"anthropic-ratelimit-requests-limit": "10",
+					"anthropic-ratelimit-requests-remaining": "11",
+				}),
+				1_000,
+			),
+		).toThrow("remaining exceeds its configured limit");
 		expect(() => parseAnthropicRateLimitHeaders(new Headers({ "retry-after": "-1" }), 1_000)).toThrow("header schema changed");
 	});
 
 	it("tags metrics with the given source, so the same header shape stays distinguishable across accounts/quota pools", () => {
 		const headers = new Headers({
-			"anthropic-ratelimit-tokens-limit": "1000", "anthropic-ratelimit-tokens-remaining": "400", "anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
+			"anthropic-ratelimit-tokens-limit": "1000",
+			"anthropic-ratelimit-tokens-remaining": "400",
+			"anthropic-ratelimit-tokens-reset": "2026-07-21T12:00:00Z",
 		});
 		expect(parseAnthropicRateLimitHeaders(headers, 1_000).metrics).toContainEqual(expect.objectContaining({ source: "anthropic" }));
-		expect(parseAnthropicRateLimitHeaders(headers, 1_000, "anthropic-vertex").metrics).toContainEqual(expect.objectContaining({ source: "anthropic-vertex" }));
-		expect(parseAnthropicRateLimitHeaders(headers, 1_000, "anthropic-vertex").metrics.some((metric) => metric.source === "anthropic")).toBe(false);
+		expect(parseAnthropicRateLimitHeaders(headers, 1_000, "anthropic-vertex").metrics).toContainEqual(
+			expect.objectContaining({ source: "anthropic-vertex" }),
+		);
+		expect(parseAnthropicRateLimitHeaders(headers, 1_000, "anthropic-vertex").metrics.some((metric) => metric.source === "anthropic")).toBe(
+			false,
+		);
 	});
 });

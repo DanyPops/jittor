@@ -1,8 +1,8 @@
 import { CLI_AVAILABLE_ROUTES_MAX } from "../constants.ts";
 import type { PolicyDecision, Route } from "../policy.ts";
 import type { RouteOverride, RouterStatus, TelemetryPollResult } from "../ports/router-controller.ts";
-import { callAndPrint, humanField, type CliDependencies } from "./support.ts";
 import { parseRoute } from "./route-args.ts";
+import { type CliDependencies, callAndPrint, humanField } from "./support.ts";
 
 export const ROUTER_USAGE_LINES = [
 	"  telemetry poll [--json]",
@@ -13,13 +13,19 @@ export const ROUTER_USAGE_LINES = [
 	"  router available-routes [--route <provider/model@thinking> ...] [--session-id <id>] [--session-secret <secret>] [--json]",
 ];
 
-interface SessionScope { session_id?: string; session_secret?: string }
+interface SessionScope {
+	session_id?: string;
+	session_secret?: string;
+}
 
 function sessionScopeInput(sessionId: string | undefined, sessionSecret: string | undefined): SessionScope {
 	return { ...(sessionId ? { session_id: sessionId } : {}), ...(sessionSecret ? { session_secret: sessionSecret } : {}) };
 }
 
-interface RouterOverrideArgs { input: RouteOverride & SessionScope; json: boolean }
+interface RouterOverrideArgs {
+	input: RouteOverride & SessionScope;
+	json: boolean;
+}
 
 function parseRouterOverrideArgs(args: string[]): RouterOverrideArgs | null {
 	let json = false;
@@ -29,7 +35,10 @@ function parseRouterOverrideArgs(args: string[]): RouterOverrideArgs | null {
 	let sessionSecret: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
-		if (argument === "--json") { json = true; continue; }
+		if (argument === "--json") {
+			json = true;
+			continue;
+		}
 		if (!["--route", "--expires-at", "--session-id", "--session-secret"].includes(argument ?? "")) return null;
 		const raw = args[++index];
 		if (raw === undefined || raw.length === 0) return null;
@@ -48,7 +57,10 @@ function parseRouterOverrideArgs(args: string[]): RouterOverrideArgs | null {
 	return { input: { route, expiresAt, ...sessionScopeInput(sessionId, sessionSecret) }, json };
 }
 
-interface RouterRouteArgs { input: Route & SessionScope; json: boolean }
+interface RouterRouteArgs {
+	input: Route & SessionScope;
+	json: boolean;
+}
 
 function parseRouterRouteArgs(args: string[]): RouterRouteArgs | null {
 	let json = false;
@@ -57,7 +69,10 @@ function parseRouterRouteArgs(args: string[]): RouterRouteArgs | null {
 	let sessionSecret: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
-		if (argument === "--json") { json = true; continue; }
+		if (argument === "--json") {
+			json = true;
+			continue;
+		}
 		if (!["--route", "--session-id", "--session-secret"].includes(argument ?? "")) return null;
 		const raw = args[++index];
 		if (raw === undefined || raw.length === 0) return null;
@@ -72,7 +87,10 @@ function parseRouterRouteArgs(args: string[]): RouterRouteArgs | null {
 	return { input: { ...route, ...sessionScopeInput(sessionId, sessionSecret) }, json };
 }
 
-interface RouterAvailableRoutesArgs { input: { routes: Route[] } & SessionScope; json: boolean }
+interface RouterAvailableRoutesArgs {
+	input: { routes: Route[] } & SessionScope;
+	json: boolean;
+}
 
 function parseRouterAvailableRoutesArgs(args: string[]): RouterAvailableRoutesArgs | null {
 	let json = false;
@@ -81,7 +99,10 @@ function parseRouterAvailableRoutesArgs(args: string[]): RouterAvailableRoutesAr
 	const routes: Route[] = [];
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
-		if (argument === "--json") { json = true; continue; }
+		if (argument === "--json") {
+			json = true;
+			continue;
+		}
 		if (!["--route", "--session-id", "--session-secret"].includes(argument ?? "")) return null;
 		const raw = args[++index];
 		if (raw === undefined || raw.length === 0) return null;
@@ -103,7 +124,10 @@ function parseRouterScopeArgs(args: string[]): { input: SessionScope; json: bool
 	let sessionSecret: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
-		if (argument === "--json") { json = true; continue; }
+		if (argument === "--json") {
+			json = true;
+			continue;
+		}
 		if (!["--session-id", "--session-secret"].includes(argument ?? "")) return null;
 		const raw = args[++index];
 		if (raw === undefined || raw.length === 0) return null;
@@ -128,10 +152,13 @@ function formatRoute(route: Route): string {
 
 export function formatTelemetryPoll(result: TelemetryPollResult): string {
 	if (result.sources.length === 0) return "Telemetry: no sources configured";
-	return ["Telemetry:", ...result.sources.map((source) => {
-		const freshness = !source.ok ? `failed${source.error ? ` (${humanField(source.error)})` : ""}` : "ok";
-		return `- ${humanField(source.id)} (${humanField(source.provider)}): ${freshness} · ${source.metrics} metric(s)`;
-	})].join("\n");
+	return [
+		"Telemetry:",
+		...result.sources.map((source) => {
+			const freshness = !source.ok ? `failed${source.error ? ` (${humanField(source.error)})` : ""}` : "ok";
+			return `- ${humanField(source.id)} (${humanField(source.provider)}): ${freshness} · ${source.metrics} metric(s)`;
+		}),
+	].join("\n");
 }
 
 export function formatRouterStatus(status: RouterStatus): string {
@@ -141,26 +168,41 @@ export function formatRouterStatus(status: RouterStatus): string {
 		`Available routes: ${status.availableRoutes.length.toLocaleString()}`,
 		`Override: ${status.override ? `${formatRoute(status.override.route)}${status.override.expiresAt === null ? "" : ` (expires ${new Date(status.override.expiresAt).toISOString()})`}` : "none"}`,
 	];
-	if (status.lastDecision) lines.push(`Last decision: ${status.lastDecision.action} · pressure ${Number.isFinite(status.lastDecision.pressure) ? status.lastDecision.pressure.toFixed(3) : "∞"} · ${humanField(status.lastDecision.reason)}`);
+	if (status.lastDecision)
+		lines.push(
+			`Last decision: ${status.lastDecision.action} · pressure ${Number.isFinite(status.lastDecision.pressure) ? status.lastDecision.pressure.toFixed(3) : "∞"} · ${humanField(status.lastDecision.reason)}`,
+		);
 	lines.push(formatTelemetryPoll({ sources: status.sources, observedAt: Date.now() }));
 	return lines.join("\n");
 }
 
 export function formatPolicyDecision(decision: PolicyDecision): string {
-	const lines = [`Decision: ${decision.action} · pressure ${Number.isFinite(decision.pressure) ? decision.pressure.toFixed(3) : "∞"} · ${humanField(decision.reason)}`];
+	const lines = [
+		`Decision: ${decision.action} · pressure ${Number.isFinite(decision.pressure) ? decision.pressure.toFixed(3) : "∞"} · ${humanField(decision.reason)}`,
+	];
 	if (decision.route) lines.push(`Route: ${formatRoute(decision.route)}`);
 	if (decision.delayMs !== undefined) lines.push(`Delay: ${decision.delayMs}ms`);
 	return lines.join("\n");
 }
 
-export async function runTelemetryCommand(action: string | undefined, rest: string[], deps: CliDependencies, usage: () => number): Promise<number> {
+export async function runTelemetryCommand(
+	action: string | undefined,
+	rest: string[],
+	deps: CliDependencies,
+	usage: () => number,
+): Promise<number> {
 	if (action !== "poll") return usage();
 	const parsed = parseJsonOnlyArgs(rest);
 	if (!parsed) return usage();
 	return callAndPrint(deps, "telemetry.poll", {}, parsed.json, formatTelemetryPoll);
 }
 
-export async function runRouterCommand(action: string | undefined, rest: string[], deps: CliDependencies, usage: () => number): Promise<number> {
+export async function runRouterCommand(
+	action: string | undefined,
+	rest: string[],
+	deps: CliDependencies,
+	usage: () => number,
+): Promise<number> {
 	switch (action) {
 		case "status": {
 			const parsed = parseRouterScopeArgs(rest);
@@ -202,6 +244,7 @@ export async function runRouterCommand(action: string | undefined, rest: string[
 			if (!parsed) return usage();
 			return callAndPrint(deps, "router.available_routes", parsed.input, parsed.json, formatRouterStatus);
 		}
-		default: return usage();
+		default:
+			return usage();
 	}
 }
