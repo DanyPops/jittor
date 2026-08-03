@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createNodeServiceInstallDeps, generateSystemdUnit, installUserService, type ServiceSpec } from "@danypops/vehicle-server/service";
 import { SYSTEMD_UNIT_NAME } from "../constants.ts";
 import { resolveJittorPaths } from "../state.ts";
+import { VERSION } from "../version.ts";
 import { parseJsonOnlyArgs } from "./router.ts";
 import { type CliDependencies, callAndPrint } from "./support.ts";
 
@@ -24,10 +25,11 @@ function jittorServiceSpec(options: SystemdUnitOptions): ServiceSpec {
 	return {
 		name: "jittor",
 		displayName: "Jittor token optimizing router",
+		version: VERSION,
 		binPath: options.bunBin,
 		args: [options.cliPath, "serve"],
 		env,
-		descriptorPath: resolveJittorPaths().serviceDescriptor,
+		handlePath: resolveJittorPaths().handle,
 		// Jittor's own client (connectJittorClient) never auto-spawns -- systemd's own
 		// supervision is this daemon's only recovery path, same as Lector's.
 		restartOnFailure: true,
