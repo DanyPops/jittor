@@ -23,34 +23,16 @@
  */
 
 import type { VehicleEffect, VehicleIdempotency } from "@danypops/vehicle-core";
-import { bindVehicleOperation, defineVehicleOperation, passthroughVehicleSchema, VehicleError } from "@danypops/vehicle-core";
+import { bindVehicleOperation, defineErrorMapping, defineVehicleOperation, passthroughVehicleSchema } from "@danypops/vehicle-core";
 import type { VehicleRegistry } from "@danypops/vehicle-server";
 import type { OperationHandlerMap } from "./operations/types.ts";
 import type { OperationName } from "./service.ts";
 import { InvalidSessionSecretError } from "./session-identity-service.ts";
 
-/**
- * Preserves /api/v1/ops's own error-to-status behavior (see createApp() in
- * service.ts): InvalidSessionSecretError -> 403, everything else a handler
- * throws -> 400. Without this, VehicleRegistry's own invoke() wraps any
- * handler-thrown error that isn't already a VehicleError into
- * category:"internal" (HTTP 500), losing both the specific status and the
- * error's own message (a VehicleFailure never serializes an error's cause
- * over the wire) -- the same regression class found and fixed in
- * web-spider's own migration (see its vehicle-error-parity.ts).
- */
-async function withJittorErrorParity<T>(run: () => T | Promise<T>): Promise<T> {
-	try {
-		return await run();
-	} catch (error) {
-		if (error instanceof VehicleError) throw error;
-		if (error instanceof InvalidSessionSecretError) {
-			throw new VehicleError("invalid-session-secret", error.message, { category: "authorization", cause: error });
-		}
-		const message = error instanceof Error ? error.message : String(error);
-		throw new VehicleError("operation-rejected", message, { category: "validation", cause: error });
-	}
-}
+/** Preserves the legacy route's 403 for invalid session credentials; every other rejection remains validation. */
+const withJittorErrorParity = defineErrorMapping([
+	{ errorClass: InvalidSessionSecretError, category: "authorization", code: "invalid-session-secret" },
+]);
 
 const OWNER = "jittor";
 const LIMITS = { defaultTimeoutMs: 10_000, maxTimeoutMs: 30_000, maxRequestBytes: 65_536, maxResponseBytes: 1_048_576 };

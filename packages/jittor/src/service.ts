@@ -207,7 +207,7 @@ export class JittorService {
 		};
 		this.vehicleRegistry = new VehicleRegistry({
 			name: "jittor",
-			version: VERSION,
+			packageJsonUrl: new URL("../package.json", import.meta.url),
 			description: "Just-in-Time Token Optimizing Router for Pi -- metrics, benchmark evidence, model ranking, and router policy.",
 		});
 		// withJittorErrorParity() already converts every real handler error into a well-formed
