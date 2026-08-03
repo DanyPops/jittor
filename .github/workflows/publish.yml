@@ -11,61 +11,24 @@ permissions:
   contents: read
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
+  publish-jittor:
+    if: startsWith(github.ref_name, 'jittor-v')
+    uses: DanyPops/vehicle/.github/workflows/reusable-npm-publish.yml@main
+    with:
+      package-directory: packages/jittor
+      tag-prefix: jittor-v
+      package-manager: bun
+      lint-command: bun run lint:ci
+      test-command: bun test
+      typecheck-command: bun run typecheck
 
-      - id: package
-        name: Match tag to package version
-        shell: bash
-        run: |
-          case "$GITHUB_REF_NAME" in
-            jittor-v*)
-              package_dir="packages/jittor"
-              tag_version="${GITHUB_REF_NAME#jittor-v}"
-              ;;
-            pi-jittor-v*)
-              package_dir="packages/pi-jittor"
-              tag_version="${GITHUB_REF_NAME#pi-jittor-v}"
-              ;;
-            *)
-              echo "Unsupported release tag: $GITHUB_REF_NAME" >&2
-              exit 1
-              ;;
-          esac
-          package_version="$(node -p "require('./$package_dir/package.json').version")"
-          if [[ "$tag_version" != "$package_version" ]]; then
-            echo "Tag version $tag_version does not match $package_dir version $package_version" >&2
-            exit 1
-          fi
-          echo "dir=$package_dir" >> "$GITHUB_OUTPUT"
-
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run lint:ci
-      - run: bun test
-      - run: bun run typecheck
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          package-manager-cache: false
-
-      - run: npm install -g npm@latest
-
-      - id: registry
-        working-directory: ${{ steps.package.outputs.dir }}
-        shell: bash
-        run: |
-          name="$(node -p "require('./package.json').name")"
-          version="$(node -p "require('./package.json').version")"
-          if npm view "$name@$version" version >/dev/null 2>&1; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - if: steps.registry.outputs.published != 'true'
-        working-directory: ${{ steps.package.outputs.dir }}
-        run: npm publish --access public --provenance
+  publish-pi-jittor:
+    if: startsWith(github.ref_name, 'pi-jittor-v')
+    uses: DanyPops/vehicle/.github/workflows/reusable-npm-publish.yml@main
+    with:
+      package-directory: packages/pi-jittor
+      tag-prefix: pi-jittor-v
+      package-manager: bun
+      lint-command: bun run lint:ci
+      test-command: bun test
+      typecheck-command: bun run typecheck
