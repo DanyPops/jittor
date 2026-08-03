@@ -207,9 +207,12 @@ export class JittorService {
 		};
 		this.vehicleRegistry = new VehicleRegistry({
 			name: "jittor",
-			version: "1.0.0",
+			version: VERSION,
 			description: "Just-in-Time Token Optimizing Router for Pi -- metrics, benchmark evidence, model ranking, and router policy.",
 		});
+		// withJittorErrorParity() already converts every real handler error into a well-formed
+		// VehicleError, so this only affects a genuine registration/binding bug.
+		this.vehicleRegistry.setExposeHandlerFailureDetails(true);
 		registerJittorVehicleOperations(this.vehicleRegistry, this.operations);
 	}
 
