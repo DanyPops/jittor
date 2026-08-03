@@ -1,9 +1,12 @@
 import { describe, expect, it } from "bun:test";
+import { SQLiteSessionIdentityStore } from "../src/adapters/sqlite-session-identity-store.ts";
 import { JittorClient } from "../src/client.ts";
+import { openJittorDb } from "../src/db.ts";
 import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/domain/metric.ts";
 import { type UsageAggregateRow, type UsageBucketWindow, usageBucketIndex } from "../src/domain/usage.ts";
 import type { MetricStore, UsageAggregateFilter } from "../src/ports/metric-store.ts";
 import { createApp, EXPECTED_OPERATION_NAMES, JittorService } from "../src/service.ts";
+import { SessionIdentity } from "../src/session-identity-service.ts";
 
 class FakeMetricStore implements MetricStore {
 	private sequence = 0;
@@ -327,5 +330,93 @@ describe("Jittor operation service", () => {
 		expect(await client.call("metrics.query", { source: "openrouter" })).toHaveLength(1);
 		expect(await client.call("context.assess", { since: 0, until: 3_000 })).toMatchObject({ injection: { runs: 0 } });
 		expect(await client.operations()).toEqual([...EXPECTED_OPERATION_NAMES]);
+	});
+});
+
+describe("Jittor operation service — the same operations, through the real Vehicle wire protocol", () => {
+	async function invoke(
+		app: { fetch(request: Request): Promise<Response> },
+		name: string,
+		input: Record<string, unknown>,
+		token = "test-token",
+	) {
+		const response = await app.fetch(
+			new Request("http://jittor.test/vehicle/invoke", {
+				method: "POST",
+				headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+				body: JSON.stringify({ name, version: 1, input, permissions: ["jittor:read", "jittor:write"] }),
+			}),
+		);
+		return {
+			status: response.status,
+			body: (await response.json()) as { output?: unknown; error?: { category: string; message: string } },
+		};
+	}
+
+	it("GET /vehicle/manifest lists all 25 operations, authenticated the same as /api/v1/ops", async () => {
+		const service = new JittorService(new FakeMetricStore());
+		const app = createApp({ service, token: "test-token" });
+		const unauthorized = await app.fetch(new Request("http://jittor.test/vehicle/manifest"));
+		expect(unauthorized.status).toBe(401);
+		const response = await app.fetch(
+			new Request("http://jittor.test/vehicle/manifest", { headers: { authorization: "Bearer test-token" } }),
+		);
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as { operations: Array<{ name: string }> };
+		expect(body.operations.map((o) => o.name).sort()).toEqual([...EXPECTED_OPERATION_NAMES].sort());
+	});
+
+	it("metrics.record/metrics.query round-trip through /vehicle/invoke, matching the /api/v1/ops shape", async () => {
+		const store = new FakeMetricStore();
+		const service = new JittorService(store);
+		const app = createApp({ service, token: "test-token" });
+		const recorded = await invoke(app, "metrics.record", {
+			source: "openrouter",
+			scope: "key:default",
+			metric: "cost",
+			value: 0.01,
+			unit: "usd",
+			observedAt: 1000,
+		});
+		expect(recorded.status).toBe(200);
+		expect((recorded.body.output as { id: number }).id).toBe(1);
+		const queried = await invoke(app, "metrics.query", { source: "openrouter" });
+		expect(queried.body.output).toHaveLength(1);
+	});
+
+	it("a handler-thrown validation error keeps its own real message, mapped to Vehicle's validation category (not a generic internal 500)", async () => {
+		const service = new JittorService(new FakeMetricStore());
+		const app = createApp({ service, token: "test-token" });
+		const response = await invoke(app, "metrics.distinct_scopes", { since: 0, until: 5_000 });
+		expect(response.status).toBe(400);
+		expect(response.body.error?.category).toBe("validation");
+		expect(response.body.error?.message).toContain("source is required");
+	});
+
+	it("InvalidSessionSecretError maps to Vehicle's authorization category -> HTTP 403, same as /api/v1/ops's own mapping", async () => {
+		const identity = new SessionIdentity(new SQLiteSessionIdentityStore(openJittorDb(":memory:")));
+		const { secret } = identity.register("s1");
+		const service = new JittorService(new FakeMetricStore(), undefined, undefined, undefined, identity);
+		const app = createApp({ service, token: "test-token" });
+		const response = await invoke(app, "router.pause", { session_id: "s1", session_secret: `${secret}-wrong` });
+		expect(response.status).toBe(403);
+		expect(response.body.error?.category).toBe("authorization");
+	});
+
+	it("the old /api/v1/ops route keeps working unchanged, alongside /vehicle/invoke", async () => {
+		const store = new FakeMetricStore();
+		const service = new JittorService(store);
+		const app = createApp({ service, token: "test-token" });
+		await invoke(app, "metrics.record", {
+			source: "openrouter",
+			scope: "key:default",
+			metric: "cost",
+			value: 0.01,
+			unit: "usd",
+			observedAt: 1000,
+		});
+		const legacy = await request(app, { op: "metrics.query", input: { source: "openrouter" } });
+		expect(legacy.status).toBe(200);
+		expect(((await legacy.json()) as { result: unknown[] }).result).toHaveLength(1);
 	});
 });

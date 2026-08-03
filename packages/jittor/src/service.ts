@@ -1,3 +1,5 @@
+import { VehicleRegistry } from "@danypops/vehicle-server";
+import { createVehicleHttpApp } from "@danypops/vehicle-server/http";
 import { errorResponse, healthResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
 import { SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "./constants.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "./domain/benchmark.ts";
@@ -20,6 +22,7 @@ import type { BenchmarkController } from "./ports/benchmark-controller.ts";
 import type { MetricStore } from "./ports/metric-store.ts";
 import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "./ports/router-controller.ts";
 import { InvalidSessionSecretError, type RegisterSessionIdentityResult, type SessionIdentity } from "./session-identity-service.ts";
+import { registerJittorVehicleOperations } from "./vehicle-registration.ts";
 import { VERSION } from "./version.ts";
 
 export const EXPECTED_OPERATION_NAMES = [
@@ -179,6 +182,8 @@ class UnavailableRouter implements RouterController {
 export class JittorService {
 	private readonly router: RouterController;
 	private readonly operations: OperationHandlerMap;
+	/** Every jittor operation, also projected onto the real Vehicle protocol -- see vehicle-registration.ts. Served alongside (not replacing) the /api/v1/ops route below. */
+	readonly vehicleRegistry: VehicleRegistry;
 
 	constructor(
 		private readonly metrics: MetricStore,
@@ -200,6 +205,12 @@ export class JittorService {
 			...modelRankingOperations(modelRanker, router, authorize),
 			...sessionIdentityOperations(sessionIdentity),
 		};
+		this.vehicleRegistry = new VehicleRegistry({
+			name: "jittor",
+			version: "1.0.0",
+			description: "Just-in-Time Token Optimizing Router for Pi -- metrics, benchmark evidence, model ranking, and router policy.",
+		});
+		registerJittorVehicleOperations(this.vehicleRegistry, this.operations);
 	}
 
 	operationNames(): OperationName[] {
@@ -247,10 +258,16 @@ function json(value: unknown, status = 200): Response {
 
 export function createApp(options: JittorAppOptions): { fetch(request: Request): Promise<Response> } {
 	const maxBodyBytes = options.maxBodyBytes ?? SERVICE_MAX_BODY_BYTES;
+	// A real second transport for every jittor operation (see vehicle-registration.ts) --
+	// composed here rather than replacing /api/v1/ops, matching every other Vehicle-migrated
+	// daemon in this ecosystem ("served alongside", not "instead of"). Routed before the
+	// top-level bearer check below since createVehicleHttpApp performs its own.
+	const vehicleApp = createVehicleHttpApp({ registry: options.service.vehicleRegistry, token: options.token });
 	return {
 		async fetch(request: Request): Promise<Response> {
-			if (!requireBearerToken(request, options.token)) return errorResponse("unauthorized", 401);
 			const url = new URL(request.url);
+			if (url.pathname.startsWith("/vehicle/")) return vehicleApp.fetch(request);
+			if (!requireBearerToken(request, options.token)) return errorResponse("unauthorized", 401);
 			if (request.method === "GET" && url.pathname === "/health") return healthResponse(VERSION);
 			if (request.method === "GET" && url.pathname === "/ready") return readyResponse(options.service.ready());
 			if (request.method === "GET" && url.pathname === "/api/v1/ops") return json({ operations: options.service.operationNames() });

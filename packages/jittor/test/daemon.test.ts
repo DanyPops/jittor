@@ -189,20 +189,20 @@ describe("Jittor systemd unit", () => {
 		expect(unit).toContain("PrivateTmp=true");
 		expect(unit).toContain("After=default.target network-online.target");
 		expect(unit).toContain("Wants=network-online.target");
-		expect(unit).toContain("Environment=DAEMON_KIT_LAUNCH_PROVENANCE=service");
+		expect(unit).toContain('Environment="DAEMON_KIT_LAUNCH_PROVENANCE=service"');
 		expect(
 			renderSystemdUnit({
 				bunBin: "/usr/bin/bun",
 				cliPath: "/opt/jittor/src/cli.ts",
 				codexAuthFile: "/home/test/.codex/auth.json",
 			}),
-		).toContain("Environment=JITTOR_CODEX_AUTH_FILE=/home/test/.codex/auth.json");
+		).toContain('Environment="JITTOR_CODEX_AUTH_FILE=/home/test/.codex/auth.json"');
 		expect(
 			renderSystemdUnit({
 				bunBin: "/usr/bin/bun",
 				cliPath: "/opt/jittor/src/cli.ts",
 				openRouterBenchmarks: true,
 			}),
-		).toContain("Environment=JITTOR_OPENROUTER_BENCHMARKS=1");
+		).toContain('Environment="JITTOR_OPENROUTER_BENCHMARKS=1"');
 	});
 });

@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-jittor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Pi extension for Jittor: native routing enforcement, footer, settings, usage graphs, and benchmark panels backed by the @danypops/jittor daemon",
   "type": "module",
   "keywords": ["pi-package", "llm-router", "token-budget"],
@@ -12,7 +12,7 @@
     "extensions": ["extension/src/index.ts"]
   },
   "dependencies": {
-    "@danypops/vehicle-client": "^0.1.1",
+    "@danypops/vehicle-client": "^0.5.1",
     "@danypops/jittor": "^0.14.0",
     "malevich-tui-components": "^0.16.1"
   },
