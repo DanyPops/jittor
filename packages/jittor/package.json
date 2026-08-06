@@ -19,7 +19,7 @@
     "@danypops/vehicle-core": "^0.12.1",
     "@danypops/vehicle-server": "^0.17.0",
     "@danypops/vehicle-client": "^0.5.1",
-    "google-auth-library": "^10.9.0"
+    "google-auth-library": "^11.0.0"
   },
   "devDependencies": {
     "bun-types": "latest"
