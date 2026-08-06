@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { PolicyDecision, RouterStatus } from "@danypops/jittor";
+import { createExtensionHarness } from "@danypops/pi-extension-harness";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	type CodexRecoveryRuntime,
@@ -125,12 +126,19 @@ function harness(
 			footerEnabled = value;
 		},
 	};
+	// createExtensionHarness() supplies the real ExtensionAPI/ExtensionContext primitives this file
+	// used to hand-roll from scratch -- most importantly a real `events: EventBus` (Pi's own
+	// createEventBus(), not a second reimplementation of on()/emit() with the same shape). The
+	// no-op factory means the harness's own tool/command tracking is unused here: registerJittorExtension
+	// is invoked directly below against a `pi` that overrides just the methods this file's own
+	// assertions need a different (Map-of-single-command, string[]-of-notifications) shape for.
+	const h = createExtensionHarness(() => {});
 	const handlers = new Map<string, Function[]>();
-	const sharedEvents = new Map<string, Set<(payload: unknown) => void>>();
 	const commands = new Map<string, any>();
 	const modelChanges: unknown[] = [];
 	const thinkingChanges: string[] = [];
 	const pi = {
+		...h.api,
 		on(name: string, handler: Function) {
 			handlers.set(name, [...(handlers.get(name) ?? []), handler]);
 		},
@@ -147,17 +155,7 @@ function harness(
 		getThinkingLevel() {
 			return "high";
 		},
-		events: {
-			on(channel: string, handler: (payload: unknown) => void) {
-				const listeners = sharedEvents.get(channel) ?? new Set();
-				listeners.add(handler);
-				sharedEvents.set(channel, listeners);
-				return () => listeners.delete(handler);
-			},
-			emit(channel: string, payload: unknown) {
-				for (const handler of sharedEvents.get(channel) ?? []) handler(payload);
-			},
-		},
+		// events: inherited from h.api above -- the harness's real EventBus.
 	} as unknown as ExtensionAPI;
 	const sentMessages: Array<{ message: unknown; options: unknown }> = [];
 	let recoveryEnabled = recovery.enabled;
@@ -184,6 +182,7 @@ function harness(
 	let pendingMessages = false;
 	const model = modelOverride ?? { provider: "openai-codex", id: "gpt-5.3-codex" };
 	const ctx = {
+		...h.ctx,
 		mode: "tui",
 		hasUI: true,
 		model,
@@ -208,8 +207,9 @@ function harness(
 		getContextUsage() {
 			return { tokens: 190_000, contextWindow: 200_000, percent: 95 };
 		},
-		sessionManager: { getSessionId: () => "test-session" },
+		sessionManager: { ...h.ctx.sessionManager, getSessionId: () => "test-session" },
 		ui: {
+			...h.ctx.ui,
 			setStatus(_key: string, value: string | undefined) {
 				statuses.push(value);
 			},
@@ -232,7 +232,10 @@ function harness(
 		sentMessages,
 		ctx,
 		emit(channel: string, payload: unknown) {
-			for (const handler of sharedEvents.get(channel) ?? []) handler(payload);
+			// Delegates to the harness's real EventBus (pi.events === h.api.events) -- the same instance
+			// registerJittorExtension subscribed against above, so this reaches the same listeners the
+			// old hand-rolled sharedEvents Map did.
+			pi.events.emit(channel, payload);
 		},
 		aborted: () => aborted,
 		setIdle(value: boolean) {

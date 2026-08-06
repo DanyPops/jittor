@@ -21,7 +21,7 @@
     },
     "packages/jittor": {
       "name": "@danypops/jittor",
-      "version": "0.16.2",
+      "version": "0.16.3",
       "bin": {
         "jittor": "src/cli.ts",
       },
@@ -44,6 +44,7 @@
         "malevich-tui-components": "^0.16.1",
       },
       "devDependencies": {
+        "@danypops/pi-extension-harness": "^0.5.0",
         "bun-types": "latest",
       },
       "peerDependencies": {
@@ -127,6 +128,8 @@
     "@danypops/armada": ["@danypops/armada@0.2.0", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-g84bLI/wuIBdjjfKGEFFjjR8U5BB0WQbOs1wAhs/PNMMwW1BRADwxx0Us7YiQvLtMTzY5DETJ+tiv33avcbRqA=="],
 
     "@danypops/jittor": ["@danypops/jittor@workspace:packages/jittor"],
+
+    "@danypops/pi-extension-harness": ["@danypops/pi-extension-harness@0.5.0", "", { "dependencies": { "jiti": "^2.7.0" }, "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" } }, "sha512-btxDBxGyQsBMmb9D4DF6qFJ0uvRr9OPusG5WN+ltNuTGpP5xykWtOqHtdxHwoZ/VQyL4ppw40110mpIlLWb3ew=="],
 
     "@danypops/pi-jittor": ["@danypops/pi-jittor@workspace:packages/pi-jittor"],
 
