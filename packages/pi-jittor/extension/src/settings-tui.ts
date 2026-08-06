@@ -79,7 +79,7 @@ async function editBudget(ctx: ExtensionCommandContext, budgets: UsageBudgetCont
 	if (input === undefined) return;
 	const normalized = input.trim().toLowerCase();
 	if (normalized === "off" || normalized === "clear") {
-		budgets.setUsageTokenBudget(period, undefined);
+		await budgets.setUsageTokenBudget(period, undefined);
 		ctx.ui.notify(`${label} token budget cleared.`, "info");
 		return;
 	}
@@ -88,7 +88,7 @@ async function editBudget(ctx: ExtensionCommandContext, budgets: UsageBudgetCont
 		ctx.ui.notify("Enter a positive token count, or `off` to clear this threshold.", "warning");
 		return;
 	}
-	budgets.setUsageTokenBudget(period, tokens);
+	await budgets.setUsageTokenBudget(period, tokens);
 	ctx.ui.notify(`${label} token budget set to ${tokens.toLocaleString()} tokens.`, "info");
 }
 

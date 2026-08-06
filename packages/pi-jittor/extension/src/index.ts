@@ -402,8 +402,8 @@ export function registerJittorExtension(
 		if (enforcement.isFooterEnabled()) installIntegratedFooter(ctx, footerState, () => pi.getThinkingLevel());
 		else ctx.ui.setFooter(undefined);
 	};
-	const disable = (ctx: ExtensionContext): void => {
-		enforcement.setEnabled(false);
+	const disable = async (ctx: ExtensionContext): Promise<void> => {
+		await enforcement.setEnabled(false);
 		ctx.ui.setStatus("jittor", undefined);
 		showFooter(ctx);
 		ctx.ui.notify(
@@ -418,12 +418,12 @@ export function registerJittorExtension(
 			await client.call("telemetry.poll", {});
 			const readinessDecision = (await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() })) as PolicyDecision;
 			if (readinessDecision.action === "halt") throw new Error(readinessDecision.reason);
-			enforcement.setEnabled(true);
+			await enforcement.setEnabled(true);
 			showFooter(ctx);
 			await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
 			ctx.ui.notify("Jittor enforcement enabled.", "info");
 		} catch (error) {
-			enforcement.setEnabled(false);
+			await enforcement.setEnabled(false);
 			showFooter(ctx);
 			const reason = error instanceof Error ? error.message : "readiness failed";
 			ctx.ui.notify(`Jittor remains monitor-only: ${reason}. ${RECOVERY_GUIDANCE}.`, "error");
@@ -438,13 +438,13 @@ export function registerJittorExtension(
 				await showSettingsPanel(ctx, enforcement, codexRecovery, usageBudgets, {
 					setEnforcement: async (enabled) => (enabled ? enable(ctx) : disable(ctx)),
 					setFooter: async (enabled) => {
-						enforcement.setFooterEnabled(enabled);
+						await enforcement.setFooterEnabled(enabled);
 						showFooter(ctx);
 						if (enabled) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 					},
-					setRecovery: (enabled) => {
+					setRecovery: async (enabled) => {
 						if (!enabled) cancelRecovery(true);
-						codexRecovery.setCodexRecoveryEnabled(enabled);
+						await codexRecovery.setCodexRecoveryEnabled(enabled);
 					},
 				});
 				return;
@@ -499,13 +499,13 @@ export function registerJittorExtension(
 				return;
 			}
 			if (action === "recovery on" || action === "recovery enable") {
-				codexRecovery.setCodexRecoveryEnabled(true);
+				await codexRecovery.setCodexRecoveryEnabled(true);
 				ctx.ui.notify("Jittor Codex recovery enabled; bounded retries begin only after transient failures fully settle.", "info");
 				return;
 			}
 			if (action === "recovery off" || action === "recovery disable") {
 				cancelRecovery(true);
-				codexRecovery.setCodexRecoveryEnabled(false);
+				await codexRecovery.setCodexRecoveryEnabled(false);
 				ctx.ui.notify("Jittor Codex recovery disabled and pending recovery cleared.", "info");
 				return;
 			}
@@ -518,7 +518,7 @@ export function registerJittorExtension(
 				return;
 			}
 			if (action === "off" || action === "disable") {
-				disable(ctx);
+				await disable(ctx);
 				return;
 			}
 			if (action === "on" || action === "enable") {
@@ -526,13 +526,13 @@ export function registerJittorExtension(
 				return;
 			}
 			if (action === "footer off" || action === "footer disable") {
-				enforcement.setFooterEnabled(false);
+				await enforcement.setFooterEnabled(false);
 				ctx.ui.setFooter(undefined);
 				ctx.ui.notify("Jittor footer disabled; routing enforcement is unchanged.", "info");
 				return;
 			}
 			if (action === "footer on" || action === "footer enable") {
-				enforcement.setFooterEnabled(true);
+				await enforcement.setFooterEnabled(true);
 				showFooter(ctx);
 				await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 				ctx.ui.notify("Jittor informational footer enabled; routing enforcement is unchanged.", "info");
@@ -615,7 +615,7 @@ export function registerJittorExtension(
 					return;
 				}
 				if (valueText === "off" || valueText === "clear") {
-					usageBudgets.setUsageTokenBudget(period, undefined);
+					await usageBudgets.setUsageTokenBudget(period, undefined);
 					ctx.ui.notify(`${USAGE_PERIODS.find((candidate) => candidate.id === period)!.label} token budget cleared.`, "info");
 					return;
 				}
@@ -624,7 +624,7 @@ export function registerJittorExtension(
 					ctx.ui.notify("Usage: /usage budget <hourly|daily|weekly|monthly|quarterly> <positive-tokens|off>", "warning");
 					return;
 				}
-				usageBudgets.setUsageTokenBudget(period, tokens);
+				await usageBudgets.setUsageTokenBudget(period, tokens);
 				ctx.ui.notify(
 					`${USAGE_PERIODS.find((candidate) => candidate.id === period)!.label} token budget set to ${tokens.toLocaleString()} tokens.`,
 					"info",

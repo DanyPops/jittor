@@ -1,22 +1,33 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { JITTOR_EXTENSION_SETTINGS_FILENAME, JITTOR_STATE_DIRECTORY, USAGE_PERIODS, type UsagePeriod } from "@danypops/jittor";
+import { createAtomicJsonWriter } from "@danypops/vehicle-core";
+import { createNodeAtomicJsonFsAdapter } from "@danypops/vehicle-server/atomic-json";
 
+const atomicJson = createAtomicJsonWriter({ fs: createNodeAtomicJsonFsAdapter() });
+
+// Every setter persists to disk before resolving, so a caller that awaits it (every real call
+// site in index.ts/settings-tui.ts already runs inside an async handler) observes a completed
+// write -- no fire-and-forget persistence that a subsequent synchronous re-read could race. The
+// return type stays `void | Promise<void>` (not a strict `Promise<void>`) so a test/adapter
+// implementation that has no real persistence to await (e.g. the no-op fallback stubs in
+// index.ts's usageBudgetControl()/recoveryControl()) can stay trivially synchronous.
 export interface EnforcementControl {
 	isEnabled(): boolean;
-	setEnabled(enabled: boolean): void;
+	setEnabled(enabled: boolean): void | Promise<void>;
 	isFooterEnabled(): boolean;
-	setFooterEnabled(enabled: boolean): void;
+	setFooterEnabled(enabled: boolean): void | Promise<void>;
 }
 
 export interface CodexRecoveryControl {
 	isCodexRecoveryEnabled(): boolean;
-	setCodexRecoveryEnabled(enabled: boolean): void;
+	setCodexRecoveryEnabled(enabled: boolean): void | Promise<void>;
 }
 
 export interface UsageBudgetControl {
 	getUsageTokenBudget(period: UsagePeriod): number | undefined;
-	setUsageTokenBudget(period: UsagePeriod, tokens: number | undefined): void;
+	setUsageTokenBudget(period: UsagePeriod, tokens: number | undefined): void | Promise<void>;
 }
 
 export interface PersistentExtensionControl extends EnforcementControl, CodexRecoveryControl, UsageBudgetControl {}
@@ -64,12 +75,9 @@ function loadSettings(path: string): ExtensionSettings {
 	}
 }
 
-function persistSettings(path: string, settings: ExtensionSettings): void {
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-	const temporary = `${path}.${process.pid}.tmp`;
-	writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
-	chmodSync(temporary, 0o600);
-	renameSync(temporary, path);
+async function persistSettings(path: string, settings: ExtensionSettings): Promise<void> {
+	await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+	await atomicJson.write(path, settings, { mode: 0o600, pretty: true, trailingNewline: true });
 }
 
 export function persistentEnforcementControl(env: Record<string, string | undefined> = process.env): PersistentExtensionControl {
@@ -77,29 +85,29 @@ export function persistentEnforcementControl(env: Record<string, string | undefi
 	const settings = loadSettings(path);
 	return {
 		isEnabled: () => settings.enforcementEnabled,
-		setEnabled(value: boolean): void {
+		async setEnabled(value: boolean): Promise<void> {
 			settings.enforcementEnabled = value;
-			persistSettings(path, settings);
+			await persistSettings(path, settings);
 		},
 		isFooterEnabled: () => settings.footerEnabled,
-		setFooterEnabled(value: boolean): void {
+		async setFooterEnabled(value: boolean): Promise<void> {
 			settings.footerEnabled = value;
-			persistSettings(path, settings);
+			await persistSettings(path, settings);
 		},
 		isCodexRecoveryEnabled: () => settings.codexRecoveryEnabled,
-		setCodexRecoveryEnabled(value: boolean): void {
+		async setCodexRecoveryEnabled(value: boolean): Promise<void> {
 			settings.codexRecoveryEnabled = value;
-			persistSettings(path, settings);
+			await persistSettings(path, settings);
 		},
 		getUsageTokenBudget(period): number | undefined {
 			return settings.usageTokenBudgets[period];
 		},
-		setUsageTokenBudget(period, tokens): void {
+		async setUsageTokenBudget(period, tokens): Promise<void> {
 			if (tokens !== undefined && (!Number.isFinite(tokens) || tokens <= 0))
 				throw new Error("usage token budget must be a positive finite number");
 			if (tokens === undefined) delete settings.usageTokenBudgets[period];
 			else settings.usageTokenBudgets[period] = tokens;
-			persistSettings(path, settings);
+			await persistSettings(path, settings);
 		},
 	};
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { persistentEnforcementControl } from "../extension/src/settings.ts";
 
 describe("Jittor extension enforcement settings", () => {
-	it("persists an emergency off switch privately across extension reloads", () => {
+	it("persists an emergency off switch privately across extension reloads", async () => {
 		const root = mkdtempSync(join(tmpdir(), "jittor-settings-"));
 		try {
 			const env = { HOME: root, XDG_CONFIG_HOME: join(root, "config") };
@@ -14,22 +14,27 @@ describe("Jittor extension enforcement settings", () => {
 			expect(first.isFooterEnabled()).toBe(true);
 			expect(first.isCodexRecoveryEnabled()).toBe(false);
 			expect(first.getUsageTokenBudget("hourly")).toBeUndefined();
-			first.setUsageTokenBudget("hourly", 25_000);
-			first.setUsageTokenBudget("daily", 250_000);
-			first.setCodexRecoveryEnabled(true);
-			first.setEnabled(false);
+			// Every setter now persists atomically (temp file + rename) via vehicle-core's
+			// createAtomicJsonWriter -- a real async fs write, not a synchronous writeFileSync -- so each
+			// call must be awaited before the next one, or before a fresh control re-reads the file, the
+			// same discipline any real caller (index.ts/settings-tui.ts, all already async) already follows.
+			await first.setUsageTokenBudget("hourly", 25_000);
+			await first.setUsageTokenBudget("daily", 250_000);
+			await first.setCodexRecoveryEnabled(true);
+			await first.setEnabled(false);
 			expect(first.isFooterEnabled()).toBe(true);
-			first.setFooterEnabled(false);
+			await first.setFooterEnabled(false);
 			const second = persistentEnforcementControl(env);
 			expect(second.isEnabled()).toBe(false);
 			expect(second.isFooterEnabled()).toBe(false);
 			expect(second.isCodexRecoveryEnabled()).toBe(true);
 			expect(second.getUsageTokenBudget("hourly")).toBe(25_000);
 			expect(second.getUsageTokenBudget("daily")).toBe(250_000);
-			expect(() => second.setUsageTokenBudget("weekly", -1)).toThrow("positive finite");
-			second.setUsageTokenBudget("hourly", undefined);
+			// A validation failure now rejects (async function) rather than throwing synchronously.
+			await expect(second.setUsageTokenBudget("weekly", -1)).rejects.toThrow("positive finite");
+			await second.setUsageTokenBudget("hourly", undefined);
 			expect(second.getUsageTokenBudget("hourly")).toBeUndefined();
-			second.setFooterEnabled(true);
+			await second.setFooterEnabled(true);
 			expect(second.isEnabled()).toBe(false);
 			expect(statSync(join(root, "config", "jittor", "extension.json")).mode & 0o777).toBe(0o600);
 		} finally {
