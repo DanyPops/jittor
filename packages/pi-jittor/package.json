@@ -22,6 +22,7 @@
     "typebox": "*"
   },
   "devDependencies": {
+    "@danypops/pi-extension-harness": "^0.5.0",
     "bun-types": "latest"
   },
   "repository": {
