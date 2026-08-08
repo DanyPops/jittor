@@ -150,9 +150,10 @@ describe("buildMessageHistoryTree against a real SessionManager", () => {
 		const result = buildMessageHistoryTree(tree as never, activeIds);
 
 		const root = result.items[0]!;
-		expect(root.children).toHaveLength(2); // both branches are real children of root in the tree
-		const abandoned = root.children!.find((child) => child.label.includes("inactive branch"))!;
-		const active = root.children!.find((child) => !child.label.includes("inactive branch"))!;
+		const branchEntries = root.children!.filter((child) => child.label.includes("assistant"));
+		expect(branchEntries).toHaveLength(2); // both branches are real children of root in the tree; root also has its granular text-cost child
+		const abandoned = branchEntries.find((child) => child.label.includes("inactive branch"))!;
+		const active = branchEntries.find((child) => !child.label.includes("inactive branch"))!;
 		expect(abandoned.estimatedTokens).toBe(Math.ceil(100 / 4)); // the abandoned branch's real cost is still shown
 		expect(active.estimatedTokens).toBe(Math.ceil(40 / 4));
 		// activeTokens counts the root + the active branch only, not the abandoned one.

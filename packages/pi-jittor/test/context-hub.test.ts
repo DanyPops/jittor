@@ -125,6 +125,18 @@ describe("buildContextReport", () => {
 		expect(itemLines).toHaveLength(5);
 		expect(itemLines[0]).toContain("item-19"); // heaviest first
 	});
+
+	it("caps deeply nested plain-text output and directs users to the searchable TUI", () => {
+		const children = Array.from({ length: 300 }, (_, index) => ({ label: `child-${index}`, estimatedTokens: 1 }));
+		const report = buildContextReport(
+			breakdown({
+				segments: [{ key: "history", label: "History", estimatedTokens: 300, confidence: "exact-structural", items: [{ label: "root", estimatedTokens: 300, children }] }],
+			}),
+		);
+		expect(report).toContain("more context rows");
+		expect(report).toContain("open /context in TUI mode to search and filter");
+		expect(report.split("\n").length).toBeLessThanOrEqual(203);
+	});
 });
 
 describe("toolLedgerSegment integration with buildContextReport", () => {

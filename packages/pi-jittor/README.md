@@ -51,6 +51,12 @@ The extension observes Papyrus's task-focus lifecycle in real time over a shared
 
 Run `/jittor benchmarks [coding|general] [research|planning|general]` (either order, either or both omitted) for the responsive recommendation panel over the core daemon's benchmark ranking operation (see `@danypops/jittor`'s README for ingestion sources). Because the released Pi extension API does not expose the exact `/scoped-models` set, the current adapter labels candidates `available-models`; the panel says **ADVISORY** and offers no selection action. Automatic route ordering is allowed only for `exact-session` authority and then narrows/reorders routes already present in the supplied candidate set. `/jittor outcome accepted` or `/jittor outcome rejected` attaches explicit outcome evidence to the latest completed local run; runtime completion alone is not treated as quality success.
 
+### Context Hub inspection
+
+Run `/context` for a tree-aware breakdown of the current context window. The TUI supports `/` live search, `f` scope cycling (**all**, **active**, **historical/compacted**), `m` minimum-size thresholds, `g`/`G` top/bottom navigation, and arrow-key scrolling. Search and filters preserve ancestor rows so a matching message block never loses its segment, turn, or branch context.
+
+Conversation entries drill into text, thinking, tool-call arguments, shell commands, and outputs. Base-prompt aggregates drill into individual tool snippets, skills, project context files, guidelines, and custom/appended prompt inputs. These item values are explicitly marked `≈ char/4`: Pi exposes their structure and characters, but no provider-neutral tokenizer. Assistant turn labels also show the exact **provider-reported aggregate request context** (`input + cacheRead + cacheWrite`) when persisted usage is available. That aggregate is the reliable per-turn tree-context size; it cannot be apportioned exactly among individual items. Image costs, provider message envelopes, cache-control serialization, and payload rewrites remain provider/model-specific. Pi's `before_provider_request` hook can expose the final payload for diagnostics, but the public API does not expose a portable tokenizer that could turn it into exact per-item costs.
+
 ### Context pressure
 
 Run `/jittor context` for the in-session summary of Papyrus prompt-injection and Pi compaction telemetry; see `@danypops/jittor`'s README for what is recorded and the equivalent CLI command.

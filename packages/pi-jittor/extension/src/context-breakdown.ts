@@ -32,29 +32,60 @@ export interface SessionTreeNodeLike {
 	children: SessionTreeNodeLike[];
 }
 
-function messageContentCharacters(message: unknown): number {
-	if (typeof message !== "object" || message === null) return 0;
+interface MessageContentAnalysis {
+	characters: number;
+	items: ContextSegmentItem[];
+	imageCount: number;
+}
+
+function measuredItem(label: string, characters: number): ContextSegmentItem {
+	return { label: `${label} · ${characters.toLocaleString()} chars (≈ char/4)`, estimatedTokens: toCeilTokens(characters) };
+}
+
+/** Breaks a message into the public content fields Pi actually persists. These are structural char/4 estimates, not tokenizer-exact costs. */
+function analyzeMessageContent(message: unknown): MessageContentAnalysis {
+	if (typeof message !== "object" || message === null) return { characters: 0, items: [], imageCount: 0 };
 	const record = message as Record<string, unknown>;
 	if (record.role === "bashExecution") {
 		// Pi's own context builder excludes "!!"-prefixed bash output from context; match that.
-		if (record.excludeFromContext === true) return 0;
-		return String(record.command ?? "").length + String(record.output ?? "").length;
+		if (record.excludeFromContext === true) return { characters: 0, items: [], imageCount: 0 };
+		const command = String(record.command ?? "");
+		const output = String(record.output ?? "");
+		return {
+			characters: command.length + output.length,
+			items: [measuredItem("command", command.length), measuredItem("output", output.length)].filter((item) => item.estimatedTokens > 0),
+			imageCount: 0,
+		};
 	}
 	const content = record.content;
-	if (typeof content === "string") return content.length;
-	if (!Array.isArray(content)) return 0;
+	if (typeof content === "string") return { characters: content.length, items: [measuredItem("text", content.length)], imageCount: 0 };
+	if (!Array.isArray(content)) return { characters: 0, items: [], imageCount: 0 };
 	let characters = 0;
-	for (const block of content) {
+	let imageCount = 0;
+	const items: ContextSegmentItem[] = [];
+	for (let index = 0; index < content.length; index++) {
+		const block = content[index];
 		if (typeof block !== "object" || block === null) continue;
 		const b = block as Record<string, unknown>;
-		if (b.type === "text") characters += String(b.text ?? "").length;
-		else if (b.type === "thinking") characters += String(b.thinking ?? "").length;
-		else if (b.type === "toolCall") characters += JSON.stringify(b.arguments ?? {}).length;
-		// "image" blocks are deliberately not counted here -- image tokens follow a different,
-		// non-character-based cost model this char/4 estimate cannot represent; this is a real,
-		// documented undercount for image-heavy sessions, not a silent approximation.
+		let blockCharacters = 0;
+		let label = `block ${index + 1}`;
+		if (b.type === "text") {
+			blockCharacters = String(b.text ?? "").length;
+			label = "text";
+		} else if (b.type === "thinking") {
+			blockCharacters = String(b.thinking ?? "").length;
+			label = "thinking";
+		} else if (b.type === "toolCall") {
+			blockCharacters = JSON.stringify(b.arguments ?? {}).length;
+			label = `tool call ${String(b.name ?? "(unknown)")} arguments`;
+		} else if (b.type === "image") {
+			imageCount += 1;
+			continue; // image tokens are provider/model-specific and cannot be derived from base64 characters
+		} else continue;
+		characters += blockCharacters;
+		if (blockCharacters > 0) items.push(measuredItem(label, blockCharacters));
 	}
-	return characters;
+	return { characters, items, imageCount };
 }
 
 function messageSnippet(message: unknown, maxLength = 48): string {
@@ -78,13 +109,28 @@ function messageSnippet(message: unknown, maxLength = 48): string {
 	return collapsed.length > maxLength ? `${collapsed.slice(0, maxLength - 1)}…` : collapsed;
 }
 
-function entryLabel(entry: SessionEntryLike): string {
+function providerPromptUsage(message: unknown): string {
+	if (typeof message !== "object" || message === null) return "";
+	const usage = (message as Record<string, unknown>).usage;
+	if (typeof usage !== "object" || usage === null) return "";
+	const record = usage as Record<string, unknown>;
+	const input = typeof record.input === "number" && record.input >= 0 ? record.input : 0;
+	const cacheRead = typeof record.cacheRead === "number" && record.cacheRead >= 0 ? record.cacheRead : 0;
+	const cacheWrite = typeof record.cacheWrite === "number" && record.cacheWrite >= 0 ? record.cacheWrite : 0;
+	const promptTokens = input + cacheRead + cacheWrite;
+	if (promptTokens <= 0) return "";
+	const cache = cacheRead > 0 || cacheWrite > 0 ? `; new ${input.toLocaleString()}, cache read ${cacheRead.toLocaleString()}, write ${cacheWrite.toLocaleString()}` : "";
+	return ` · provider-reported request context ${promptTokens.toLocaleString()} tok${cache}`;
+}
+
+function entryLabel(entry: SessionEntryLike, imageCount = 0): string {
 	if (entry.type === "compaction") return "compaction summary";
 	if (entry.type === "branch_summary") return "branch summary";
 	const role = typeof entry.message === "object" && entry.message !== null ? (entry.message as Record<string, unknown>).role : undefined;
 	const prefix = typeof role === "string" ? role : entry.type;
 	const snippet = messageSnippet(entry.message);
-	return snippet ? `${prefix}: ${snippet}` : prefix;
+	const images = imageCount > 0 ? ` · ${imageCount} image${imageCount === 1 ? "" : "s"} (token cost unavailable)` : "";
+	return `${snippet ? `${prefix}: ${snippet}` : prefix}${providerPromptUsage(entry.message)}${images}`;
 }
 
 export interface MessageHistoryTree {
@@ -160,9 +206,10 @@ export function buildMessageHistoryTree(
 	for (let index = order.length - 1; index >= 0; index--) {
 		const frame = order[index]!;
 		const entry = frame.node.entry;
+		const analysis = entry.type === "message" ? analyzeMessageContent(entry.message) : { characters: 0, items: [], imageCount: 0 };
 		const characters =
 			entry.type === "message"
-				? messageContentCharacters(entry.message)
+				? analysis.characters
 				: entry.type === "compaction" || entry.type === "branch_summary"
 					? (entry.summary ?? "").length
 					: 0;
@@ -171,11 +218,14 @@ export function buildMessageHistoryTree(
 		if (isActive) activeTokens += tokens;
 		const isOnBranch = branchEntryIds ? branchEntryIds.has(entry.id) : isActive; // no branch set given -- fall back to the old binary active/inactive-branch label
 
-		const children = childItemsByParent.get(index) ?? [];
-		if (tokens === 0 && children.length === 0) continue; // no content, no descendants with content -- nothing to show
+		const treeChildren = childItemsByParent.get(index) ?? [];
+		const contentChildren = analysis.items;
+		const children = [...contentChildren, ...treeChildren];
+		if (tokens === 0 && children.length === 0 && analysis.imageCount === 0) continue; // no content, no descendants, and no unknown-cost image -- nothing to show
 
+		const label = entryLabel(entry, analysis.imageCount);
 		const item: ContextSegmentItem = {
-			label: isActive ? entryLabel(entry) : isOnBranch ? `${entryLabel(entry)} (compacted)` : `${entryLabel(entry)} (inactive branch)`,
+			label: isActive ? label : isOnBranch ? `${label} (compacted)` : `${label} (inactive branch)`,
 			estimatedTokens: tokens,
 			...(children.length > 0 ? { children } : {}),
 		};
@@ -228,9 +278,14 @@ export function buildBasePromptItems(options: BuildSystemPromptOptions, totalCha
 	const toolSnippetEntries = Object.entries(options.toolSnippets ?? {});
 	// Mirrors buildSystemPrompt()'s own "- name: snippet\n" line shape closely enough to be a
 	// fair estimate without importing Pi-internal formatting code.
+	const toolSnippetDetails = toolSnippetEntries.map(([name, snippet]) => measuredItem(name, name.length + snippet.length + 4));
 	const toolSnippetsCharacters = toolSnippetEntries.reduce((sum, [name, snippet]) => sum + name.length + snippet.length + 4, 0);
 	if (toolSnippetsCharacters > 0) {
-		items.push({ label: `Tool snippets (${toolSnippetEntries.length} tools)`, estimatedTokens: toCeilTokens(toolSnippetsCharacters) });
+		items.push({
+			label: `Tool snippets (${toolSnippetEntries.length} tools)`,
+			estimatedTokens: toCeilTokens(toolSnippetsCharacters),
+			children: toolSnippetDetails,
+		});
 	}
 
 	const visibleSkills = (options.skills ?? []).filter((skill) => !skill.disableModelInvocation);
@@ -239,7 +294,11 @@ export function buildBasePromptItems(options: BuildSystemPromptOptions, totalCha
 		0,
 	);
 	if (skillsCharacters > 0) {
-		items.push({ label: `Skills catalog (${visibleSkills.length} skills)`, estimatedTokens: toCeilTokens(skillsCharacters) });
+		items.push({
+			label: `Skills catalog (${visibleSkills.length} skills)`,
+			estimatedTokens: toCeilTokens(skillsCharacters),
+			children: visibleSkills.map((skill) => measuredItem(skill.name, skill.name.length + skill.description.length + skill.filePath.length + 20)),
+		});
 	}
 
 	const contextFiles = options.contextFiles ?? [];
@@ -248,10 +307,32 @@ export function buildBasePromptItems(options: BuildSystemPromptOptions, totalCha
 		items.push({
 			label: `Project context files (${contextFiles.length}, e.g. AGENTS.md)`,
 			estimatedTokens: toCeilTokens(contextFilesCharacters),
+			children: contextFiles.map((file) => measuredItem(file.path, file.path.length + file.content.length + 40)),
 		});
 	}
 
-	const knownCharacters = toolSnippetsCharacters + skillsCharacters + contextFilesCharacters;
+	const promptGuidelines = options.promptGuidelines ?? [];
+	const promptGuidelinesCharacters = promptGuidelines.reduce((sum, guideline) => sum + guideline.length + 2, 0);
+	if (promptGuidelinesCharacters > 0) {
+		items.push({
+			label: `Tool guidelines (${promptGuidelines.length})`,
+			estimatedTokens: toCeilTokens(promptGuidelinesCharacters),
+			children: promptGuidelines.map((guideline, index) => measuredItem(`guideline ${index + 1}`, guideline.length + 2)),
+		});
+	}
+
+	const customPromptCharacters = options.customPrompt?.length ?? 0;
+	if (customPromptCharacters > 0) items.push(measuredItem("Custom system prompt", customPromptCharacters));
+	const appendedPromptCharacters = options.appendSystemPrompt?.length ?? 0;
+	if (appendedPromptCharacters > 0) items.push(measuredItem("Appended system prompt", appendedPromptCharacters));
+
+	const knownCharacters =
+		toolSnippetsCharacters +
+		skillsCharacters +
+		contextFilesCharacters +
+		promptGuidelinesCharacters +
+		customPromptCharacters +
+		appendedPromptCharacters;
 	const remainderCharacters = Math.max(0, totalCharacters - knownCharacters);
 	if (remainderCharacters > 0 || items.length === 0) {
 		items.push({ label: "Base template, guidelines, and formatting", estimatedTokens: toCeilTokens(remainderCharacters) });

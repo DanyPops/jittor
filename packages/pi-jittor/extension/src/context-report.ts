@@ -1,9 +1,10 @@
 import type { ContextSegment } from "@danypops/jittor";
-import { buildContextRows, type ContextSegment as MalevichContextSegment } from "malevich-tui-components";
+import { type ContextRow, type ContextSegment as MalevichContextSegment } from "malevich-tui-components";
 import type { ContextBreakdown } from "./context-breakdown.ts";
 
 /** Bounds how many items render per segment in the plain-text fallback -- a notify-mode report is a scan-at-a-glance summary, not a full dump (the interactive TUI view has no such cap, since it scrolls). */
 const MAX_ITEMS_PER_SEGMENT_LINE = 5;
+const MAX_REPORT_ROWS = 200;
 
 function formatTokens(tokens: number): string {
 	return tokens >= 1_000 ? `${(tokens / 1_000).toFixed(1)}k` : String(tokens);
@@ -11,6 +12,32 @@ function formatTokens(tokens: number): string {
 
 function percentOf(part: number, whole: number): string {
 	return whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : "—";
+}
+
+/** Malevich-compatible row projection with an explicit stack, safe for long linear session trees. */
+export function buildContextRowsIterative(segments: readonly MalevichContextSegment[], totalTokens?: number | null): ContextRow[] {
+	const rows: ContextRow[] = [];
+	const denominator = totalTokens ?? segments.reduce((sum, segment) => sum + segment.estimatedTokens, 0);
+	for (const segment of segments) {
+		const items = [...(segment.items ?? [])].filter((item) => item.estimatedTokens > 0).sort((a, b) => b.estimatedTokens - a.estimatedTokens);
+		if (segment.estimatedTokens <= 0 && items.length === 0 && !segment.unknown) continue;
+		rows.push({
+			key: segment.key,
+			isHeader: true,
+			depth: 0,
+			text: `${segment.label} — ${segment.estimatedTokens} tok (${percentOf(segment.estimatedTokens, denominator)})`,
+		});
+		const stack = items.reverse().map((item) => ({ item, depth: 1 }));
+		while (stack.length > 0) {
+			const { item, depth } = stack.pop()!;
+			rows.push({ key: segment.key, isHeader: false, depth, text: `${item.estimatedTokens.toString().padStart(6)} tok  ${item.label}` });
+			const children = [...(item.children ?? [])]
+				.filter((child) => child.estimatedTokens > 0)
+				.sort((a, b) => b.estimatedTokens - a.estimatedTokens);
+			for (let index = children.length - 1; index >= 0; index--) stack.push({ item: children[index]!, depth: depth + 1 });
+		}
+	}
+	return rows;
 }
 
 /** Malevich's row builder is confidence-unaware (it's a generic segment/item shape); folding the tier into the label is how it survives into the rendered row text, e.g. "Active Rules [exact-cooperative]". */
@@ -49,12 +76,14 @@ export function buildContextReport(breakdown: ContextBreakdown): string {
 		lines.push(`Estimates exceed real total by ~${breakdown.overshootTokens} tok -- sizes below are approximate, not exact`);
 
 	const sorted = [...breakdown.segments].sort((left, right) => right.estimatedTokens - left.estimatedTokens).map(withConfidenceLabel);
-	const rows = buildContextRows(sorted, breakdown.totalTokens ?? undefined);
+	const rows = buildContextRowsIterative(sorted, breakdown.totalTokens ?? undefined);
 	if (rows.length === 0) {
 		lines.push("", "(no segments observed yet)");
 		return lines.join("\n");
 	}
 	lines.push("");
-	for (const row of rows) lines.push(row.isHeader ? row.text : `${"  ".repeat(row.depth)}${row.text}`);
+	const visibleRows = rows.slice(0, MAX_REPORT_ROWS);
+	for (const row of visibleRows) lines.push(row.isHeader ? row.text : `${"  ".repeat(row.depth)}${row.text}`);
+	if (rows.length > visibleRows.length) lines.push(`… ${rows.length - visibleRows.length} more context rows (open /context in TUI mode to search and filter)`);
 	return lines.join("\n");
 }

@@ -27,8 +27,9 @@ describe("buildMessageHistoryTree", () => {
 		const child = node("2", { type: "message", message: { role: "assistant", content: [{ type: "text", text: "y".repeat(40) }] } });
 		const tree = [node("1", { type: "message", message: { role: "user", content: "x".repeat(40) } }, [child])];
 		const result = buildMessageHistoryTree(tree, new Set(["1", "2"]));
-		expect(result.items[0]!.children).toHaveLength(1);
-		expect(result.items[0]!.children![0]!.estimatedTokens).toBe(Math.ceil(40 / 4));
+		const assistant = result.items[0]!.children!.find((item) => item.label.includes("assistant"));
+		expect(assistant).toBeDefined();
+		expect(assistant!.estimatedTokens).toBe(Math.ceil(40 / 4));
 	});
 
 	it("labels a branch not on the active path distinctly, and excludes it from activeTokens", () => {
@@ -65,7 +66,7 @@ describe("buildMessageHistoryTree", () => {
 		expect(result.items[0]!.label).not.toContain("(compacted)");
 	});
 
-	it("counts thinking blocks and tool-call arguments, not just plain text", () => {
+	it("exposes granular text, thinking, and named tool-call argument costs under each message", () => {
 		const tree = [
 			node("1", {
 				type: "message",
@@ -73,13 +74,47 @@ describe("buildMessageHistoryTree", () => {
 					role: "assistant",
 					content: [
 						{ type: "thinking", thinking: "a".repeat(20) },
-						{ type: "toolCall", arguments: { path: "b".repeat(20) } },
+						{ type: "toolCall", name: "read", arguments: { path: "b".repeat(20) } },
 					],
 				},
 			}),
 		];
 		const result = buildMessageHistoryTree(tree, new Set(["1"]));
 		expect(result.items[0]!.estimatedTokens).toBeGreaterThan(0);
+		const labels = result.items[0]!.children!.map((item) => item.label);
+		expect(labels.some((label) => label.includes("thinking") && label.includes("char/4"))).toBe(true);
+		expect(labels.some((label) => label.includes("tool call read arguments") && label.includes("char/4"))).toBe(true);
+	});
+
+	it("shows the exact provider-reported aggregate request context on assistant turns without calling it a per-item cost", () => {
+		const result = buildMessageHistoryTree(
+			[
+				node("1", {
+					type: "message",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: "answer" }],
+						usage: { input: 200, cacheRead: 300, cacheWrite: 50 },
+					},
+				}),
+			],
+			new Set(["1"]),
+		);
+		expect(result.items[0]!.label).toContain("provider-reported request context 550 tok");
+		expect(result.items[0]!.label).toContain("new 200, cache read 300, write 50");
+	});
+
+	it("surfaces image presence while stating that its provider-specific token cost is unavailable", () => {
+		const result = buildMessageHistoryTree(
+			[
+				node("1", {
+					type: "message",
+					message: { role: "user", content: [{ type: "text", text: "inspect" }, { type: "image", data: "base64" }] },
+				}),
+			],
+			new Set(["1"]),
+		);
+		expect(result.items[0]!.label).toContain("1 image (token cost unavailable)");
 	});
 
 	it("excludes bashExecution output explicitly marked excludeFromContext, matching Pi's own !! prefix behavior", () => {
@@ -166,6 +201,11 @@ describe("buildBasePromptItems", () => {
 		expect(labels.some((label) => label.includes("Project context files (1"))).toBe(true);
 		expect(labels.some((label) => label.includes("Base template"))).toBe(true);
 		for (const item of items) expect(item.estimatedTokens).toBeGreaterThan(0);
+		expect(items.find((item) => item.label.includes("Tool snippets"))!.children!.map((item) => item.label)).toEqual(
+			expect.arrayContaining([expect.stringContaining("read"), expect.stringContaining("bash")]),
+		);
+		expect(items.find((item) => item.label.includes("Skills catalog"))!.children![0]!.label).toContain("commit");
+		expect(items.find((item) => item.label.includes("Project context files"))!.children![0]!.label).toContain("AGENTS.md");
 	});
 
 	it("excludes skills marked disableModelInvocation from the count, since Pi's own formatSkillsForPrompt does the same", () => {
