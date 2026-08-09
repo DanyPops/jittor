@@ -11,14 +11,17 @@ import type { OperationHandlerMap } from "./operation-types.ts";
 /**
  * Best-effort catalog-backed pricing lookup: an unconfigured/unavailable catalog, or a model the
  * catalog doesn't carry, returns null rather than throwing -- cache economics degrades that
- * model's pricing to "unknown" instead of failing the whole query. Only the flat top-level prices
- * are used (no tiered/context-length-aware resolution): a query-time aggregate has no single
- * request context size to resolve a tier against.
+ * model's pricing to "unknown" instead of failing the whole query.
+ *
+ * `contextSizeTokens` is accepted (matching the caller-side per-run resolution in
+ * cache-economics.ts) but not yet used to resolve `pricing.tiers`/`contextOver200k` -- only the
+ * flat top-level prices are returned today. Tiered/long-context resolution is the next slice; this
+ * still only returns a flat price so this refactor stays behavior-preserving.
  */
 class CatalogCacheEconomicsPricing implements CacheEconomicsPricingLookup {
 	constructor(private readonly catalog: ModelCatalogController) {}
 
-	priceFor(provider: string, model: string): CacheEconomicsPricing | null {
+	priceFor(provider: string, model: string, _contextSizeTokens: number): CacheEconomicsPricing | null {
 		try {
 			const entry = this.catalog.query({ provider, model, limit: 1 }).entries[0];
 			if (!entry) return null;

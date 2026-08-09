@@ -16,16 +16,22 @@ import type { StoredMetricObservation } from "./metric.ts";
  */
 export type CacheCostBasis = "provider-reported" | "catalog-estimate" | "unknown";
 
-/** Flat (non-tiered, non-context-length-aware) per-token-million catalog prices for one provider/model. */
+/** Flat (already tier-resolved, if applicable) per-token-million catalog prices for one provider/model at one particular request size. */
 export interface CacheEconomicsPricing {
 	input?: number;
 	cacheRead?: number;
 	cacheWrite?: number;
 }
 
-/** Best-effort catalog pricing lookup; returns null when the catalog has no snapshot or no matching model, never throws. */
+/**
+ * Best-effort catalog pricing lookup; returns null when the catalog has no snapshot or no
+ * matching model, never throws. `contextSizeTokens` is the specific request/run's own real size
+ * (input + cache-read + cache-write tokens) -- the lookup is free to resolve a tiered or
+ * long-context ("contextOver200k") price against it instead of a single flat rate; the domain
+ * layer here never assumes which it did.
+ */
 export interface CacheEconomicsPricingLookup {
-	priceFor(provider: string, model: string): CacheEconomicsPricing | null;
+	priceFor(provider: string, model: string, contextSizeTokens: number): CacheEconomicsPricing | null;
 }
 
 export interface CacheEconomicsModelSummary {
@@ -49,7 +55,7 @@ export interface CacheEconomicsModelSummary {
 	savingsUsd: number | null;
 	/** The premium actually paid for cache-write tokens over what plain input billing would have cost. */
 	cacheWritePremiumUsd: number | null;
-	/** How many cache-read tokens, at the observed/estimated read rate, would be needed to offset the write premium. Zero when no premium was paid; null when undeterminable. */
+	/** How many cache-read tokens, at the observed/estimated read rate, would be needed to offset the write premium. Zero when no premium was paid; null when undeterminable. An aggregate approximation over the whole window/model, not resolved per run. */
 	breakEvenReadTokens: number | null;
 	/** Whether observed savings already met or exceeded the write premium. Null when there was no cache write to evaluate, or the comparison is undeterminable. */
 	paybackAchieved: boolean | null;
@@ -85,7 +91,15 @@ function attributeText(attributes: Record<string, unknown>, key: string): string
 	return typeof attributes[key] === "string" && attributes[key].length > 0 ? (attributes[key] as string) : "unknown";
 }
 
-interface ModelAccumulator {
+/** A turn's own runId when present, else its shared observedAt timestamp -- rows recorded before runId tagging existed still group correctly as long as they were sent (and therefore timestamped) together. */
+function runKeyFor(row: StoredMetricObservation): string {
+	const runId = row.attributes.runId;
+	if (typeof runId === "string" && runId.length > 0) return runId;
+	return `observedAt:${row.observedAt}`;
+}
+
+/** One turn's own token/cost totals -- the unit pricing (including any tiered/long-context catalog rate) is resolved against. */
+interface RunAccumulator {
 	provider: string;
 	model: string;
 	inputTokens: number;
@@ -99,11 +113,8 @@ interface ModelAccumulator {
 	sawCacheWriteCost: boolean;
 }
 
-function accumulatorFor(byKey: Map<string, ModelAccumulator>, provider: string, model: string): ModelAccumulator {
-	const key = `${provider}\u0000${model}`;
-	const existing = byKey.get(key);
-	if (existing) return existing;
-	const created: ModelAccumulator = {
+function newRunAccumulator(provider: string, model: string): RunAccumulator {
+	return {
 		provider,
 		model,
 		inputTokens: 0,
@@ -116,8 +127,6 @@ function accumulatorFor(byKey: Map<string, ModelAccumulator>, provider: string, 
 		cacheWriteCostUsd: 0,
 		sawCacheWriteCost: false,
 	};
-	byKey.set(key, created);
-	return created;
 }
 
 function combineBasis(left: CacheCostBasis, right: CacheCostBasis): CacheCostBasis {
@@ -126,14 +135,28 @@ function combineBasis(left: CacheCostBasis, right: CacheCostBasis): CacheCostBas
 	return "provider-reported";
 }
 
-/** provider-reported-in-window rate when available, else a catalog estimate, else null -- with the basis that produced it. */
-function inputRate(accumulator: ModelAccumulator, pricing: CacheEconomicsPricingLookup): { rate: number | null; basis: CacheCostBasis } {
-	if (accumulator.sawInputCost && accumulator.inputTokens > 0) {
-		return { rate: accumulator.inputCostUsd / accumulator.inputTokens, basis: "provider-reported" };
+/** Sums basis-tagged dollar amounts; a single unknown amount makes the whole sum unknown rather than silently partial. */
+function combineDollarField(entries: Array<{ amount: number | null; basis: CacheCostBasis }>): {
+	amount: number | null;
+	basis: CacheCostBasis;
+} {
+	let total = 0;
+	let basis: CacheCostBasis = "provider-reported";
+	for (const entry of entries) {
+		if (entry.amount === null) return { amount: null, basis: "unknown" };
+		total += entry.amount;
+		basis = combineBasis(basis, entry.basis);
 	}
-	const price = pricing.priceFor(accumulator.provider, accumulator.model)?.input;
-	if (price !== undefined) return { rate: price / CATALOG_PRICE_TOKEN_UNIT, basis: "catalog-estimate" };
-	return { rate: null, basis: "unknown" };
+	return { amount: total, basis };
+}
+
+function combineNullableSum(values: Array<number | null>): number | null {
+	let total = 0;
+	for (const value of values) {
+		if (value === null) return null;
+		total += value;
+	}
+	return total;
 }
 
 function actualCost(
@@ -149,76 +172,135 @@ function actualCost(
 	return { costUsd: null, basis: "unknown" };
 }
 
-function summarizeModel(accumulator: ModelAccumulator, pricing: CacheEconomicsPricingLookup): CacheEconomicsModelSummary {
-	const catalogPrices = pricing.priceFor(accumulator.provider, accumulator.model);
-	const { rate: baselineRate, basis: baselineBasis } = inputRate(accumulator, pricing);
-	const read = actualCost(
-		accumulator.cacheReadTokens,
-		accumulator.sawCacheReadCost,
-		accumulator.cacheReadCostUsd,
-		catalogPrices?.cacheRead,
-	);
-	const write = actualCost(
-		accumulator.cacheWriteTokens,
-		accumulator.sawCacheWriteCost,
-		accumulator.cacheWriteCostUsd,
-		catalogPrices?.cacheWrite,
-	);
+interface RunPricingResult {
+	inputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	inputCostUsd: number;
+	sawInputCost: boolean;
+	cacheReadCostUsd: number | null;
+	cacheReadCostBasis: CacheCostBasis;
+	cacheWriteCostUsd: number | null;
+	cacheWriteCostBasis: CacheCostBasis;
+	counterfactualNoCacheCostUsd: number | null;
+	counterfactualBasis: CacheCostBasis;
+	cacheWritePremiumUsd: number | null;
+}
+
+/**
+ * Prices exactly one turn, against that turn's own real context size (input + cache-read +
+ * cache-write tokens) -- the only level at which a tiered/long-context catalog price can honestly
+ * be resolved. Never sums across turns; that happens once, afterward, in aggregateRuns.
+ */
+function priceRun(run: RunAccumulator, pricing: CacheEconomicsPricingLookup): RunPricingResult {
+	const contextSizeTokens = run.inputTokens + run.cacheReadTokens + run.cacheWriteTokens;
+	const catalogPrices = pricing.priceFor(run.provider, run.model, contextSizeTokens);
+	const read = actualCost(run.cacheReadTokens, run.sawCacheReadCost, run.cacheReadCostUsd, catalogPrices?.cacheRead);
+	const write = actualCost(run.cacheWriteTokens, run.sawCacheWriteCost, run.cacheWriteCostUsd, catalogPrices?.cacheWrite);
+
+	let baselineRate: number | null = null;
+	let baselineBasis: CacheCostBasis = "unknown";
+	if (run.sawInputCost && run.inputTokens > 0) {
+		baselineRate = run.inputCostUsd / run.inputTokens;
+		baselineBasis = "provider-reported";
+	} else if (catalogPrices?.input !== undefined) {
+		baselineRate = catalogPrices.input / CATALOG_PRICE_TOKEN_UNIT;
+		baselineBasis = "catalog-estimate";
+	}
 
 	let counterfactualNoCacheCostUsd: number | null = null;
 	let counterfactualBasis: CacheCostBasis = "unknown";
-	if (accumulator.cacheReadTokens === 0) {
+	if (run.cacheReadTokens === 0) {
 		counterfactualNoCacheCostUsd = 0;
 		counterfactualBasis = "provider-reported";
 	} else if (baselineRate !== null) {
-		counterfactualNoCacheCostUsd = accumulator.cacheReadTokens * baselineRate;
+		counterfactualNoCacheCostUsd = run.cacheReadTokens * baselineRate;
 		counterfactualBasis = baselineBasis;
 	}
 
-	const savingsUsd = counterfactualNoCacheCostUsd !== null && read.costUsd !== null ? counterfactualNoCacheCostUsd - read.costUsd : null;
-
 	let cacheWritePremiumUsd: number | null = null;
-	if (accumulator.cacheWriteTokens === 0) {
-		cacheWritePremiumUsd = 0;
-	} else if (baselineRate !== null && write.costUsd !== null) {
-		cacheWritePremiumUsd = write.costUsd - accumulator.cacheWriteTokens * baselineRate;
-	}
+	if (run.cacheWriteTokens === 0) cacheWritePremiumUsd = 0;
+	else if (baselineRate !== null && write.costUsd !== null) cacheWritePremiumUsd = write.costUsd - run.cacheWriteTokens * baselineRate;
+
+	return {
+		inputTokens: run.inputTokens,
+		cacheReadTokens: run.cacheReadTokens,
+		cacheWriteTokens: run.cacheWriteTokens,
+		inputCostUsd: run.inputCostUsd,
+		sawInputCost: run.sawInputCost,
+		cacheReadCostUsd: read.costUsd,
+		cacheReadCostBasis: read.basis,
+		cacheWriteCostUsd: write.costUsd,
+		cacheWriteCostBasis: write.basis,
+		counterfactualNoCacheCostUsd,
+		counterfactualBasis: run.cacheReadTokens === 0 ? "provider-reported" : combineBasis(baselineBasis, counterfactualBasis),
+		cacheWritePremiumUsd,
+	};
+}
+
+/**
+ * Sums already-run-priced dollar figures into one model's window totals, then derives
+ * break-even/payback from those totals plus one whole-window catalog lookup -- an intentional,
+ * documented approximation: unlike the dollar totals above (correctly tiered per run), a single
+ * "how many more read tokens would it take" projection over a blended window has no one real
+ * request size to resolve a tier against either.
+ */
+function aggregateRuns(
+	provider: string,
+	model: string,
+	runs: RunPricingResult[],
+	pricing: CacheEconomicsPricingLookup,
+): CacheEconomicsModelSummary {
+	const inputTokens = runs.reduce((sum, run) => sum + run.inputTokens, 0);
+	const cacheReadTokens = runs.reduce((sum, run) => sum + run.cacheReadTokens, 0);
+	const cacheWriteTokens = runs.reduce((sum, run) => sum + run.cacheWriteTokens, 0);
+	const read = combineDollarField(runs.map((run) => ({ amount: run.cacheReadCostUsd, basis: run.cacheReadCostBasis })));
+	const write = combineDollarField(runs.map((run) => ({ amount: run.cacheWriteCostUsd, basis: run.cacheWriteCostBasis })));
+	const counterfactual = combineDollarField(
+		runs.map((run) => ({ amount: run.counterfactualNoCacheCostUsd, basis: run.counterfactualBasis })),
+	);
+	const savingsUsd = counterfactual.amount !== null && read.amount !== null ? counterfactual.amount - read.amount : null;
+	const cacheWritePremiumUsd = combineNullableSum(runs.map((run) => run.cacheWritePremiumUsd));
+
+	const reportingRuns = runs.filter((run) => run.sawInputCost && run.inputTokens > 0);
+	const effectiveInputRateUsdPerToken =
+		reportingRuns.length > 0
+			? reportingRuns.reduce((sum, run) => sum + run.inputCostUsd, 0) / reportingRuns.reduce((sum, run) => sum + run.inputTokens, 0)
+			: null;
 
 	let breakEvenReadTokens: number | null = null;
-	if (accumulator.cacheWriteTokens === 0) {
-		breakEvenReadTokens = 0;
-	} else if (cacheWritePremiumUsd !== null && baselineRate !== null) {
+	if (cacheWriteTokens === 0) breakEvenReadTokens = 0;
+	else if (cacheWritePremiumUsd !== null) {
+		const catalogPrices = pricing.priceFor(provider, model, inputTokens + cacheReadTokens + cacheWriteTokens);
+		const baselineRate =
+			effectiveInputRateUsdPerToken ?? (catalogPrices?.input !== undefined ? catalogPrices.input / CATALOG_PRICE_TOKEN_UNIT : null);
 		const readRate =
-			accumulator.cacheReadTokens > 0 && read.costUsd !== null
-				? read.costUsd / accumulator.cacheReadTokens
+			cacheReadTokens > 0 && read.amount !== null
+				? read.amount / cacheReadTokens
 				: (catalogPrices?.cacheRead ?? undefined) !== undefined
 					? catalogPrices!.cacheRead! / CATALOG_PRICE_TOKEN_UNIT
 					: null;
-		const perTokenSavings = readRate !== null ? baselineRate - readRate : null;
+		const perTokenSavings = baselineRate !== null && readRate !== null ? baselineRate - readRate : null;
 		if (cacheWritePremiumUsd <= 0) breakEvenReadTokens = 0;
 		else if (perTokenSavings !== null && perTokenSavings > 0) breakEvenReadTokens = Math.ceil(cacheWritePremiumUsd / perTokenSavings);
 	}
 
 	const paybackAchieved =
-		accumulator.cacheWriteTokens === 0
-			? null
-			: savingsUsd !== null && cacheWritePremiumUsd !== null
-				? savingsUsd >= cacheWritePremiumUsd
-				: null;
+		cacheWriteTokens === 0 ? null : savingsUsd !== null && cacheWritePremiumUsd !== null ? savingsUsd >= cacheWritePremiumUsd : null;
 
 	return {
-		provider: accumulator.provider,
-		model: accumulator.model,
-		inputTokens: accumulator.inputTokens,
-		cacheReadTokens: accumulator.cacheReadTokens,
-		cacheWriteTokens: accumulator.cacheWriteTokens,
-		cacheReadCostUsd: read.costUsd,
+		provider,
+		model,
+		inputTokens,
+		cacheReadTokens,
+		cacheWriteTokens,
+		cacheReadCostUsd: read.amount,
 		cacheReadCostBasis: read.basis,
-		cacheWriteCostUsd: write.costUsd,
+		cacheWriteCostUsd: write.amount,
 		cacheWriteCostBasis: write.basis,
-		effectiveInputRateUsdPerToken: accumulator.sawInputCost && accumulator.inputTokens > 0 ? baselineRate : null,
-		counterfactualNoCacheCostUsd,
-		counterfactualBasis: accumulator.cacheReadTokens === 0 ? "provider-reported" : combineBasis(baselineBasis, counterfactualBasis),
+		effectiveInputRateUsdPerToken,
+		counterfactualNoCacheCostUsd: counterfactual.amount,
+		counterfactualBasis: counterfactual.basis,
 		savingsUsd,
 		cacheWritePremiumUsd,
 		breakEvenReadTokens,
@@ -282,7 +364,10 @@ function findMissedOpportunities(
 
 /**
  * Pure aggregation over already-fetched, already-bounded rows -- the operation layer owns querying
- * MetricStore and the model catalog; this function only ever combines what it is given. Every
+ * MetricStore and the model catalog; this function only ever combines what it is given. Rows are
+ * first grouped into per-turn runs (see runKeyFor) and priced against each run's own real context
+ * size, so a tiered/long-context catalog price is resolved honestly instead of guessed against a
+ * blended window-wide sum; run-level dollar figures are only summed together afterward. Every
  * derived (non-trivial) dollar figure is explicitly basis-tagged; nothing is fabricated when
  * evidence is absent.
  */
@@ -292,35 +377,50 @@ export function buildCacheEconomicsSummary(
 	pricing: CacheEconomicsPricingLookup,
 	options: CacheEconomicsSummaryOptions,
 ): CacheEconomicsSummary {
-	const byModel = new Map<string, ModelAccumulator>();
+	const byRun = new Map<string, RunAccumulator>();
+	const admittedModels = new Set<string>();
 	let modelGroupsTruncated = false;
 	for (const row of usageRows) {
 		if (row.source !== "pi" || typeof row.value !== "number" || !Number.isFinite(row.value) || row.value < 0) continue;
 		if (row.observedAt < options.since || row.observedAt > options.until) continue;
 		const provider = attributeText(row.attributes, "provider");
 		const model = attributeText(row.attributes, "model");
-		const key = `${provider}\u0000${model}`;
-		if (!byModel.has(key) && byModel.size >= CACHE_ECONOMICS_MAX_MODEL_GROUPS) {
-			modelGroupsTruncated = true;
-			continue;
+		const modelKey = `${provider}\u0000${model}`;
+		if (!admittedModels.has(modelKey)) {
+			if (admittedModels.size >= CACHE_ECONOMICS_MAX_MODEL_GROUPS) {
+				modelGroupsTruncated = true;
+				continue;
+			}
+			admittedModels.add(modelKey);
 		}
-		const accumulator = accumulatorFor(byModel, provider, model);
-		if (row.metric === "input-tokens" && row.unit === "tokens") accumulator.inputTokens += row.value;
-		else if (row.metric === "cache-read-tokens" && row.unit === "tokens") accumulator.cacheReadTokens += row.value;
-		else if (row.metric === "cache-write-tokens" && row.unit === "tokens") accumulator.cacheWriteTokens += row.value;
+		const runKey = `${modelKey}\u0000${runKeyFor(row)}`;
+		const run = byRun.get(runKey) ?? newRunAccumulator(provider, model);
+		byRun.set(runKey, run);
+		if (row.metric === "input-tokens" && row.unit === "tokens") run.inputTokens += row.value;
+		else if (row.metric === "cache-read-tokens" && row.unit === "tokens") run.cacheReadTokens += row.value;
+		else if (row.metric === "cache-write-tokens" && row.unit === "tokens") run.cacheWriteTokens += row.value;
 		else if (row.metric === "input-cost" && row.unit === "usd") {
-			accumulator.inputCostUsd += row.value;
-			accumulator.sawInputCost = true;
+			run.inputCostUsd += row.value;
+			run.sawInputCost = true;
 		} else if (row.metric === "cache-read-cost" && row.unit === "usd") {
-			accumulator.cacheReadCostUsd += row.value;
-			accumulator.sawCacheReadCost = true;
+			run.cacheReadCostUsd += row.value;
+			run.sawCacheReadCost = true;
 		} else if (row.metric === "cache-write-cost" && row.unit === "usd") {
-			accumulator.cacheWriteCostUsd += row.value;
-			accumulator.sawCacheWriteCost = true;
+			run.cacheWriteCostUsd += row.value;
+			run.sawCacheWriteCost = true;
 		}
 	}
-	const models = [...byModel.values()]
-		.map((accumulator) => summarizeModel(accumulator, pricing))
+
+	const runsByModel = new Map<string, { provider: string; model: string; runs: RunPricingResult[] }>();
+	for (const run of byRun.values()) {
+		const modelKey = `${run.provider}\u0000${run.model}`;
+		const priced = priceRun(run, pricing);
+		const existing = runsByModel.get(modelKey);
+		if (existing) existing.runs.push(priced);
+		else runsByModel.set(modelKey, { provider: run.provider, model: run.model, runs: [priced] });
+	}
+	const models = [...runsByModel.values()]
+		.map(({ provider, model, runs }) => aggregateRuns(provider, model, runs, pricing))
 		.sort(
 			(left, right) =>
 				right.cacheReadTokens + right.cacheWriteTokens - (left.cacheReadTokens + left.cacheWriteTokens) ||

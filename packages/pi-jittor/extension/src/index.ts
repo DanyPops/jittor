@@ -311,12 +311,17 @@ async function applyDecision(
 	);
 }
 
+let assistantUsageRunSequence = 0;
+
 /**
  * taskId, when a Papyrus task is focused, tags the metric for cost-per-task correlation. thinking
  * comes from pi.getThinkingLevel() at message_end time, not from the message itself -- AssistantMessage
  * has no thinking field of its own, and the level can't have changed mid-message. sessionId tags every
  * row so cache economics (see @danypops/jittor's cache-economics.ts) can correlate a cache write back
  * to this same session's own context-prefix reset evidence, without ever widening scope by provider/model.
+ * runId ties every metric emitted for this one turn together (a counter, not just observedAt, since
+ * two turns can share a millisecond) so cache economics can resolve per-turn (e.g. tiered) catalog
+ * pricing against this turn's own real size instead of a blended sum across a whole query window.
  */
 function assistantUsageMetrics(
 	message: unknown,
@@ -335,9 +340,11 @@ function assistantUsageMetrics(
 	const provider = typeof value.provider === "string" ? value.provider : "unknown";
 	const model = typeof value.model === "string" ? value.model : "unknown";
 	const scope = `${provider}:${model}`;
+	const runId = `pi-usage-${metricObservedAt}-${++assistantUsageRunSequence}`;
 	const attributes = {
 		provider,
 		model,
+		runId,
 		...(taskId === null ? {} : { taskId }),
 		...(thinking === null || thinking.length === 0 ? {} : { thinking }),
 		...(sessionId === null || sessionId.length === 0 ? {} : { sessionId }),

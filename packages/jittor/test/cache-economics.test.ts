@@ -35,7 +35,7 @@ function snapshotHeaderRow(overrides: Partial<StoredMetricObservation> & { obser
 
 class FakePricing implements CacheEconomicsPricingLookup {
 	constructor(private readonly table: Record<string, CacheEconomicsPricing>) {}
-	priceFor(provider: string, model: string): CacheEconomicsPricing | null {
+	priceFor(provider: string, model: string, _contextSizeTokens: number): CacheEconomicsPricing | null {
 		return this.table[`${provider}/${model}`] ?? null;
 	}
 }

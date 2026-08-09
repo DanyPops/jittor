@@ -960,6 +960,30 @@ describe("Jittor Pi actuator", () => {
 		// correlate a cache write back to the same session's own context-prefix reset evidence.
 		for (const record of [cacheReadCost, cacheWriteCost, inputCost])
 			expect((record?.attributes as Record<string, unknown> | undefined)?.sessionId).toBe("test-session");
+		// Every metric for this one turn shares the same runId, so cache economics can group them
+		// back into one request when resolving per-turn (e.g. tiered) catalog pricing.
+		const allTokenRows = records.filter((record) => record.source === "pi");
+		const runIds = new Set(allTokenRows.map((record) => (record.attributes as Record<string, unknown>).runId));
+		expect(runIds.size).toBe(1);
+		expect([...runIds][0]).toBeTruthy();
+	});
+
+	it("gives each turn's assistant-usage metrics its own distinct runId, even when two turns share a timestamp", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		const message = {
+			role: "assistant",
+			provider: "anthropic",
+			model: "claude-sonnet-5",
+			usage: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } },
+		};
+		await app.handlers.get("message_end")![0]!({ message }, app.ctx);
+		await app.handlers.get("message_end")![0]!({ message }, app.ctx);
+		const runIds = recordedMetrics(client)
+			.filter((record) => record.source === "pi" && record.metric === "input-tokens")
+			.map((record) => (record.attributes as Record<string, unknown>).runId);
+		expect(runIds).toHaveLength(2);
+		expect(runIds[0]).not.toBe(runIds[1]);
 	});
 
 	it("omits itemized cache-cost metrics when the provider never reports that cost breakdown, rather than fabricating one", async () => {
