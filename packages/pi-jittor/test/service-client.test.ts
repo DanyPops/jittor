@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { JittorClient } from "@danypops/jittor";
-import { callJittor, resetJittorClientForTests, setJittorClientConnectorForTests } from "../extension/src/service-client.ts";
+import { callJittor, operationRetryMode, resetJittorClientForTests, setJittorClientConnectorForTests } from "../extension/src/service-client.ts";
 
 afterEach(() => {
 	resetJittorClientForTests();
@@ -32,6 +32,22 @@ describe("Jittor vehicle-client retrying client wiring", () => {
 		const result = await call("router.status", {});
 
 		expect(result).toEqual({ ready: true });
+		expect(connectorCalls).toBe(2);
+	});
+
+	it("never retries a mutating operation, but drops the stale client so the next call reconnects", async () => {
+		let connectorCalls = 0;
+		setJittorClientConnectorForTests(async () => {
+			connectorCalls++;
+			return connectorCalls === 1 ? fakeConnectionRefused() : fakeClient(async () => ({ ready: true }) as never);
+		});
+
+		expect(operationRetryMode("metrics.record")).toBe("once");
+		expect(operationRetryMode("router.pause")).toBe("once");
+		await expect(call("metrics.record", {})).rejects.toThrow(TypeError);
+		expect(connectorCalls).toBe(1);
+
+		expect(await call("router.status", {})).toEqual({ ready: true });
 		expect(connectorCalls).toBe(2);
 	});
 
