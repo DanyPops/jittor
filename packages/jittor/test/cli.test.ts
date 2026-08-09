@@ -31,6 +31,12 @@ const summary: ContextAssessment = {
 		averageElapsedMsBetween: 1_000,
 		averageProviderTokensBetween: 2_000,
 		averageCacheReadTokensBetween: 1_000,
+		effectivenessSamples: 0,
+		averageReductionRatio: null,
+		averagePreContextTokens: null,
+		averagePostContextTokens: null,
+		mechanisms: { "pi-native": 0, "provider-side": 0, extension: 0 },
+		regrowth: { "50": null, "80": null, "100": null },
 		reasons: { manual: 0, threshold: 1, overflow: 0 },
 	},
 };

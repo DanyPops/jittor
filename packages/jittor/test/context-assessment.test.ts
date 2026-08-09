@@ -50,6 +50,19 @@ describe("context pressure assessment", () => {
 					willRetry: true,
 				}),
 				row(5, "pi-context", "compaction-aborted", 1, "count", 6_000, { reason: "manual" }),
+				row(6, "pi-context", "compaction-effectiveness", 0.6, "ratio", 5_100, {
+					mechanism: "pi-native",
+					preContextTokens: 10_000,
+					postContextTokens: 4_000,
+					preContextProvenance: "provider-reported",
+					postContextProvenance: "structural-estimate",
+				}),
+				row(7, "pi-context", "compaction-regrowth", 0.8, "ratio", 6_500, {
+					threshold: 0.8,
+					turnsSinceCompaction: 3,
+					elapsedSinceCompactionMs: 1_400,
+					mechanism: "pi-native",
+				}),
 			],
 			{ since: 1_000, until: 7_000, truncated: false },
 		);
@@ -71,6 +84,12 @@ describe("context pressure assessment", () => {
 			averageTurnsBetween: 3,
 			averageProviderTokensBetween: 2_000,
 			averageCacheReadTokensBetween: 750,
+			effectivenessSamples: 1,
+			averageReductionRatio: 0.6,
+			averagePreContextTokens: 10_000,
+			averagePostContextTokens: 4_000,
+			mechanisms: { "pi-native": 1, "provider-side": 0, extension: 0 },
+			regrowth: { "50": null, "80": { samples: 1, averageTurns: 3, averageElapsedMs: 1_400 }, "100": null },
 		});
 		expect(result.compaction.reasons).toEqual({ threshold: 1, overflow: 1, manual: 0 });
 		expect(result.compaction.perRun).toBe(1);

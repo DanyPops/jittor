@@ -6,6 +6,7 @@ import {
 	CONTEXT_HUB_CONTRIBUTION_CHANNEL,
 	CompactionTelemetry,
 	type ContextAssessment,
+	classifyTaskFromTools,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
 	HmacContextFingerprinter,
 	loadOpenAiTextTokenCounter,
@@ -405,9 +406,17 @@ export function registerJittorExtension(
 				// A custom SessionManager tree shape must not suppress the real request-payload snapshot.
 				snapshot = captureProviderContextSnapshot(captureInput);
 			}
-			// Observation must never delay, alter, or abort the provider request. The daemon operation is
-			// a single-execution local write and receives only bounded token sizes and keyed fingerprints.
+			// Observation must never alter or abort the provider request. Both local writes are detached;
+			// they receive only bounded token sizes and keyed fingerprints.
+			const requestTokens = snapshot.segments
+				.filter((segment) => segment.requestPosition !== null)
+				.reduce((sum, segment) => sum + segment.tokens, 0);
+			const compactionMetrics = compactionTelemetry.observeContextSnapshot(requestTokens, "structural-estimate", snapshot.capturedAt, {
+				provider: snapshot.provider,
+				model: snapshot.model,
+			});
 			void client.call("context.snapshot", snapshot).catch(() => undefined);
+			if (compactionMetrics.length > 0) void recordMetrics(client, compactionMetrics).catch(() => undefined);
 		} catch {
 			// Snapshot collection is strictly failure-isolated from provider delivery.
 		}
@@ -634,6 +643,7 @@ export function registerJittorExtension(
 						`Papyrus injection: ${summary.injection.runs} runs · avg ${average} chars · p95 ${p95} chars · unchanged ${summary.injection.unchangedRate === null ? "unknown" : `${(summary.injection.unchangedRate * 100).toFixed(1)}%`}`,
 						`Mix: rules ${summary.injection.ruleCharacters.toLocaleString()} chars · tasks ${summary.injection.taskCharacters.toLocaleString()} chars · estimated ${summary.injection.estimatedTokens.toLocaleString()} tokens`,
 						`Compactions: ${summary.compaction.completed} completed · ${summary.compaction.aborted} aborted · ${summary.compaction.perRun === null ? "unknown" : summary.compaction.perRun.toFixed(3)} per agent run · ${summary.compaction.perTurn === null ? "unknown" : summary.compaction.perTurn.toFixed(3)} per turn`,
+						`Effectiveness: ${summary.compaction.effectivenessSamples} samples · avg reduction ${summary.compaction.averageReductionRatio === null ? "unknown" : `${(summary.compaction.averageReductionRatio * 100).toFixed(1)}%`} · mechanisms Pi/provider/extension ${summary.compaction.mechanisms["pi-native"]}/${summary.compaction.mechanisms["provider-side"]}/${summary.compaction.mechanisms.extension}`,
 						`Completeness: ${summary.completeness}`,
 					].join("\n"),
 					"info",
@@ -775,11 +785,19 @@ export function registerJittorExtension(
 	pi.on("session_before_compact", async (event, ctx) => {
 		beginCompactionUi(ctx, event.signal);
 		const usage = ctx.getContextUsage();
+		const preparationTokens = event.preparation?.tokensBefore;
 		const metric = compactionTelemetry.begin({
 			reason: event.reason,
 			willRetry: event.willRetry,
+			mechanism: "pi-native",
+			provider: ctx.model?.provider ?? "unknown",
+			model: ctx.model?.id ?? "unknown",
 			...(usage?.percent === null || usage?.percent === undefined ? {} : { contextPercent: usage.percent }),
-			...(usage?.tokens === null || usage?.tokens === undefined ? {} : { contextTokens: usage.tokens }),
+			...(typeof preparationTokens === "number" && Number.isSafeInteger(preparationTokens) && preparationTokens > 0
+				? { contextTokens: preparationTokens, contextProvenance: "structural-estimate" as const }
+				: usage?.tokens === null || usage?.tokens === undefined
+					? {}
+					: { contextTokens: usage.tokens, contextProvenance: "provider-reported" as const }),
 		});
 		await recordMetrics(client, [metric]).catch(() => undefined);
 	});
@@ -787,9 +805,20 @@ export function registerJittorExtension(
 	pi.on("session_compact", async (event) => {
 		finishCompactionUi();
 		contextGrowth.reset();
-		await recordMetrics(client, [compactionTelemetry.complete({ reason: event.reason, willRetry: event.willRetry })]).catch(
-			() => undefined,
-		);
+		const summary = event.compactionEntry?.summary;
+		await recordMetrics(client, [
+			compactionTelemetry.complete({
+				reason: event.reason,
+				willRetry: event.willRetry,
+				mechanism: event.fromExtension ? "extension" : "pi-native",
+				...(typeof summary === "string"
+					? {
+							summaryTokens: Math.ceil(summary.length / CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN),
+							summaryProvenance: "structural-estimate" as const,
+						}
+					: {}),
+			}),
+		]).catch(() => undefined);
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
@@ -865,6 +894,8 @@ export function registerJittorExtension(
 
 	pi.on("tool_execution_end", async (event) => {
 		localRunTelemetry.onToolExecutionEnd(event.toolName, event.isError);
+		const classification = classifyTaskFromTools([event.toolName]);
+		compactionTelemetry.observeToolClass(`${classification.domain}-${classification.type}`, event.isError);
 	});
 
 	pi.on("after_provider_response", async (event, ctx) => {

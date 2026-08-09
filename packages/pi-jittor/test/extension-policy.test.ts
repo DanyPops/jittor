@@ -330,13 +330,32 @@ describe("Jittor Pi actuator", () => {
 		});
 		await Promise.resolve();
 		const signal = new AbortController().signal;
-		await app.handlers.get("session_before_compact")![0]!({ reason: "threshold", willRetry: false, signal }, app.ctx);
-		await app.handlers.get("session_compact")![0]!({ reason: "threshold", willRetry: false }, app.ctx);
+		await app.handlers.get("session_before_compact")![0]!(
+			{ reason: "threshold", willRetry: false, signal, preparation: { tokensBefore: 10_000 } },
+			app.ctx,
+		);
+		await app.handlers.get("session_compact")![0]!(
+			{ reason: "threshold", willRetry: false, fromExtension: false, compactionEntry: { summary: "bounded summary" } },
+			app.ctx,
+		);
+		await app.handlers.get("before_provider_request")![0]!(
+			{ payload: { system: "post compaction", messages: [{ role: "user", content: "remaining" }] } },
+			app.ctx,
+		);
 		const recorded = recordedMetrics(client) as Array<{ source: string; metric: string; attributes?: Record<string, unknown> }>;
 		expect(recorded.some((metric) => metric.source === "papyrus-context" && metric.metric === "injected-characters")).toBe(true);
 		expect(
 			recorded.some(
 				(metric) => metric.source === "pi-context" && metric.metric === "compaction-duration" && metric.attributes?.reason === "threshold",
+			),
+		).toBe(true);
+		expect(
+			recorded.some(
+				(metric) =>
+					metric.source === "pi-context" &&
+					metric.metric === "compaction-effectiveness" &&
+					metric.attributes?.preContextTokens === 10_000 &&
+					metric.attributes?.postContextProvenance === "structural-estimate",
 			),
 		).toBe(true);
 	});

@@ -7,6 +7,7 @@ import {
 	PAPYRUS_CONTEXT_INJECTION_SCHEMA,
 } from "../constants.ts";
 import type { MetricObservation, StoredMetricObservation } from "./metric.ts";
+import type { TokenMeasurementProvenance } from "./token-measurement.ts";
 
 interface PayloadSize {
 	characters: number;
@@ -133,15 +134,49 @@ export function papyrusContextMetric(observation: PapyrusContextInjection): Metr
 	};
 }
 
+export type CompactionMechanism = "pi-native" | "provider-side" | "extension";
+
 export interface CompactionStart {
 	reason: "manual" | "threshold" | "overflow";
 	willRetry: boolean;
+	mechanism?: CompactionMechanism;
 	contextPercent?: number;
 	contextTokens?: number;
+	contextProvenance?: TokenMeasurementProvenance;
+	provider?: string;
+	model?: string;
+}
+
+export interface CompactionCompletion extends Pick<CompactionStart, "reason" | "willRetry"> {
+	mechanism?: CompactionMechanism;
+	summaryTokens?: number;
+	summaryProvenance?: TokenMeasurementProvenance;
 }
 
 interface OpenCompaction extends CompactionStart {
+	mechanism: CompactionMechanism;
 	startedAt: number;
+}
+
+interface PendingEffectiveness {
+	preContextTokens: number;
+	preContextProvenance: TokenMeasurementProvenance;
+	mechanism: CompactionMechanism;
+	provider?: string;
+	model?: string;
+	summaryTokens?: number;
+	summaryProvenance?: TokenMeasurementProvenance;
+	completedAt: number;
+}
+
+interface RegrowthState {
+	preContextTokens: number;
+	completedAt: number;
+	turns: number;
+	emitted: Set<number>;
+	mechanism: CompactionMechanism;
+	provider?: string;
+	model?: string;
 }
 interface UsageCounters {
 	turns: number;
@@ -150,22 +185,42 @@ interface UsageCounters {
 	providerTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
+	toolCalls: number;
+	toolFailures: number;
+	toolClasses: Map<string, number>;
+	acceptedOutcomes: number;
+	rejectedOutcomes: number;
 }
 
 function emptyCounters(): UsageCounters {
-	return { turns: 0, injectedCharacters: 0, estimatedInjectedTokens: 0, providerTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+	return {
+		turns: 0,
+		injectedCharacters: 0,
+		estimatedInjectedTokens: 0,
+		providerTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		toolCalls: 0,
+		toolFailures: 0,
+		toolClasses: new Map(),
+		acceptedOutcomes: 0,
+		rejectedOutcomes: 0,
+	};
 }
 
 export class CompactionTelemetry {
 	private open: OpenCompaction | undefined;
 	private counters = emptyCounters();
 	private previousCompletedAt: number | undefined;
+	private pendingEffectiveness: PendingEffectiveness | undefined;
+	private regrowth: RegrowthState | undefined;
 
 	hasOpenCompaction(): boolean {
 		return this.open !== undefined;
 	}
 	observeTurn(): void {
 		this.counters.turns += 1;
+		if (this.regrowth) this.regrowth.turns += 1;
 	}
 	observeInjection(characters: number, estimatedTokens: number): void {
 		this.counters.injectedCharacters += Math.max(0, characters);
@@ -176,9 +231,31 @@ export class CompactionTelemetry {
 		this.counters.cacheReadTokens += Math.max(0, usage.cacheRead);
 		this.counters.cacheWriteTokens += Math.max(0, usage.cacheWrite);
 	}
+	observeToolClass(toolClass: string, failed: boolean): void {
+		if (!/^[a-z][a-z0-9-]{0,31}$/.test(toolClass)) return;
+		this.counters.toolCalls += 1;
+		if (failed) this.counters.toolFailures += 1;
+		if (this.counters.toolClasses.size < 16 || this.counters.toolClasses.has(toolClass))
+			this.counters.toolClasses.set(toolClass, (this.counters.toolClasses.get(toolClass) ?? 0) + 1);
+	}
+	observeOutcome(outcome: "accepted" | "rejected"): void {
+		if (outcome === "accepted") this.counters.acceptedOutcomes += 1;
+		else this.counters.rejectedOutcomes += 1;
+	}
 
 	begin(input: CompactionStart, now = Date.now()): MetricObservation {
-		this.open = { ...input, startedAt: now };
+		if (this.open) {
+			return {
+				source: "pi-context",
+				scope: "compaction",
+				metric: "compaction-overlap",
+				value: 1,
+				unit: "count",
+				observedAt: now,
+				attributes: { reason: input.reason, willRetry: input.willRetry, openReason: this.open.reason },
+			};
+		}
+		this.open = { ...input, mechanism: input.mechanism ?? "pi-native", startedAt: now };
 		return {
 			source: "pi-context",
 			scope: "compaction",
@@ -190,7 +267,7 @@ export class CompactionTelemetry {
 		};
 	}
 
-	complete(input: Pick<CompactionStart, "reason" | "willRetry">, now = Date.now()): MetricObservation {
+	complete(input: CompactionCompletion, now = Date.now()): MetricObservation {
 		if (!this.open)
 			return {
 				source: "pi-context",
@@ -206,6 +283,18 @@ export class CompactionTelemetry {
 		const attributes = this.intervalAttributes(open, now);
 		this.previousCompletedAt = now;
 		this.counters = emptyCounters();
+		if (typeof open.contextTokens === "number" && Number.isSafeInteger(open.contextTokens) && open.contextTokens > 0) {
+			this.pendingEffectiveness = {
+				preContextTokens: open.contextTokens,
+				preContextProvenance: open.contextProvenance ?? "provider-reported",
+				mechanism: input.mechanism ?? open.mechanism,
+				...(open.provider === undefined ? {} : { provider: open.provider }),
+				...(open.model === undefined ? {} : { model: open.model }),
+				...(input.summaryTokens === undefined ? {} : { summaryTokens: Math.max(0, Math.round(input.summaryTokens)) }),
+				...(input.summaryProvenance === undefined ? {} : { summaryProvenance: input.summaryProvenance }),
+				completedAt: now,
+			};
+		}
 		return {
 			source: "pi-context",
 			scope: "compaction",
@@ -213,8 +302,106 @@ export class CompactionTelemetry {
 			value: Math.max(0, now - open.startedAt),
 			unit: "milliseconds",
 			observedAt: now,
-			attributes: { ...attributes, reason: input.reason, willRetry: input.willRetry },
+			attributes: {
+				...attributes,
+				reason: input.reason,
+				willRetry: input.willRetry,
+				mechanism: input.mechanism ?? open.mechanism,
+				...(input.summaryTokens === undefined ? {} : { summaryTokens: Math.max(0, Math.round(input.summaryTokens)) }),
+				...(input.summaryProvenance === undefined ? {} : { summaryProvenance: input.summaryProvenance }),
+			},
 		};
+	}
+
+	/** Correlates the first post-compaction request, then reports bounded 50/80/100% regrowth milestones once each. */
+	observeContextSnapshot(
+		tokens: number,
+		provenance: TokenMeasurementProvenance,
+		now = Date.now(),
+		identity?: { provider: string; model: string },
+	): MetricObservation[] {
+		if (!Number.isSafeInteger(tokens) || tokens < 0) return [];
+		const observations: MetricObservation[] = [];
+		if (this.pendingEffectiveness) {
+			const pending = this.pendingEffectiveness;
+			this.pendingEffectiveness = undefined;
+			const identityChange =
+				identity && pending.provider && identity.provider !== pending.provider
+					? "provider-changed"
+					: identity && pending.model && identity.model !== pending.model
+						? "model-changed"
+						: null;
+			if (identityChange) {
+				this.regrowth = undefined;
+				return [
+					{
+						source: "pi-context",
+						scope: "compaction",
+						metric: "compaction-effectiveness-unavailable",
+						value: 1,
+						unit: "count",
+						observedAt: now,
+						attributes: { reason: identityChange, mechanism: pending.mechanism },
+					},
+				];
+			}
+			const reduction = (pending.preContextTokens - tokens) / pending.preContextTokens;
+			observations.push({
+				source: "pi-context",
+				scope: "compaction",
+				metric: "compaction-effectiveness",
+				value: reduction,
+				unit: "ratio",
+				observedAt: now,
+				attributes: {
+					mechanism: pending.mechanism,
+					preContextTokens: pending.preContextTokens,
+					postContextTokens: tokens,
+					preContextProvenance: pending.preContextProvenance,
+					postContextProvenance: provenance,
+					...(pending.provider === undefined ? {} : { provider: pending.provider }),
+					...(pending.model === undefined ? {} : { model: pending.model }),
+					...(pending.summaryTokens === undefined ? {} : { summaryTokens: pending.summaryTokens }),
+					...(pending.summaryProvenance === undefined ? {} : { summaryProvenance: pending.summaryProvenance }),
+				},
+			});
+			this.regrowth = {
+				preContextTokens: pending.preContextTokens,
+				completedAt: pending.completedAt,
+				turns: 0,
+				emitted: new Set(),
+				mechanism: pending.mechanism,
+				...(pending.provider === undefined ? {} : { provider: pending.provider }),
+				...(pending.model === undefined ? {} : { model: pending.model }),
+			};
+			return observations;
+		}
+		const regrowth = this.regrowth;
+		if (!regrowth) return observations;
+		const fraction = tokens / regrowth.preContextTokens;
+		for (const threshold of [0.5, 0.8, 1]) {
+			if (fraction < threshold || regrowth.emitted.has(threshold)) continue;
+			regrowth.emitted.add(threshold);
+			observations.push({
+				source: "pi-context",
+				scope: "compaction",
+				metric: "compaction-regrowth",
+				value: threshold,
+				unit: "ratio",
+				observedAt: now,
+				attributes: {
+					threshold,
+					contextTokens: tokens,
+					contextProvenance: provenance,
+					turnsSinceCompaction: regrowth.turns,
+					elapsedSinceCompactionMs: Math.max(0, now - regrowth.completedAt),
+					mechanism: regrowth.mechanism,
+					...(regrowth.provider === undefined ? {} : { provider: regrowth.provider }),
+					...(regrowth.model === undefined ? {} : { model: regrowth.model }),
+				},
+			});
+		}
+		return observations;
 	}
 
 	abort(now = Date.now(), abortReason = "aborted"): MetricObservation {
@@ -247,6 +434,10 @@ export class CompactionTelemetry {
 		return {
 			reason: open.reason,
 			willRetry: open.willRetry,
+			mechanism: open.mechanism,
+			...(open.contextProvenance === undefined ? {} : { contextProvenance: open.contextProvenance }),
+			...(open.provider === undefined ? {} : { provider: open.provider }),
+			...(open.model === undefined ? {} : { model: open.model }),
 			...(open.contextPercent === undefined ? {} : { contextPercent: open.contextPercent }),
 			...(open.contextTokens === undefined ? {} : { contextTokens: open.contextTokens }),
 			turnsSincePrevious: this.counters.turns,
@@ -255,6 +446,13 @@ export class CompactionTelemetry {
 			providerTokensSincePrevious: this.counters.providerTokens,
 			cacheReadTokensSincePrevious: this.counters.cacheReadTokens,
 			cacheWriteTokensSincePrevious: this.counters.cacheWriteTokens,
+			toolCallsSincePrevious: this.counters.toolCalls,
+			toolFailuresSincePrevious: this.counters.toolFailures,
+			repeatedToolClassesSincePrevious: [...this.counters.toolClasses.entries()]
+				.filter(([, count]) => count > 1)
+				.map(([name, count]) => `${name}:${count}`),
+			acceptedOutcomesSincePrevious: this.counters.acceptedOutcomes,
+			rejectedOutcomesSincePrevious: this.counters.rejectedOutcomes,
 			...(this.previousCompletedAt === undefined ? {} : { elapsedSincePreviousMs: Math.max(0, now - this.previousCompletedAt) }),
 		};
 	}
@@ -285,6 +483,12 @@ export interface ContextAssessment {
 		averageElapsedMsBetween: number | null;
 		averageProviderTokensBetween: number | null;
 		averageCacheReadTokensBetween: number | null;
+		effectivenessSamples: number;
+		averageReductionRatio: number | null;
+		averagePreContextTokens: number | null;
+		averagePostContextTokens: number | null;
+		mechanisms: Record<CompactionMechanism, number>;
+		regrowth: Record<"50" | "80" | "100", { samples: number; averageTurns: number | null; averageElapsedMs: number | null } | null>;
 		reasons: Record<"manual" | "threshold" | "overflow", number>;
 	};
 }
@@ -315,6 +519,24 @@ export function assessContextTelemetry(
 	const unchanged = injections.filter((row) => row.attributes.unchanged === true).length;
 	const completed = compactions.filter((row) => row.metric === "compaction-duration" && typeof row.value === "number");
 	const aborted = compactions.filter((row) => row.metric === "compaction-aborted");
+	const effectiveness = compactions.filter(
+		(row) => row.metric === "compaction-effectiveness" && typeof row.value === "number" && Number.isFinite(row.value),
+	);
+	const regrowthRows = compactions.filter((row) => row.metric === "compaction-regrowth");
+	const mechanisms: Record<CompactionMechanism, number> = { "pi-native": 0, "provider-side": 0, extension: 0 };
+	for (const row of effectiveness) {
+		const mechanism = row.attributes.mechanism;
+		if (mechanism === "pi-native" || mechanism === "provider-side" || mechanism === "extension") mechanisms[mechanism] += 1;
+	}
+	const regrowth = (threshold: number): { samples: number; averageTurns: number | null; averageElapsedMs: number | null } | null => {
+		const rows = regrowthRows.filter((row) => row.attributes.threshold === threshold);
+		if (rows.length === 0) return null;
+		return {
+			samples: rows.length,
+			averageTurns: average(rows.flatMap((row) => numericAttribute(row, "turnsSinceCompaction") ?? [])),
+			averageElapsedMs: average(rows.flatMap((row) => numericAttribute(row, "elapsedSinceCompactionMs") ?? [])),
+		};
+	};
 	const reasons = { manual: 0, threshold: 0, overflow: 0 };
 	for (const row of completed) {
 		const reason = row.attributes.reason;
@@ -347,6 +569,12 @@ export function assessContextTelemetry(
 			averageElapsedMsBetween: average(completed.flatMap((row) => numericAttribute(row, "elapsedSincePreviousMs") ?? [])),
 			averageProviderTokensBetween: average(completed.flatMap((row) => numericAttribute(row, "providerTokensSincePrevious") ?? [])),
 			averageCacheReadTokensBetween: average(completed.flatMap((row) => numericAttribute(row, "cacheReadTokensSincePrevious") ?? [])),
+			effectivenessSamples: effectiveness.length,
+			averageReductionRatio: average(effectiveness.map((row) => row.value as number)),
+			averagePreContextTokens: average(effectiveness.flatMap((row) => numericAttribute(row, "preContextTokens") ?? [])),
+			averagePostContextTokens: average(effectiveness.flatMap((row) => numericAttribute(row, "postContextTokens") ?? [])),
+			mechanisms,
+			regrowth: { "50": regrowth(0.5), "80": regrowth(0.8), "100": regrowth(1) },
 			reasons,
 		},
 	};
