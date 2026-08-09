@@ -30,6 +30,7 @@ import {
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { showBenchmarkPanel } from "./benchmark-tui.ts";
 import { CodexRecoveryCapability, type CodexRecoveryRuntime, SYSTEM_RECOVERY_RUNTIME } from "./capabilities/codex-recovery.ts";
+import { ContextGrowthCapability } from "./capabilities/context-growth.ts";
 import { ContextHubCapability } from "./capabilities/context-hub.ts";
 import { LocalRunTelemetry } from "./capabilities/local-run-telemetry.ts";
 import { ProviderResponseTelemetry } from "./capabilities/provider-response-telemetry.ts";
@@ -318,10 +319,12 @@ export function registerJittorExtension(
 	enforcement: EnforcementControl = persistentEnforcementControl(),
 	codexRecovery: CodexRecoveryControl = recoveryControl(enforcement),
 	recoveryRuntime: CodexRecoveryRuntime = SYSTEM_RECOVERY_RUNTIME,
+	contextGrowth: ContextGrowthCapability = new ContextGrowthCapability(),
 ): void {
 	const footerState: IntegratedFooterState = { providerBudget: null };
 	const usageBudgets = usageBudgetControl(enforcement);
 	let compactionTelemetry = new CompactionTelemetry();
+	let contextGrowthTurn = 0;
 	const localRunTelemetry = new LocalRunTelemetry();
 	const providerResponseTelemetry = new ProviderResponseTelemetry();
 	const codexRecoveryCapability = new CodexRecoveryCapability(pi, codexRecovery, recoveryRuntime);
@@ -644,6 +647,8 @@ export function registerJittorExtension(
 		focusedTaskId = null;
 		finishCompactionUi();
 		compactionTelemetry = new CompactionTelemetry();
+		contextGrowthTurn = 0;
+		contextGrowth.reset();
 		localRunTelemetry.reset();
 		contextHub.reset();
 		cancelRecovery(true);
@@ -693,6 +698,7 @@ export function registerJittorExtension(
 
 	pi.on("session_compact", async (event) => {
 		finishCompactionUi();
+		contextGrowth.reset();
 		await recordMetrics(client, [compactionTelemetry.complete({ reason: event.reason, willRetry: event.willRetry })]).catch(
 			() => undefined,
 		);
@@ -783,7 +789,9 @@ export function registerJittorExtension(
 		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 	});
 
-	pi.on("turn_end", async (event) => {
+	pi.on("turn_end", async (event, ctx) => {
+		const tokens = ctx.getContextUsage()?.tokens;
+		if (typeof tokens === "number" && Number.isFinite(tokens)) contextGrowth.observe(++contextGrowthTurn, tokens);
 		const metrics = localRunTelemetry.completeTurn(event.message, pi.getThinkingLevel());
 		await recordMetrics(client, metrics).catch(() => undefined);
 	});

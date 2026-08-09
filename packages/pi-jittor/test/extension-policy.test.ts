@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { PolicyDecision, RouterStatus } from "@danypops/jittor";
 import { createExtensionHarness } from "@danypops/pi-extension-harness";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { ContextGrowthCapability } from "../extension/src/capabilities/context-growth.ts";
 import {
 	type CodexRecoveryRuntime,
 	formatFooterStatus,
@@ -113,6 +114,7 @@ function harness(
 	enforcement?: EnforcementControl,
 	recovery: { enabled: boolean; runtime: CodexRecoveryRuntime } = { enabled: false, runtime: new FakeRecoveryRuntime() },
 	modelOverride?: { provider: string; id: string },
+	contextGrowth: ContextGrowthCapability = new ContextGrowthCapability(),
 ) {
 	let defaultEnabled = true;
 	let footerEnabled = true;
@@ -173,6 +175,7 @@ function harness(
 			},
 		},
 		recovery.runtime,
+		contextGrowth,
 	);
 	const statuses: Array<string | undefined> = [];
 	const footers: unknown[] = [];
@@ -245,6 +248,7 @@ function harness(
 			pendingMessages = value;
 		},
 		recoveryEnabled: () => recoveryEnabled,
+		contextGrowth,
 	};
 }
 
@@ -255,6 +259,21 @@ describe("Jittor Pi actuator", () => {
 		expect(app.handlers.get("session_compact")).toHaveLength(1);
 		expect(app.handlers.get("agent_settled")).toHaveLength(1);
 		expect(app.handlers.get("session_shutdown")).toHaveLength(1);
+	});
+
+	it("resets context-growth observations when compaction completes", async () => {
+		const app = harness(new FakeClient());
+		await app.handlers.get("turn_end")![0]!({ message: {} }, app.ctx);
+		await app.handlers.get("turn_end")![0]!({ message: {} }, app.ctx);
+		expect(app.contextGrowth.observations()).toEqual([
+			{ turn: 1, tokens: 190_000 },
+			{ turn: 2, tokens: 190_000 },
+		]);
+
+		await app.handlers.get("session_compact")![0]!({ reason: "threshold", willRetry: false }, app.ctx);
+		expect(app.contextGrowth.observations()).toEqual([]);
+		app.contextGrowth.observe(3, 30_000);
+		expect(app.contextGrowth.observations()).toEqual([{ turn: 3, tokens: 30_000 }]);
 	});
 
 	it("ingests Papyrus context push events and records completed Pi compactions end to end", async () => {
