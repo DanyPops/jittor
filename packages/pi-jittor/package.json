@@ -24,7 +24,9 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@danypops/pi-extension-harness": "^0.5.0",
+    "@danypops/pi-extension-harness": "^0.6.2",
+    "@danypops/pi-process-harness": "^0.1.1",
+    "@danypops/pi-tui-harness": "^0.0.2",
     "bun-types": "latest"
   },
   "repository": {

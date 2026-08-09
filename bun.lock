@@ -46,7 +46,9 @@
         "malevich-tui-components": "^0.16.1",
       },
       "devDependencies": {
-        "@danypops/pi-extension-harness": "^0.5.0",
+        "@danypops/pi-extension-harness": "^0.6.2",
+        "@danypops/pi-process-harness": "^0.1.1",
+        "@danypops/pi-tui-harness": "^0.0.2",
         "bun-types": "latest",
       },
       "peerDependencies": {
@@ -131,9 +133,13 @@
 
     "@danypops/jittor": ["@danypops/jittor@workspace:packages/jittor"],
 
-    "@danypops/pi-extension-harness": ["@danypops/pi-extension-harness@0.5.0", "", { "dependencies": { "jiti": "^2.7.0" }, "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" } }, "sha512-btxDBxGyQsBMmb9D4DF6qFJ0uvRr9OPusG5WN+ltNuTGpP5xykWtOqHtdxHwoZ/VQyL4ppw40110mpIlLWb3ew=="],
+    "@danypops/pi-extension-harness": ["@danypops/pi-extension-harness@0.6.2", "", { "dependencies": { "jiti": "^2.7.0" }, "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" } }, "sha512-3tzvyhkrnUHaADXMaCbtGX6i3W+KmT+qDWFJhGMGeFt+KBeVvG4VClGCa177X5fPYP2m4EB7ElVJVeAcxibF+Q=="],
 
     "@danypops/pi-jittor": ["@danypops/pi-jittor@workspace:packages/pi-jittor"],
+
+    "@danypops/pi-process-harness": ["@danypops/pi-process-harness@0.1.1", "", { "dependencies": { "@earendil-works/pi-ai": "*" }, "peerDependencies": { "@earendil-works/pi-coding-agent": "*" } }, "sha512-Rg2iiUp9vYE4HT86ZG8Ov9tx3KkCDR+MN8XUjpXSvVoVnTWCGumA/qscPZiol7vYJfRePiZvDlMBnLy8/D5jGQ=="],
+
+    "@danypops/pi-tui-harness": ["@danypops/pi-tui-harness@0.0.2", "", { "dependencies": { "@xterm/headless": "^6.0.0" }, "peerDependencies": { "@earendil-works/pi-tui": "*" } }, "sha512-XIQI2qNiH6/DSOXWOu27P7CG+ptXJsafbsEiS2LZMmuEMG9Ve5bpVhbC4xgOu8wuZF9ysAZEi8p5L6ZOoK50vw=="],
 
     "@danypops/vehicle-client": ["@danypops/vehicle-client@0.5.1", "", { "dependencies": { "@danypops/vehicle-core": "^0.10.0", "@danypops/vehicle-server": "^0.13.0" } }, "sha512-PxPh8Rc+6wvOR1ZAvB+tZRLqPGcd40MmZeHe0HpIZ1dI7wBYC7QeyqGZ9AU2CbBD9A5XDLPjbb47YJ90l0dr1w=="],
 
@@ -326,6 +332,8 @@
     "@unrs/resolver-binding-win32-ia32-msvc": ["@unrs/resolver-binding-win32-ia32-msvc@1.12.2", "", { "os": "win32", "cpu": "ia32" }, "sha512-WD9sY00OfpHVGfsnHZoA8jVT+esS/Bg8z8jzxp5BnDCjjwsuKsPQrzswwpFy4J1AUJbXPRfkpcX0mXrzeXW79g=="],
 
     "@unrs/resolver-binding-win32-x64-msvc": ["@unrs/resolver-binding-win32-x64-msvc@1.12.2", "", { "os": "win32", "cpu": "x64" }, "sha512-nAB74NfSNKknqQ1RrYj6uz8FcXEomu/MATJZxh/x+BArzN2U3JbOYC0APYzUIGhVY3m5hRxA8VPNdPBoG8txlA=="],
+
+    "@xterm/headless": ["@xterm/headless@6.0.0", "", {}, "sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw=="],
 
     "acorn": ["acorn@8.18.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ=="],
 
