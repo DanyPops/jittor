@@ -7,6 +7,7 @@ import {
 	type CompanionDaemon,
 	encodeFauxScript,
 	type RealPiProcess,
+	resolveFauxProviderExtensionPath,
 	runCliToCompletion,
 	SCRIPT_ENV_VAR,
 	spawnCompanionDaemon,
@@ -17,7 +18,6 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 const JITTOR_PACKAGE = fileURLToPath(new URL("../../jittor", import.meta.url));
 const JITTOR_EXTENSION = fileURLToPath(new URL("../extension/src/index.ts", import.meta.url));
-const PAYLOAD_AWARE_FAUX_EXTENSION = fileURLToPath(new URL("./fixtures/payload-aware-faux-provider-extension.ts", import.meta.url));
 
 let sandbox: string | undefined;
 let daemon: CompanionDaemon | undefined;
@@ -72,8 +72,8 @@ describe("provider token provenance through a real Pi + Jittor daemon", () => {
 		});
 
 		pi = spawnRealPiProcess({
-			extensions: [PAYLOAD_AWARE_FAUX_EXTENSION, JITTOR_EXTENSION],
-			extraArgs: ["--provider", "faux-payload", "--model", "faux-1"],
+			extensions: [resolveFauxProviderExtensionPath(), JITTOR_EXTENSION],
+			extraArgs: ["--provider", "faux", "--model", "faux-1"],
 			cwd: sandbox,
 			isolatedHome: join(sandbox, "home"),
 			env: {
@@ -99,7 +99,7 @@ describe("provider token provenance through a real Pi + Jittor daemon", () => {
 			scope: "request-input",
 			provenance: "provider-reported",
 			method: "pi-assistant-usage",
-			provider: "faux-payload",
+			provider: "faux",
 			model: "faux-1",
 		});
 		expect(JSON.stringify(rows)).not.toContain("private e2e prompt");
