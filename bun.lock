@@ -21,7 +21,7 @@
     },
     "packages/jittor": {
       "name": "@danypops/jittor",
-      "version": "0.16.3",
+      "version": "0.17.0",
       "bin": {
         "jittor": "src/cli.ts",
       },
@@ -38,7 +38,7 @@
     },
     "packages/pi-jittor": {
       "name": "@danypops/pi-jittor",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "dependencies": {
         "@danypops/jittor": "workspace:^",
         "@danypops/vehicle-client": "^0.5.1",
