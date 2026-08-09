@@ -11,7 +11,7 @@ import {
 } from "@danypops/jittor";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { registerJittorExtension } from "../extension/src/index.ts";
-import { renderUsageGraph, showUsagePanel } from "../extension/src/usage.ts";
+import { renderCostGraph, renderUsageGraph, showUsagePanel } from "../extension/src/usage.ts";
 
 const hour = 60 * 60 * 1_000;
 const now = Date.UTC(2026, 6, 19, 12);
@@ -289,6 +289,33 @@ describe("usage graph TUI", () => {
 		for (const statusColor of ["success", "warning", "error"]) expect(seriesColorsUsed.has(statusColor)).toBe(false);
 	});
 
+	it("keeps each model color stable when token and cost rankings order the series differently", () => {
+		const window = resolveUsageWindow("daily", now, 4);
+		const rows = aggregate(
+			[
+				{ observedAt: now - 4 * hour, scope: "openai-codex:gpt-5.6-sol", metric: "input-tokens", value: 4_000 },
+				{ observedAt: now - 4 * hour, scope: "openrouter:openai/gpt-4.1-mini", metric: "input-tokens", value: 2_000 },
+				{ observedAt: now - 4 * hour, scope: "openai-codex:gpt-5.6-sol", metric: "cost", value: 0.25 },
+				{ observedAt: now - 4 * hour, scope: "openrouter:openai/gpt-4.1-mini", metric: "cost", value: 0.5 },
+			],
+			window,
+		);
+		const theme = {
+			fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+			bold: (text: string) => `**${text}**`,
+		};
+		const tokenLines = renderUsageGraph(buildUsageGraph(rows, window, { period: "daily" }), 100, theme);
+		const costLines = renderCostGraph(buildCostGraph(rows, window, { period: "daily" }), 100, theme);
+		const legendColor = (lines: string[], identity: string) => {
+			const line = lines.find((candidate) => candidate.includes(identity));
+			return line?.match(/<([^>]+)>■<\/[^>]+>/)?.[1];
+		};
+		for (const identity of ["openai-codex/gpt-5.6-sol", "openrouter/openai/gpt-4.1-mini"]) {
+			expect(legendColor(tokenLines, identity)).toBeDefined();
+			expect(legendColor(costLines, identity)).toBe(legendColor(tokenLines, identity));
+		}
+	});
+
 	it("renders a single-model chart with exactly one series color, since there is nothing to distinguish", () => {
 		const window = resolveUsageWindow("daily", now, 4);
 		const oneModel = aggregate(
@@ -309,7 +336,7 @@ describe("usage graph TUI", () => {
 		expect(seriesColorsUsed.size).toBe(1);
 	});
 
-	it("adds bold as a second visual channel once the hue palette is exhausted, instead of repeating an indistinguishable color", () => {
+	it("uses bold as a second stable visual channel across a larger model set", () => {
 		const seriesCount = 10;
 		const series = Array.from({ length: seriesCount }, (_, index) => ({
 			key: `p${index}/m${index}`,

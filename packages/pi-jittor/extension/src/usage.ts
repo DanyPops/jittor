@@ -61,10 +61,9 @@ export interface UsageTheme {
  * perceptual separation between adjacent categories.
  *
  * Terminal foreground color is a single channel with a hard ceiling on how many hues stay mutually
- * distinguishable (most qualitative-palette guidance caps around 8–12). Once the hue palette is
- * exhausted, seriesStyle adds bold as a second, independent visual channel before any exact
- * color+weight combination repeats — a standard visualization technique (encode extra categories
- * on an additional channel rather than silently reusing an indistinguishable color).
+ * distinguishable (most qualitative-palette guidance caps around 8–12). seriesStyle derives both a
+ * hue and optional bold weight from stable identity bits, using a second visual channel to reduce
+ * collisions without allowing ranking or render order to change a model's appearance.
  */
 const SERIES_HUES: UsageColor[] = [
 	"accent",
@@ -78,10 +77,20 @@ const SERIES_HUES: UsageColor[] = [
 	"syntaxOperator",
 ];
 
-/** Returns a style function for the Nth series: cycles hue, then adds bold once the palette wraps. */
-function seriesStyle(index: number, theme: UsageTheme): (text: string) => string {
-	const hue = SERIES_HUES[index % SERIES_HUES.length]!;
-	const useBold = Math.floor(index / SERIES_HUES.length) % 2 === 1;
+/**
+ * Stable FNV-1a identity hash. Series ordering changes with totals and selected period, so assigning
+ * colors by array index makes a model change color whenever another model overtakes it. Deriving
+ * both visual channels from its provider/model key keeps that identity fixed across token and cost
+ * graphics, period switches, refreshes, and extension restarts.
+ */
+function seriesStyle(identity: string, theme: UsageTheme): (text: string) => string {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < identity.length; index += 1) {
+		hash ^= identity.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	const hue = SERIES_HUES[hash % SERIES_HUES.length]!;
+	const useBold = Math.floor(hash / SERIES_HUES.length) % 2 === 1;
 	return (text: string) => (useBold ? theme.bold(theme.fg(hue, text)) : theme.fg(hue, text));
 }
 
@@ -121,7 +130,7 @@ function plainTheme(): UsageTheme {
 
 const hostTextMeasure: TextMeasure = { visibleWidth, truncateToWidth };
 
-function chartTheme(theme: UsageTheme): HistoryChartTheme {
+function chartTheme(theme: UsageTheme, seriesIdentities: string[]): HistoryChartTheme {
 	return {
 		title: theme.bold,
 		subtitle: (text) => text,
@@ -129,7 +138,7 @@ function chartTheme(theme: UsageTheme): HistoryChartTheme {
 		warningLine: (text) => theme.fg("warning", text),
 		errorLine: (text) => theme.fg("error", text),
 		muted: (text) => theme.fg("muted", text),
-		series: (index) => seriesStyle(index, theme),
+		series: (index) => seriesStyle(seriesIdentities[index] ?? `series:${index}`, theme),
 	};
 }
 
@@ -163,7 +172,10 @@ function renderChart(
 		noDataText: options.noDataText,
 		truncated: chart.truncated,
 		formatAxisLabel: (value) => formatPeriodPoint(value, chart.period),
-		theme: chartTheme(theme),
+		theme: chartTheme(
+			theme,
+			chart.series.map((series) => series.key),
+		),
 		measure: hostTextMeasure,
 		height: USAGE_CHART_HEIGHT,
 		yAxisWidth: USAGE_Y_AXIS_WIDTH,
