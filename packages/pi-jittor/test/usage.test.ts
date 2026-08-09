@@ -259,6 +259,7 @@ describe("usage graph TUI", () => {
 		expect(lines.some((line) => line.includes("Daily token usage"))).toBe(true);
 		expect(lines.some((line) => line.includes("OVER BUDGET") && line.includes("3k"))).toBe(true);
 		expect(lines.some((line) => line.includes("15k") && line.includes("┄"))).toBe(true);
+		expect(lines.some((line) => line.includes("Budget") && line.includes("100%") && line.includes("█"))).toBe(true);
 		expect(lines.some((line) => line.includes("9k") && line.includes("│"))).toBe(true);
 		expect(lines.some((line) => line.includes("└") && line.includes("─"))).toBe(true);
 		expect(lines.join("\n")).toContain("█");

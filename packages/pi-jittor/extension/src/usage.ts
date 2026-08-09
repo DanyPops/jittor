@@ -16,6 +16,7 @@ import {
 } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { HistoryChart, ProgressBar, type HistoryChartTheme, type TextMeasure } from "malevich-tui-components";
 import type { UsageBudgetControl } from "./settings.ts";
 import type { JittorPanelClient } from "./tui.ts";
 
@@ -84,65 +85,11 @@ function seriesStyle(index: number, theme: UsageTheme): (text: string) => string
 	return (text: string) => (useBold ? theme.bold(theme.fg(hue, text)) : theme.fg(hue, text));
 }
 
-const PARTIAL_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-
 function compact(value: number): string {
 	if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(value >= 10_000_000_000 ? 0 : 1)}B`;
 	if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
 	if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 || value % 1_000 === 0 ? 0 : 1)}k`;
 	return String(Math.round(value));
-}
-
-interface RenderableSeries {
-	key: string;
-	provider: string;
-	model: string;
-	total: number;
-}
-interface RenderableBucket {
-	start: number;
-	end: number;
-	total: number;
-	series: Record<string, number>;
-}
-interface RenderableChart {
-	period: UsagePeriod;
-	start: number;
-	end: number;
-	buckets: RenderableBucket[];
-	series: RenderableSeries[];
-	total: number;
-	truncated: boolean;
-}
-
-function mergeBuckets(buckets: RenderableBucket[], maximum: number): RenderableBucket[] {
-	if (buckets.length <= maximum) return buckets;
-	const result: RenderableBucket[] = [];
-	for (let index = 0; index < maximum; index += 1) {
-		const from = Math.floor((index * buckets.length) / maximum);
-		const to = Math.max(from + 1, Math.floor(((index + 1) * buckets.length) / maximum));
-		const selected = buckets.slice(from, to);
-		const series: Record<string, number> = {};
-		for (const bucket of selected) {
-			for (const [key, value] of Object.entries(bucket.series)) series[key] = (series[key] ?? 0) + value;
-		}
-		result.push({
-			start: selected[0]!.start,
-			end: selected[selected.length - 1]!.end,
-			total: selected.reduce((sum, bucket) => sum + bucket.total, 0),
-			series,
-		});
-	}
-	return result;
-}
-
-function seriesAt(bucket: RenderableBucket, chart: RenderableChart, valueHeight: number): number {
-	let cumulative = 0;
-	for (let index = 0; index < chart.series.length; index += 1) {
-		cumulative += bucket.series[chart.series[index]!.key] ?? 0;
-		if (valueHeight <= cumulative) return index;
-	}
-	return Math.max(0, chart.series.length - 1);
 }
 
 /** Compact USD formatter: full cents below $1k, then the same k/M suffix convention as compact(). */
@@ -160,18 +107,6 @@ function formatPeriodPoint(value: number, period: UsagePeriod): string {
 	return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function axisLabels(start: number, end: number, period: UsagePeriod, width: number): string {
-	const labels = [formatPeriodPoint(start, period), formatPeriodPoint(start + (end - start) / 2, period), formatPeriodPoint(end, period)];
-	const positions = [0, Math.max(0, Math.floor((width - labels[1]!.length) / 2)), Math.max(0, width - labels[2]!.length)];
-	const characters = Array.from({ length: width }, () => " ");
-	for (let labelIndex = 0; labelIndex < labels.length; labelIndex += 1) {
-		for (let index = 0; index < labels[labelIndex]!.length && positions[labelIndex]! + index < width; index += 1) {
-			characters[positions[labelIndex]! + index] = labels[labelIndex]![index]!;
-		}
-	}
-	return characters.join("");
-}
-
 function displayIdentity(value: string): string {
 	return value
 		.replace(/[\r\n\t]/g, " ")
@@ -184,110 +119,73 @@ function plainTheme(): UsageTheme {
 	return { fg: (_color, text) => text, bold: (text) => text };
 }
 
+const hostTextMeasure: TextMeasure = { visibleWidth, truncateToWidth };
+
+function chartTheme(theme: UsageTheme): HistoryChartTheme {
+	return {
+		title: theme.bold,
+		subtitle: (text) => text,
+		axis: (text) => theme.fg("borderMuted", text),
+		warningLine: (text) => theme.fg("warning", text),
+		errorLine: (text) => theme.fg("error", text),
+		muted: (text) => theme.fg("muted", text),
+		series: (index) => seriesStyle(index, theme),
+	};
+}
+
 interface ChartRenderOptions {
 	title: string;
 	formatValue: (value: number) => string;
-	/** Appended after the observed/budget amount, e.g. " tokens"; empty when formatValue already carries a unit prefix like "$". */
 	unitSuffix: string;
 	subtitle?: string;
 	budget?: number;
 	noDataText: string;
 }
 
-/** Shared cumulative bar-chart renderer behind renderUsageGraph and renderCostGraph. */
-function renderChart(chart: RenderableChart, width: number, theme: UsageTheme, options: ChartRenderOptions): string[] {
-	const { formatValue, unitSuffix } = options;
-	const safeWidth = Math.max(20, width);
-	const chartColumns = Math.max(1, Math.floor((safeWidth - USAGE_Y_AXIS_WIDTH - 1) / 2));
-	const increments = mergeBuckets(chart.buckets, chartColumns);
-	const runningSeries: Record<string, number> = {};
-	let runningTotal = 0;
-	const buckets = increments.map((bucket) => {
-		runningTotal += bucket.total;
-		for (const [key, value] of Object.entries(bucket.series)) runningSeries[key] = (runningSeries[key] ?? 0) + value;
-		return { ...bucket, total: runningTotal, series: { ...runningSeries } };
+/** Adapts Jittor's domain graph to Malevich's reusable cumulative HistoryChart and budget ProgressBar. */
+function renderChart(
+	chart: { period: UsagePeriod; buckets: UsageGraph["buckets"]; series: UsageGraph["series"]; total: number; truncated: boolean },
+	width: number,
+	theme: UsageTheme,
+	options: ChartRenderOptions,
+): string[] {
+	const component = new HistoryChart({
+		title: options.title,
+		buckets: chart.buckets,
+		series: chart.series.map((series) => ({
+			key: series.key,
+			label: `${displayIdentity(series.provider)}/${displayIdentity(series.model)}`,
+		})),
+		formatValue: options.formatValue,
+		unitSuffix: options.unitSuffix,
+		...(options.subtitle ? { subtitle: options.subtitle } : {}),
+		...(options.budget !== undefined ? { budget: options.budget } : {}),
+		noDataText: options.noDataText,
+		truncated: chart.truncated,
+		formatAxisLabel: (value) => formatPeriodPoint(value, chart.period),
+		theme: chartTheme(theme),
+		measure: hostTextMeasure,
+		height: USAGE_CHART_HEIGHT,
+		yAxisWidth: USAGE_Y_AXIS_WIDTH,
+		maxSeriesShown: USAGE_RENDER_MAX_SERIES,
 	});
-	const barStep = buckets.length * 2 <= safeWidth - USAGE_Y_AXIS_WIDTH ? 2 : 1;
-	const plotWidth = buckets.length * barStep;
-	const budget = typeof options.budget === "number" && Number.isFinite(options.budget) && options.budget > 0 ? options.budget : undefined;
-	const maximum = Math.max(chart.total, budget ?? 0);
-	const observed = chart.truncated ? `at least ${formatValue(chart.total)}` : formatValue(chart.total);
-	const budgetState =
-		budget === undefined
-			? `${observed}${unitSuffix} · budget not configured${chart.truncated ? " · query limit reached" : ""}`
-			: chart.total > budget
-				? `${observed}${unitSuffix} / ${formatValue(budget)} budget · OVER BUDGET by ${chart.truncated ? "at least " : ""}${formatValue(chart.total - budget)}`
-				: chart.truncated
-					? `${observed}${unitSuffix} / ${formatValue(budget)} budget · state unknown · query limit reached`
-					: `${observed}${unitSuffix} / ${formatValue(budget)} budget · ${formatValue(budget - chart.total)} remaining`;
-	const lines = [
-		truncateToWidth(theme.bold(options.title), safeWidth, ""),
-		truncateToWidth(budgetState, safeWidth, "…"),
-		...(options.subtitle ? [truncateToWidth(options.subtitle, safeWidth, "…")] : []),
-		"",
-	];
-	if (maximum === 0) {
-		lines.push(theme.fg("dim", options.noDataText));
-		return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
-	}
-
-	for (let row = 0; row < USAGE_CHART_HEIGHT; row += 1) {
-		const fromBottom = USAGE_CHART_HEIGHT - row - 1;
-		const lower = (maximum * fromBottom) / USAGE_CHART_HEIGHT;
-		const upper = (maximum * (fromBottom + 1)) / USAGE_CHART_HEIGHT;
-		const thresholdRow = budget !== undefined && budget > lower && budget <= upper;
-		const label = thresholdRow
-			? formatValue(budget)
-			: row === 0
-				? formatValue(maximum)
-				: row === Math.floor(USAGE_CHART_HEIGHT / 2)
-					? formatValue(maximum / 2)
-					: "";
-		if (thresholdRow) {
-			const color = chart.total > budget ? "error" : "warning";
-			lines.push(`${label.padStart(USAGE_Y_AXIS_WIDTH - 2)} ${theme.fg("borderMuted", "│")}${theme.fg(color, "┄".repeat(plotWidth))}`);
-			continue;
-		}
-		let plot = "";
-		for (const bucket of buckets) {
-			const scaled = (bucket.total / maximum) * USAGE_CHART_HEIGHT;
-			const occupancy = Math.max(0, Math.min(1, scaled - fromBottom));
-			if (occupancy <= 0) {
-				plot += " ".repeat(barStep);
-				continue;
-			}
-			const block = PARTIAL_BLOCKS[Math.max(0, Math.ceil(occupancy * PARTIAL_BLOCKS.length) - 1)]!;
-			const valueHeight = Math.min(bucket.total, (maximum * (fromBottom + Math.min(occupancy, 0.5))) / USAGE_CHART_HEIGHT);
-			plot += seriesStyle(seriesAt(bucket, chart, valueHeight), theme)(block) + (barStep === 2 ? " " : "");
-		}
-		lines.push(`${label.padStart(USAGE_Y_AXIS_WIDTH - 2)} ${theme.fg("borderMuted", "│")}${plot}`);
-	}
-	lines.push(`${"0".padStart(USAGE_Y_AXIS_WIDTH - 2)} ${theme.fg("borderMuted", `└${"─".repeat(plotWidth)}`)}`);
-	lines.push(`${" ".repeat(USAGE_Y_AXIS_WIDTH)}${axisLabels(chart.start, chart.end, chart.period, plotWidth)}`);
-	lines.push("");
-	const displayedSeries = chart.series.slice(0, USAGE_RENDER_MAX_SERIES);
-	for (let index = 0; index < displayedSeries.length; index += 1) {
-		const series = displayedSeries[index]!;
-		const bullet = seriesStyle(index, theme)("■");
-		lines.push(
-			truncateToWidth(
-				`${bullet} ${displayIdentity(series.provider)}/${displayIdentity(series.model)}  ${formatValue(series.total)}`,
-				safeWidth,
-				"…",
-			),
-		);
-	}
-	if (chart.series.length > displayedSeries.length)
-		lines.push(truncateToWidth(theme.fg("muted", `… ${chart.series.length - displayedSeries.length} more series omitted`), safeWidth, "…"));
-	return lines.map((line) => (visibleWidth(line) <= safeWidth ? line : truncateToWidth(line, safeWidth, "…")));
+	const lines = component.render(width);
+	if (options.budget === undefined || !Number.isFinite(options.budget) || options.budget <= 0 || chart.total === 0) return lines;
+	const meter = new ProgressBar({
+		value: chart.total,
+		max: options.budget,
+		label: "Budget",
+		style: chart.total > options.budget ? (text) => theme.fg("error", text) : (text) => theme.fg("accent", text),
+		measure: hostTextMeasure,
+	});
+	lines.splice(options.subtitle ? 3 : 2, 0, ...meter.render(Math.max(20, width)));
+	return lines;
 }
 
 export function renderUsageGraph(chart: UsageGraph, width: number, theme: UsageTheme, tokenBudget?: number): string[] {
 	return renderChart(
 		{
 			period: chart.period,
-			start: chart.start,
-			end: chart.end,
 			buckets: chart.buckets,
 			series: chart.series,
 			total: chart.totalTokens,
@@ -310,8 +208,6 @@ export function renderCostGraph(chart: CostGraph, width: number, theme: UsageThe
 	return renderChart(
 		{
 			period: chart.period,
-			start: chart.start,
-			end: chart.end,
 			buckets: chart.buckets,
 			series: chart.series,
 			total: chart.totalUsd,
