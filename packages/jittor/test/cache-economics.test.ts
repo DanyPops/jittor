@@ -132,6 +132,35 @@ describe("cache economics", () => {
 		expect(model.breakEvenReadTokens).toBeNull();
 	});
 
+	it("resolves each run's own catalog price against that run's own real context size, then sums the results -- the whole point of pricing per run instead of per window", () => {
+		const tieredPricing: CacheEconomicsPricingLookup = {
+			priceFor: (_provider, _model, contextSizeTokens) => (contextSizeTokens > 200_000 ? { cacheRead: 0.1 } : { cacheRead: 0.3 }),
+		};
+		const rows = [
+			// Run A: 100,000 read tokens, below the 200k threshold -> priced at 0.3/1M -> $0.03
+			usageRow({
+				observedAt: 1_000,
+				metric: "cache-read-tokens",
+				value: 100_000,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", runId: "run-a" },
+			}),
+			// Run B: 300,000 read tokens, above the threshold -> priced at 0.1/1M -> $0.03
+			usageRow({
+				observedAt: 2_000,
+				metric: "cache-read-tokens",
+				value: 300_000,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", runId: "run-b" },
+			}),
+		];
+		const summary = buildCacheEconomicsSummary(rows, [], tieredPricing, { since: 0, until: 3_000 });
+		const model = summary.models[0]!;
+		expect(model.cacheReadTokens).toBe(400_000);
+		// A single flat-rate lookup over the blended 400,000 tokens would misprice this (e.g. always the
+		// >200k rate, or always the <=200k rate); per-run pricing gets both runs right and sums correctly.
+		expect(model.cacheReadCostUsd).toBeCloseTo(0.03 + 0.03, 10);
+		expect(model.cacheReadCostBasis).toBe("catalog-estimate");
+	});
+
 	it("isolates economics per provider/model, since pricing and cache behavior differ by model", () => {
 		const rows = [
 			usageRow({ observedAt: 1_000, metric: "cache-read-tokens", value: 1_000 }),

@@ -76,6 +76,8 @@ export const CACHE_ECONOMICS_MAX_MISSED_OPPORTUNITIES = 100;
 export const CACHE_ECONOMICS_LOSS_CORRELATION_WINDOW_MS = 5 * MILLISECONDS_PER_MINUTE;
 /** models.dev (and Jittor's catalog) quote pricing per one million tokens; catalog-estimate math divides by this to get a per-token rate. */
 export const CATALOG_PRICE_TOKEN_UNIT = 1_000_000;
+/** models.dev's own long-context pricing convention: a request whose context exceeds this many tokens uses ModelCatalogPricing.contextOver200k instead of the flat/tiered rate. */
+export const CATALOG_LONG_CONTEXT_THRESHOLD_TOKENS = 200_000;
 /** A `metrics prune --before` cutoff newer than this must pass `force: true`. Guards against accidentally wiping recent/live data with a too-recent cutoff (e.g. "now"), while still allowing routine cleanup of genuinely old rows without ceremony. */
 export const PRUNE_MIN_AGE_MS = 24 * MILLISECONDS_PER_HOUR;
 export const CONTEXT_OBSERVATION_MAX_CHARACTERS = 10_000_000;
