@@ -2,6 +2,7 @@
 import { fileURLToPath } from "node:url";
 import { BACKFILL_USAGE_LINES, formatUsageImportResult, formatUsageImportStatus, runBackfillCommand } from "./cli-commands/backfill.ts";
 import { BENCHMARKS_USAGE_LINES, runBenchmarksCommand } from "./cli-commands/benchmarks.ts";
+import { CACHE_USAGE_LINES, formatCacheEconomics, runCacheCommand } from "./cli-commands/cache.ts";
 import { CATALOG_USAGE_LINES, formatCatalogQuery, formatCatalogStatus, runCatalogCommand } from "./cli-commands/catalog.ts";
 import { runCompactionCommand } from "./cli-commands/compaction.ts";
 import { CONTEXT_USAGE_LINES, formatContextAssessment, formatContextDelta, runContextCommand } from "./cli-commands/context.ts";
@@ -19,6 +20,7 @@ import { connectJittorClient } from "./vehicle/client.ts";
 // directly from cli.ts rather than reaching into src/cli-commands/*.
 export type { CliDependencies };
 export {
+	formatCacheEconomics,
 	formatCatalogQuery,
 	formatCatalogStatus,
 	formatContextAssessment,
@@ -54,6 +56,7 @@ function usage(stderr: (line: string) => void): number {
 			...CONTEXT_USAGE_LINES,
 			...BENCHMARKS_USAGE_LINES,
 			...CATALOG_USAGE_LINES,
+			...CACHE_USAGE_LINES,
 			...METRICS_USAGE_LINES,
 			...ROUTER_USAGE_LINES,
 			...SESSION_USAGE_LINES,
@@ -96,6 +99,8 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 			return runBenchmarksCommand(action, rest, deps, fail);
 		case "catalog":
 			return runCatalogCommand(action, rest, deps, fail);
+		case "cache":
+			return runCacheCommand(action, rest, deps, fail);
 		case "context":
 			return runContextCommand(action, rest, deps, fail);
 		case "service":

@@ -16,6 +16,16 @@ export {
 	googleVertexFailureMetrics,
 } from "./google-vertex/failures.ts";
 export {
+	buildCacheEconomicsSummary,
+	type CacheCostBasis,
+	type CacheEconomicsMissedOpportunity,
+	type CacheEconomicsModelSummary,
+	type CacheEconomicsPricing,
+	type CacheEconomicsPricingLookup,
+	type CacheEconomicsSummary,
+	type CacheEconomicsSummaryOptions,
+} from "./observability/cache-economics.ts";
+export {
 	CONTEXT_SEGMENT_SOURCES,
 	CONTEXT_SEGMENT_STATES,
 	CONTEXT_SNAPSHOT_MAX_SEGMENTS,

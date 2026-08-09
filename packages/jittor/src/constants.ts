@@ -69,6 +69,13 @@ export const PAPYRUS_TASK_FOCUS_SCHEMA = "papyrus.task-focus/v1";
 export const TASK_FOCUS_EVENT_MAX_AGE_MS = 5 * MILLISECONDS_PER_MINUTE;
 export const TASK_FOCUS_ID_MAX_LENGTH = 200;
 export const TASK_COST_QUERY_LIMIT = 10_000;
+export const CACHE_ECONOMICS_QUERY_LIMIT = 10_000;
+export const CACHE_ECONOMICS_MAX_MODEL_GROUPS = 500;
+export const CACHE_ECONOMICS_MAX_MISSED_OPPORTUNITIES = 100;
+/** How soon after a context-prefix reset (session/provider/model change) a same-session cache-write still counts as a candidate cache-loss consequence of that reset, not an unrelated later write. */
+export const CACHE_ECONOMICS_LOSS_CORRELATION_WINDOW_MS = 5 * MILLISECONDS_PER_MINUTE;
+/** models.dev (and Jittor's catalog) quote pricing per one million tokens; catalog-estimate math divides by this to get a per-token rate. */
+export const CATALOG_PRICE_TOKEN_UNIT = 1_000_000;
 /** A `metrics prune --before` cutoff newer than this must pass `force: true`. Guards against accidentally wiping recent/live data with a too-recent cutoff (e.g. "now"), while still allowing routine cleanup of genuinely old rows without ceremony. */
 export const PRUNE_MIN_AGE_MS = 24 * MILLISECONDS_PER_HOUR;
 export const CONTEXT_OBSERVATION_MAX_CHARACTERS = 10_000_000;

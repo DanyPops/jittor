@@ -50,6 +50,7 @@ const OPERATION_RETRY_MODE = {
 	"router.clear_override": "once",
 	"router.current_route": "once",
 	"router.available_routes": "once",
+	"cache.economics": "retry",
 } as const satisfies Record<OperationName, "retry" | "once">;
 
 export function operationRetryMode(operation: OperationName): "retry" | "once" {

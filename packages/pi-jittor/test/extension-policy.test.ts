@@ -39,6 +39,7 @@ class FakeClient implements JittorExtensionClient {
 	};
 	metrics: any[] = [];
 	contextDelta: any = null;
+	cacheEconomics: unknown;
 	compactionEstimate: { ms: number | null; confidence: "cold-start" | "learned"; sampleSize: number; observedAt: number } = {
 		ms: null,
 		confidence: "cold-start",
@@ -80,6 +81,16 @@ class FakeClient implements JittorExtensionClient {
 				secret: `secret-for-${(input as { session_id: string }).session_id}`,
 			};
 		if (operation === "session.release") return { released: true };
+		if (operation === "cache.economics")
+			return (
+				this.cacheEconomics ?? {
+					since: (input as { since: number }).since,
+					until: (input as { until: number }).until,
+					models: [],
+					missedOpportunities: [],
+					truncated: false,
+				}
+			);
 		return {};
 	}
 }
@@ -591,6 +602,45 @@ describe("Jittor Pi actuator", () => {
 		expect(rendered).toContain("ADVISORY");
 	});
 
+	it("queries and renders cache economics for the trailing 7-day window through /jittor cache", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		client.cacheEconomics = {
+			since: 0,
+			until: 1,
+			models: [
+				{
+					provider: "anthropic",
+					model: "claude-sonnet-5",
+					inputTokens: 1_000_000,
+					cacheReadTokens: 500_000,
+					cacheWriteTokens: 200_000,
+					cacheReadCostUsd: 0.15,
+					cacheReadCostBasis: "provider-reported",
+					cacheWriteCostUsd: 0.75,
+					cacheWriteCostBasis: "provider-reported",
+					effectiveInputRateUsdPerToken: 0.000003,
+					counterfactualNoCacheCostUsd: 1.5,
+					counterfactualBasis: "provider-reported",
+					savingsUsd: 1.35,
+					cacheWritePremiumUsd: 0.15,
+					breakEvenReadTokens: 55_556,
+					paybackAchieved: true,
+				},
+			],
+			missedOpportunities: [],
+			truncated: false,
+		};
+		await app.commands.get("jittor").handler("cache", app.ctx);
+		const call = client.calls.find((candidate) => candidate.operation === "cache.economics")!;
+		const { since, until } = call.input as { since: number; until: number };
+		expect(typeof since).toBe("number");
+		expect(typeof until).toBe("number");
+		expect(until - since).toBe(7 * 24 * 60 * 60 * 1_000);
+		expect(app.notifications.at(-1)).toContain("anthropic/claude-sonnet-5");
+		expect(app.notifications.at(-1)).toContain("$1.35");
+	});
+
 	it("resolves domain and type from /jittor benchmarks as two independent, order-free positional words", async () => {
 		const client = new FakeClient();
 		const app = harness(client);
@@ -877,6 +927,60 @@ describe("Jittor Pi actuator", () => {
 				model: "openai/gpt-4.1-mini",
 			},
 		});
+	});
+
+	it("records provider-reported itemized cache-read/write cost alongside tokens, tagged with the active Pi session for cache-loss correlation", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		await app.handlers.get("message_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "anthropic",
+					model: "claude-sonnet-5",
+					usage: {
+						input: 1_000_000,
+						output: 1_000,
+						cacheRead: 500_000,
+						cacheWrite: 200_000,
+						cost: { input: 3, output: 0.015, cacheRead: 0.15, cacheWrite: 0.75, total: 3.915 },
+					},
+				},
+			},
+			app.ctx,
+		);
+		const records = recordedMetrics(client);
+		const cacheReadCost = records.find((record) => record.source === "pi" && record.metric === "cache-read-cost");
+		const cacheWriteCost = records.find((record) => record.source === "pi" && record.metric === "cache-write-cost");
+		const inputCost = records.find((record) => record.source === "pi" && record.metric === "input-cost");
+		expect(cacheReadCost).toMatchObject({ value: 0.15, unit: "usd" });
+		expect(cacheWriteCost).toMatchObject({ value: 0.75, unit: "usd" });
+		expect(inputCost).toMatchObject({ value: 3, unit: "usd" });
+		// Every "pi"-source row this turn carries the active session id, so cache economics can
+		// correlate a cache write back to the same session's own context-prefix reset evidence.
+		for (const record of [cacheReadCost, cacheWriteCost, inputCost])
+			expect((record?.attributes as Record<string, unknown> | undefined)?.sessionId).toBe("test-session");
+	});
+
+	it("omits itemized cache-cost metrics when the provider never reports that cost breakdown, rather than fabricating one", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		await app.handlers.get("message_end")![0]!(
+			{
+				message: {
+					role: "assistant",
+					provider: "openai-codex",
+					model: "gpt-5.6-sol",
+					usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 0, cost: { total: 0.004 } },
+				},
+			},
+			app.ctx,
+		);
+		const records = recordedMetrics(client);
+		expect(records.some((record) => record.metric === "cache-read-cost")).toBe(false);
+		expect(records.some((record) => record.metric === "cache-write-cost")).toBe(false);
+		expect(records.some((record) => record.metric === "input-cost")).toBe(false);
+		expect(records.some((record) => record.metric === "cost" && record.value === 0.004)).toBe(true);
 	});
 
 	it("records and reloads official Anthropic rate-limit response headers for the active route", async () => {

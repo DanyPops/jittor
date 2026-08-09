@@ -73,6 +73,8 @@ const WRITE: VehicleIdempotency = { mode: "unsafe" };
  *   available_routes: local-write (every one is a real router.set (or
  *   pause/resume) call, despite router.current_route's read-sounding name
  *   -- confirmed directly against router-operations.ts).
+ * - cache.economics: read (a pure projection over already-recorded metric
+ *   rows plus catalog pricing; never mutates anything).
  */
 const OPERATION_META: Record<OperationName, OperationMeta> = {
 	"metrics.record": { description: "Records one metric observation.", effect: "local-write" },
@@ -113,6 +115,11 @@ const OPERATION_META: Record<OperationName, OperationMeta> = {
 	"router.clear_override": { description: "Clears a manual route override.", effect: "local-write" },
 	"router.current_route": { description: "Sets the router's currently-active route.", effect: "local-write" },
 	"router.available_routes": { description: "Sets the router's currently-available routes.", effect: "local-write" },
+	"cache.economics": {
+		description:
+			"Reports prompt-cache economics (read/write cost, savings, break-even) and candidate missed-cache opportunities within a bounded time window.",
+		effect: "read",
+	},
 };
 
 /** Read effects need only jittor:read; every other effect needs both (writes commonly also read first). */

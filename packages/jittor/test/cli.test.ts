@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { formatContextDelta, formatCostByTask, formatMetricsQuery, formatRouterStatus, runCli } from "../src/cli.ts";
+import { formatCacheEconomics, formatContextDelta, formatCostByTask, formatMetricsQuery, formatRouterStatus, runCli } from "../src/cli.ts";
+import type { CacheEconomicsSummary } from "../src/observability/cache-economics.ts";
 import type { ContextDelta } from "../src/observability/context-delta.ts";
 import type { ContextAssessment } from "../src/observability/context-telemetry.ts";
 import type { StoredMetricObservation } from "../src/observability/metric.ts";
@@ -467,6 +468,68 @@ describe("Jittor CLI context telemetry parity", () => {
 		expect(text).toContain("anthropic/claude-sonnet-5 (high)");
 		expect(text).toContain("anthropic/claude-haiku-5 (off)");
 		expect(text.indexOf("ship-feature-x")).toBeLessThan(text.indexOf("claude-sonnet-5"));
+	});
+
+	it("renders cache economics with basis-qualified dollar figures and missed-cache candidates", () => {
+		const summary: CacheEconomicsSummary = {
+			since: 0,
+			until: 1_000,
+			models: [
+				{
+					provider: "anthropic",
+					model: "claude-sonnet-5",
+					inputTokens: 1_000_000,
+					cacheReadTokens: 500_000,
+					cacheWriteTokens: 200_000,
+					cacheReadCostUsd: 0.15,
+					cacheReadCostBasis: "provider-reported",
+					cacheWriteCostUsd: 0.75,
+					cacheWriteCostBasis: "provider-reported",
+					effectiveInputRateUsdPerToken: 0.000003,
+					counterfactualNoCacheCostUsd: 1.5,
+					counterfactualBasis: "provider-reported",
+					savingsUsd: 1.35,
+					cacheWritePremiumUsd: 0.15,
+					breakEvenReadTokens: 55_556,
+					paybackAchieved: true,
+				},
+				{
+					provider: "openrouter",
+					model: "openai/gpt-4.1-mini",
+					inputTokens: 0,
+					cacheReadTokens: 10,
+					cacheWriteTokens: 0,
+					cacheReadCostUsd: null,
+					cacheReadCostBasis: "unknown",
+					cacheWriteCostUsd: 0,
+					cacheWriteCostBasis: "provider-reported",
+					effectiveInputRateUsdPerToken: null,
+					counterfactualNoCacheCostUsd: null,
+					counterfactualBasis: "unknown",
+					savingsUsd: null,
+					cacheWritePremiumUsd: 0,
+					breakEvenReadTokens: 0,
+					paybackAchieved: null,
+				},
+			],
+			missedOpportunities: [
+				{
+					sessionId: "session-1",
+					occurredAt: 500,
+					resetReason: "model-changed",
+					cacheWriteTokens: 50_000,
+					cacheWriteCostUsd: 0.75,
+					note: "Candidate missed-cache opportunity: a model-changed context-prefix reset was followed by a cache write in the same session within the correlation window. This is a correlated pattern, not a proven cause.",
+				},
+			],
+			truncated: false,
+		};
+		const text = formatCacheEconomics(summary);
+		expect(text).toContain("anthropic/claude-sonnet-5");
+		expect(text).toContain("$1.35");
+		expect(text).toContain("unknown");
+		expect(text).toContain("session session-1");
+		expect(text).toContain("model-changed");
 	});
 
 	it("renders actionable human output and rejects invalid bounds", async () => {

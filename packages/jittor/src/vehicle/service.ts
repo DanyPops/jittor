@@ -2,6 +2,7 @@ import { VehicleRegistry } from "@danypops/vehicle-server";
 import { createVehicleHttpApp } from "@danypops/vehicle-server/http";
 import { errorResponse, healthResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
 import { SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "../constants.ts";
+import type { CacheEconomicsSummary } from "../observability/cache-economics.ts";
 import type { ContextDelta, ContextSnapshot } from "../observability/context-delta.ts";
 import { type ContextSnapshotHistory, MetricContextSnapshotHistory } from "../observability/context-snapshot-history.ts";
 import type { CompactionDurationEstimate, ContextAssessment } from "../observability/context-telemetry.ts";
@@ -27,6 +28,7 @@ import { routerMutationAuthorizer } from "../sessions/router-authorization.ts";
 import { DisabledObservationExporter, type ObservationExporter, type ObservationExportStatus } from "../telemetry-export/exporter.ts";
 import { VERSION } from "../version.ts";
 import { benchmarkOperations } from "./benchmark-operations.ts";
+import { cacheEconomicsOperations } from "./cache-operations.ts";
 import { catalogOperations } from "./catalog-operations.ts";
 import { contextOperations } from "./context-operations.ts";
 import { exportOperations } from "./export-operations.ts";
@@ -74,6 +76,7 @@ export const EXPECTED_OPERATION_NAMES = [
 	"router.clear_override",
 	"router.current_route",
 	"router.available_routes",
+	"cache.economics",
 ] as const;
 
 export type OperationName = (typeof EXPECTED_OPERATION_NAMES)[number];
@@ -117,6 +120,7 @@ export interface OperationInputs {
 	"router.clear_override": RouterScopeInput;
 	"router.current_route": Route & RouterScopeInput;
 	"router.available_routes": { routes: Route[] } & RouterScopeInput;
+	"cache.economics": { since: number; until: number };
 }
 export interface OperationOutputs {
 	"session.register": RegisterSessionIdentityResult;
@@ -154,6 +158,7 @@ export interface OperationOutputs {
 	"router.clear_override": RouterStatus;
 	"router.current_route": RouterStatus;
 	"router.available_routes": RouterStatus;
+	"cache.economics": CacheEconomicsSummary;
 }
 
 export class UnknownOperationError extends Error {}
@@ -286,6 +291,7 @@ export class JittorService {
 			...routerOperations(router, authorize),
 			...modelRankingOperations(modelRanker, router, authorize),
 			...sessionIdentityOperations(sessionIdentity),
+			...cacheEconomicsOperations(metrics, catalog),
 		};
 		this.vehicleRegistry = new VehicleRegistry({
 			name: "jittor",

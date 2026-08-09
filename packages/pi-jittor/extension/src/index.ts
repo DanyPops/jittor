@@ -12,6 +12,7 @@ import {
 	loadOpenAiTextTokenCounter,
 	MAX_DYNAMIC_ROUTES,
 	type MetricObservation,
+	MILLISECONDS_PER_DAY,
 	type ModelCandidate,
 	type ModelTaskDomain,
 	type ModelTaskType,
@@ -33,6 +34,7 @@ import {
 	validateTaskFocusEvent,
 } from "@danypops/jittor";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { showCacheEconomicsView } from "./observability/cache-economics-view.ts";
 import {
 	basePromptSegment,
 	buildBasePromptItems,
@@ -312,13 +314,16 @@ async function applyDecision(
 /**
  * taskId, when a Papyrus task is focused, tags the metric for cost-per-task correlation. thinking
  * comes from pi.getThinkingLevel() at message_end time, not from the message itself -- AssistantMessage
- * has no thinking field of its own, and the level can't have changed mid-message.
+ * has no thinking field of its own, and the level can't have changed mid-message. sessionId tags every
+ * row so cache economics (see @danypops/jittor's cache-economics.ts) can correlate a cache write back
+ * to this same session's own context-prefix reset evidence, without ever widening scope by provider/model.
  */
 function assistantUsageMetrics(
 	message: unknown,
 	observedAt: number,
 	taskId: string | null = null,
 	thinking: string | null = null,
+	sessionId: string | null = null,
 ): MetricObservation[] {
 	if (typeof message !== "object" || message === null || Array.isArray(message)) return [];
 	const value = message as Record<string, unknown>;
@@ -335,6 +340,7 @@ function assistantUsageMetrics(
 		model,
 		...(taskId === null ? {} : { taskId }),
 		...(thinking === null || thinking.length === 0 ? {} : { thinking }),
+		...(sessionId === null || sessionId.length === 0 ? {} : { sessionId }),
 	};
 	const metrics: MetricObservation[] = [];
 	for (const [field, metric, tokenScope] of [
@@ -365,9 +371,23 @@ function assistantUsageMetrics(
 				},
 			});
 	}
-	const cost = typeof usage.cost === "object" && usage.cost !== null ? (usage.cost as Record<string, unknown>).total : undefined;
+	const costBreakdown = typeof usage.cost === "object" && usage.cost !== null ? (usage.cost as Record<string, unknown>) : undefined;
+	const cost = costBreakdown?.total;
 	if (typeof cost === "number" && Number.isFinite(cost))
 		metrics.push({ source: "pi", scope, metric: "cost", value: cost, unit: "usd", observedAt: metricObservedAt, attributes });
+	// Itemized provider-reported cost, when the provider breaks it out -- the real dollar figures cache
+	// economics needs (see cache-economics.ts) instead of ever re-deriving them from catalog prices when
+	// the provider already told us. Never fabricated: omitted entirely when a field is absent.
+	for (const [field, metric] of [
+		["input", "input-cost"],
+		["output", "output-cost"],
+		["cacheRead", "cache-read-cost"],
+		["cacheWrite", "cache-write-cost"],
+	] as const satisfies ReadonlyArray<readonly [string, string]>) {
+		const amount = costBreakdown?.[field];
+		if (typeof amount === "number" && Number.isFinite(amount))
+			metrics.push({ source: "pi", scope, metric, value: amount, unit: "usd", observedAt: metricObservedAt, attributes });
+	}
 	return metrics;
 }
 
@@ -546,7 +566,7 @@ export function registerJittorExtension(
 	};
 
 	pi.registerCommand("jittor", {
-		description: "Jittor settings, routing status, benchmarks, and Codex recovery controls",
+		description: "Jittor settings, routing status, benchmarks, cache economics, and Codex recovery controls",
 		handler: async (args, ctx) => {
 			const action = args.trim().toLowerCase();
 			if (action === "" || action === "settings") {
@@ -595,6 +615,10 @@ export function registerJittorExtension(
 					requestedDomain ?? "general",
 					requestedType ?? "general",
 				);
+				return;
+			}
+			if (action === "cache") {
+				await showCacheEconomicsView(ctx, client, 7 * MILLISECONDS_PER_DAY);
 				return;
 			}
 			if (action === "outcome accepted" || action === "outcome rejected") {
@@ -946,7 +970,13 @@ export function registerJittorExtension(
 				event.message.errorMessage,
 			);
 		}
-		const metrics = assistantUsageMetrics(event.message, Date.now(), focusedTaskId, pi.getThinkingLevel());
+		const metrics = assistantUsageMetrics(
+			event.message,
+			Date.now(),
+			focusedTaskId,
+			pi.getThinkingLevel(),
+			ctx.sessionManager.getSessionId(),
+		);
 		if (metrics.length > 0) {
 			const amount = (name: string): number =>
 				metrics
