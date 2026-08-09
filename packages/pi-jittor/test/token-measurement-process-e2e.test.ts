@@ -18,6 +18,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 const JITTOR_PACKAGE = fileURLToPath(new URL("../../jittor", import.meta.url));
 const JITTOR_EXTENSION = fileURLToPath(new URL("../extension/src/index.ts", import.meta.url));
+const PI_CLI = fileURLToPath(new URL("./cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")));
 
 let sandbox: string | undefined;
 let daemon: CompanionDaemon | undefined;
@@ -72,6 +73,7 @@ describe("provider token provenance through a real Pi + Jittor daemon", () => {
 		});
 
 		pi = spawnRealPiProcess({
+			bin: PI_CLI,
 			extensions: [resolveFauxProviderExtensionPath(), JITTOR_EXTENSION],
 			extraArgs: ["--provider", "faux", "--model", "faux-1"],
 			cwd: sandbox,
