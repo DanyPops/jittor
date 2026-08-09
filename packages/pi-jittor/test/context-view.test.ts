@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ContextSegment, ContextSegmentItem } from "@danypops/jittor";
+import { renderToTerminal } from "@danypops/pi-tui-harness";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ContextBreakdown } from "../extension/src/observability/context-breakdown.ts";
 import { buildContextRowsIterative } from "../extension/src/observability/context-report.ts";
@@ -86,7 +87,9 @@ describe("showContextView", () => {
 			ui: {
 				async custom(factory: Function) {
 					const component = factory({ requestRender() {} }, theme, {}, () => undefined);
-					rendered = component.render(60).join("\n");
+					const terminal = await renderToTerminal(component.render(60));
+					rendered = terminal.plainLines().join("\n");
+					terminal.dispose();
 					return undefined;
 				},
 			},
@@ -96,6 +99,8 @@ describe("showContextView", () => {
 		expect(rendered).toContain("12.0k");
 		expect(rendered.indexOf("Active Rules")).toBeLessThan(rendered.indexOf("Tool definitions"));
 		expect(rendered).toContain("[exact-cooperative]");
+		expect(rendered).toContain("model tokenizer");
+		expect(rendered).toContain("provider request totals remain aggregate");
 		expect(rendered).toContain("esc close");
 	});
 

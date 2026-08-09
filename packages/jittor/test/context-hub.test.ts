@@ -60,6 +60,57 @@ describe("Context Hub: shared contribution channel", () => {
 		);
 	});
 
+	it("preserves content-free item measurements and provider request reconciliation", () => {
+		const segment = validateContextSegment({
+			key: "history",
+			label: "History",
+			estimatedTokens: 2,
+			confidence: "exact-structural",
+			items: [
+				{
+					label: "assistant",
+					estimatedTokens: 2,
+					measurement: {
+						tokens: 2,
+						scope: "context-item",
+						provenance: "tokenizer-exact-text",
+						method: "gpt-tokenizer:o200k_base",
+						provider: "openai",
+						model: "gpt-5",
+					},
+					requestTokenReconciliation: {
+						aggregate: {
+							tokens: 550,
+							scope: "request-context",
+							provenance: "provider-reported",
+							method: "pi-assistant-usage",
+							provider: "openai",
+							model: "gpt-5",
+						},
+						attributedTokens: 0,
+						residual: {
+							tokens: 550,
+							scope: "unattributed-residual",
+							provenance: "structural-estimate",
+							method: "aggregate-minus-attributed",
+							provider: "openai",
+							model: "gpt-5",
+						},
+						overshootTokens: 0,
+					},
+				},
+			],
+		});
+		expect(segment.items?.[0]?.measurement?.provenance).toBe("tokenizer-exact-text");
+		expect(segment.items?.[0]?.requestTokenReconciliation?.aggregate.tokens).toBe(550);
+		expect(() =>
+			validateContextSegment({
+				...segment,
+				items: [{ ...segment.items![0], measurement: { ...segment.items![0]!.measurement, tokens: 3 } }],
+			}),
+		).toThrow("must match");
+	});
+
 	it("rejects a segment item tree nested past the bound", () => {
 		let deep: Record<string, unknown> = { label: "leaf", estimatedTokens: 1 };
 		for (let i = 0; i < 8; i++) deep = { label: `level-${i}`, estimatedTokens: 1, children: [deep] };

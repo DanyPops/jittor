@@ -15,7 +15,7 @@
     "@danypops/vehicle-client": "^0.5.1",
     "@danypops/vehicle-core": "^0.12.1",
     "@danypops/vehicle-server": "^0.17.0",
-    "@danypops/jittor": "^0.14.0",
+    "@danypops/jittor": "workspace:^",
     "malevich-tui-components": "^0.16.1"
   },
   "peerDependencies": {

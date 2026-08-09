@@ -751,6 +751,12 @@ describe("Jittor Pi actuator", () => {
 		expect(local.map((metric) => metric.metric)).toContain("tool-calls");
 		expect(local.some((metric) => metric.metric === "outcome-accepted" && metric.value === 1)).toBe(true);
 		expect(local.every((metric) => metric.attributes.domain === "coding" && metric.attributes.type === "general")).toBe(true);
+		expect(local.find((metric) => metric.metric === "input-tokens")?.attributes.tokenMeasurement).toMatchObject({
+			tokens: 100,
+			scope: "request-input",
+			provenance: "provider-reported",
+			method: "pi-assistant-usage",
+		});
 		expect(JSON.stringify(local)).not.toContain("private");
 	});
 
@@ -782,6 +788,16 @@ describe("Jittor Pi actuator", () => {
 		const records = recordedMetrics(client);
 		expect(records.some((record) => record.source === "codex-subscription")).toBe(true);
 		expect(records.some((record) => record.metric === "cost" && record.value === 0.004)).toBe(true);
+		expect(records.find((record) => record.source === "pi" && record.metric === "input-tokens")?.attributes).toMatchObject({
+			tokenMeasurement: {
+				tokens: 100,
+				scope: "request-input",
+				provenance: "provider-reported",
+				method: "pi-assistant-usage",
+				provider: "openrouter",
+				model: "openai/gpt-4.1-mini",
+			},
+		});
 	});
 
 	it("records and reloads official Anthropic rate-limit response headers for the active route", async () => {

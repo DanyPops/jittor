@@ -22,6 +22,8 @@ Dependencies point toward `observability/` and `optimization/`; provider, SQLite
 
 Operations currently include bounded metric recording/query/pruning, benchmark refresh/status/query, context assessment, routing control, telemetry polling, and service checkpointing. Every operation is exposed through the authenticated typed client; benchmark operations also have CLI parity.
 
+Token counts carry explicit scope and provenance (`provider-reported`, `provider-count-api`, `tokenizer-exact-text`, or `structural-estimate`). Provider aggregates remain authoritative, exact local tokenization is labeled exact for text only, and envelope/media/provider residuals remain explicit instead of being assigned to individual context items. See [`docs/TOKEN_MEASUREMENT.md`](docs/TOKEN_MEASUREMENT.md) for the contract, OpenAI-family adapter, privacy boundary, module benchmark, and E2E test layers.
+
 ## Provider telemetry
 
 - ChatGPT-authenticated Codex subscription usage

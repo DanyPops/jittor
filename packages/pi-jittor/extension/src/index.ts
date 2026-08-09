@@ -7,6 +7,7 @@ import {
 	CompactionTelemetry,
 	type ContextAssessment,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
+	loadOpenAiTextTokenCounter,
 	MAX_DYNAMIC_ROUTES,
 	type MetricObservation,
 	type ModelCandidate,
@@ -21,6 +22,8 @@ import {
 	type StoredMetricObservation,
 	TASK_DOMAINS,
 	TASK_TYPES,
+	type TextTokenCounter,
+	type TokenMeasurementScope,
 	toolLedgerSegment,
 	USAGE_PERIODS,
 	type UsagePeriod,
@@ -56,6 +59,20 @@ export { formatFooterStatus } from "./observability/status.ts";
 export type { CodexRecoveryRuntime } from "./optimization/recovery/codex.ts";
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const textTokenCounterPromises = new Map<string, Promise<readonly TextTokenCounter[]>>();
+
+function textTokenCounters(provider: string | undefined, model: string | undefined): Promise<readonly TextTokenCounter[]> {
+	if (!provider || !model) return Promise.resolve([]);
+	const key = `${provider}\u0000${model}`;
+	let counters = textTokenCounterPromises.get(key);
+	if (!counters) {
+		counters = loadOpenAiTextTokenCounter(provider, model)
+			.then((counter) => (counter ? [counter] : []))
+			.catch(() => []);
+		textTokenCounterPromises.set(key, counters);
+	}
+	return counters;
+}
 const RECOVERY_GUIDANCE = "Run /jittor off to disable blocking, or restart the daemon with: systemctl --user restart jittor.service";
 
 export interface JittorExtensionClient {
@@ -297,15 +314,33 @@ function assistantUsageMetrics(
 		...(thinking === null || thinking.length === 0 ? {} : { thinking }),
 	};
 	const metrics: MetricObservation[] = [];
-	for (const [field, metric] of [
-		["input", "input-tokens"],
-		["output", "output-tokens"],
-		["cacheRead", "cache-read-tokens"],
-		["cacheWrite", "cache-write-tokens"],
-	] as const) {
+	for (const [field, metric, tokenScope] of [
+		["input", "input-tokens", "request-input"],
+		["output", "output-tokens", "response-output"],
+		["cacheRead", "cache-read-tokens", "cache-read"],
+		["cacheWrite", "cache-write-tokens", "cache-write"],
+	] as const satisfies ReadonlyArray<readonly [string, string, TokenMeasurementScope]>) {
 		const amount = usage[field];
-		if (typeof amount === "number" && Number.isFinite(amount))
-			metrics.push({ source: "pi", scope, metric, value: amount, unit: "tokens", observedAt, attributes });
+		if (typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0)
+			metrics.push({
+				source: "pi",
+				scope,
+				metric,
+				value: amount,
+				unit: "tokens",
+				observedAt,
+				attributes: {
+					...attributes,
+					tokenMeasurement: {
+						tokens: amount,
+						scope: tokenScope,
+						provenance: "provider-reported",
+						method: "pi-assistant-usage",
+						provider,
+						model,
+					},
+				},
+			});
 	}
 	const cost = typeof usage.cost === "object" && usage.cost !== null ? (usage.cost as Record<string, unknown>).total : undefined;
 	if (typeof cost === "number" && Number.isFinite(cost))
@@ -580,7 +615,10 @@ export function registerJittorExtension(
 			// path including everything a real compaction has already summarized away.
 			const activeEntryIds = new Set((ctx.sessionManager.buildContextEntries() as SessionEntryLike[]).map((entry) => entry.id));
 			const branchEntryIds = new Set((ctx.sessionManager.getBranch() as SessionEntryLike[]).map((entry) => entry.id));
-			const messageHistory = buildMessageHistoryTree(tree, activeEntryIds, branchEntryIds);
+			const messageHistory = buildMessageHistoryTree(tree, activeEntryIds, branchEntryIds, {
+				...(ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {}),
+				counters: await textTokenCounters(ctx.model?.provider, ctx.model?.id),
+			});
 			const usage = ctx.getContextUsage();
 			const ownSegments = [
 				basePromptSegment(lastObservedBasePromptTokens, lastObservedBasePromptItems),

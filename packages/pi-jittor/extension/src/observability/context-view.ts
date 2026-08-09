@@ -155,9 +155,7 @@ class ContextViewport {
 				),
 			);
 		}
-		lines.push(
-			theme.fg("dim", "Item sizes marked ≈ use char/4; provider request totals are aggregate usage, not per-item tokenizer counts."),
-		);
+		lines.push(theme.fg("dim", "Exact-text items name the model tokenizer; ≈ uses char/4; provider request totals remain aggregate."));
 		lines.push("");
 
 		const rowsTheme: ContextRowsTheme = { colorFor, header: (s) => theme.bold(s) };

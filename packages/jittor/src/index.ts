@@ -71,6 +71,21 @@ export {
 	validateTaskFocusEvent,
 } from "./observability/task-focus.ts";
 export {
+	countTextWithFallback,
+	type RequestTokenReconciliation,
+	reconcileRequestTokens,
+	StructuralTextTokenCounter,
+	type TextTokenCounter,
+	type TextTokenCountInput,
+	TOKEN_MEASUREMENT_PROVENANCES,
+	TOKEN_MEASUREMENT_SCOPES,
+	type TokenMeasurement,
+	type TokenMeasurementProvenance,
+	type TokenMeasurementScope,
+	validateRequestTokenReconciliation,
+	validateTokenMeasurement,
+} from "./observability/token-measurement.ts";
+export {
 	buildCostGraph,
 	buildUsageGraph,
 	type CostBucket,
@@ -91,6 +106,7 @@ export {
 	usagePeriod,
 	usagePeriodStart,
 } from "./observability/usage.ts";
+export { loadOpenAiTextTokenCounter, OpenAiTextTokenCounter } from "./openai/token-counter.ts";
 export {
 	type ModelCandidate,
 	type ModelRankingInput,

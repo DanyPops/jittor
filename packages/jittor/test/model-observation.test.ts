@@ -62,7 +62,9 @@ describe("local model observations", () => {
 		const metrics = modelRunMetrics(run());
 		expect(
 			metrics.every((metric) =>
-				Object.keys(metric.attributes ?? {}).every((key) => ["provider", "model", "thinking", "domain", "type", "runId"].includes(key)),
+				Object.keys(metric.attributes ?? {}).every((key) =>
+					["provider", "model", "thinking", "domain", "type", "runId", "tokenMeasurement"].includes(key),
+				),
 			),
 		).toBe(true);
 		expect(JSON.stringify(metrics)).not.toContain("private");
@@ -89,6 +91,19 @@ describe("local model observations", () => {
 		]);
 		expect(metrics.every((metric) => metric.source === "local-model")).toBe(true);
 		expect(metrics.every((metric) => metric.attributes?.domain === "coding" && metric.attributes?.type === "general")).toBe(true);
+		expect(metrics.find((metric) => metric.metric === "input-tokens")?.attributes?.tokenMeasurement).toEqual({
+			tokens: 1_000,
+			scope: "request-input",
+			provenance: "provider-reported",
+			method: "pi-assistant-usage",
+			provider: "openai-codex",
+			model: "gpt-5.4",
+		});
+		expect(metrics.find((metric) => metric.metric === "cache-read-tokens")?.attributes?.tokenMeasurement).toMatchObject({
+			tokens: 500,
+			scope: "cache-read",
+			provenance: "provider-reported",
+		});
 	});
 
 	it("classifies domain and type from bounded tool names without inspecting payloads", () => {

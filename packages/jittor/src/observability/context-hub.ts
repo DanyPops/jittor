@@ -24,12 +24,22 @@ import {
 	CONTEXT_HUB_SEGMENT_LABEL_MAX_CHARACTERS,
 } from "../constants.ts";
 import type { MetricObservation } from "./metric.ts";
+import {
+	type RequestTokenReconciliation,
+	type TokenMeasurement,
+	validateRequestTokenReconciliation,
+	validateTokenMeasurement,
+} from "./token-measurement.ts";
 
 export type ContextConfidenceTier = (typeof CONTEXT_HUB_CONFIDENCE_TIERS)[number];
 
 export interface ContextSegmentItem {
 	label: string;
 	estimatedTokens: number;
+	/** Explicit provenance for this item's own token count. Omitted only by legacy/cooperative producers that have not migrated yet. */
+	measurement?: TokenMeasurement;
+	/** Provider aggregate for the request associated with this entry, kept separate from this item's own cost. */
+	requestTokenReconciliation?: RequestTokenReconciliation;
 	children?: ContextSegmentItem[];
 }
 
@@ -78,12 +88,19 @@ function validateSegmentItem(value: unknown, depth: number): ContextSegmentItem 
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("context segment item must be an object");
 	const input = value as Record<string, unknown>;
 	for (const key of Object.keys(input)) {
-		if (key !== "label" && key !== "estimatedTokens" && key !== "children")
+		if (key !== "label" && key !== "estimatedTokens" && key !== "measurement" && key !== "requestTokenReconciliation" && key !== "children")
 			throw new Error(`context segment item contains unexpected field: ${key}`);
 	}
+	const estimatedTokens = boundedInteger(input.estimatedTokens, "item.estimatedTokens");
+	const measurement = input.measurement === undefined ? undefined : validateTokenMeasurement(input.measurement);
+	if (measurement && measurement.tokens !== estimatedTokens) throw new Error("item measurement tokens must match item.estimatedTokens");
+	const requestTokenReconciliation =
+		input.requestTokenReconciliation === undefined ? undefined : validateRequestTokenReconciliation(input.requestTokenReconciliation);
 	const item: ContextSegmentItem = {
 		label: nonEmptyString(input.label, "item.label", CONTEXT_HUB_ITEM_LABEL_MAX_CHARACTERS),
-		estimatedTokens: boundedInteger(input.estimatedTokens, "item.estimatedTokens"),
+		estimatedTokens,
+		...(measurement ? { measurement } : {}),
+		...(requestTokenReconciliation ? { requestTokenReconciliation } : {}),
 	};
 	if (input.children !== undefined) {
 		if (!Array.isArray(input.children)) throw new Error("item.children must be an array");

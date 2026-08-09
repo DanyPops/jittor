@@ -4,6 +4,12 @@ import {
 	CONTEXT_TREE_MAX_NODES,
 	type ContextSegment,
 	type ContextSegmentItem,
+	countTextWithFallback,
+	type RequestTokenReconciliation,
+	reconcileRequestTokens,
+	StructuralTextTokenCounter,
+	type TextTokenCounter,
+	type TokenMeasurement,
 } from "@danypops/jittor";
 import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 
@@ -34,58 +40,106 @@ export interface SessionTreeNodeLike {
 
 interface MessageContentAnalysis {
 	characters: number;
+	text: string;
 	items: ContextSegmentItem[];
 	imageCount: number;
 }
 
-function measuredItem(label: string, characters: number): ContextSegmentItem {
-	return { label: `${label} · ${characters.toLocaleString()} chars (≈ char/4)`, estimatedTokens: toCeilTokens(characters) };
+export interface ContextTokenMeasurementOptions {
+	provider?: string;
+	model?: string;
+	counters?: readonly TextTokenCounter[];
 }
 
-/** Breaks a message into the public content fields Pi actually persists. These are structural char/4 estimates, not tokenizer-exact costs. */
-function analyzeMessageContent(message: unknown): MessageContentAnalysis {
-	if (typeof message !== "object" || message === null) return { characters: 0, items: [], imageCount: 0 };
+const STRUCTURAL_TEXT_COUNTER = new StructuralTextTokenCounter();
+
+function measurementForText(text: string, options: ContextTokenMeasurementOptions = {}): TokenMeasurement {
+	return countTextWithFallback(
+		{
+			text,
+			scope: "context-item",
+			...(options.provider === undefined ? {} : { provider: options.provider }),
+			...(options.model === undefined ? {} : { model: options.model }),
+		},
+		options.counters ?? [],
+		STRUCTURAL_TEXT_COUNTER,
+	);
+}
+
+function measuredItem(label: string, textOrCharacters: string | number, options: ContextTokenMeasurementOptions = {}): ContextSegmentItem {
+	const characters = typeof textOrCharacters === "string" ? textOrCharacters.length : textOrCharacters;
+	const measurement =
+		typeof textOrCharacters === "string"
+			? measurementForText(textOrCharacters, options)
+			: {
+					tokens: toCeilTokens(characters),
+					scope: "context-item" as const,
+					provenance: "structural-estimate" as const,
+					method: `char/${CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN}`,
+				};
+	const suffix =
+		measurement.provenance === "structural-estimate"
+			? `${characters.toLocaleString()} chars (≈ char/4)`
+			: `${measurement.tokens.toLocaleString()} tok (${measurement.method}; exact text)`;
+	return { label: `${label} · ${suffix}`, estimatedTokens: measurement.tokens, measurement };
+}
+
+/** Breaks a message into Pi's public content fields and attaches explicit exact-text or structural provenance without retaining content. */
+function analyzeMessageContent(message: unknown, options: ContextTokenMeasurementOptions = {}): MessageContentAnalysis {
+	if (typeof message !== "object" || message === null) return { characters: 0, text: "", items: [], imageCount: 0 };
 	const record = message as Record<string, unknown>;
+	const effectiveOptions = options;
 	if (record.role === "bashExecution") {
 		// Pi's own context builder excludes "!!"-prefixed bash output from context; match that.
-		if (record.excludeFromContext === true) return { characters: 0, items: [], imageCount: 0 };
+		if (record.excludeFromContext === true) return { characters: 0, text: "", items: [], imageCount: 0 };
 		const command = String(record.command ?? "");
 		const output = String(record.output ?? "");
 		return {
 			characters: command.length + output.length,
-			items: [measuredItem("command", command.length), measuredItem("output", output.length)].filter((item) => item.estimatedTokens > 0),
+			text: command + output,
+			items: [measuredItem("command", command, effectiveOptions), measuredItem("output", output, effectiveOptions)].filter(
+				(item) => item.estimatedTokens > 0,
+			),
 			imageCount: 0,
 		};
 	}
 	const content = record.content;
-	if (typeof content === "string") return { characters: content.length, items: [measuredItem("text", content.length)], imageCount: 0 };
-	if (!Array.isArray(content)) return { characters: 0, items: [], imageCount: 0 };
+	if (typeof content === "string")
+		return {
+			characters: content.length,
+			text: content,
+			items: [measuredItem("text", content, effectiveOptions)],
+			imageCount: 0,
+		};
+	if (!Array.isArray(content)) return { characters: 0, text: "", items: [], imageCount: 0 };
 	let characters = 0;
 	let imageCount = 0;
+	let text = "";
 	const items: ContextSegmentItem[] = [];
 	for (let index = 0; index < content.length; index++) {
 		const block = content[index];
 		if (typeof block !== "object" || block === null) continue;
 		const b = block as Record<string, unknown>;
-		let blockCharacters = 0;
+		let blockText = "";
 		let label = `block ${index + 1}`;
 		if (b.type === "text") {
-			blockCharacters = String(b.text ?? "").length;
+			blockText = String(b.text ?? "");
 			label = "text";
 		} else if (b.type === "thinking") {
-			blockCharacters = String(b.thinking ?? "").length;
+			blockText = String(b.thinking ?? "");
 			label = "thinking";
 		} else if (b.type === "toolCall") {
-			blockCharacters = JSON.stringify(b.arguments ?? {}).length;
+			blockText = JSON.stringify(b.arguments ?? {});
 			label = `tool call ${String(b.name ?? "(unknown)")} arguments`;
 		} else if (b.type === "image") {
 			imageCount += 1;
 			continue; // image tokens are provider/model-specific and cannot be derived from base64 characters
 		} else continue;
-		characters += blockCharacters;
-		if (blockCharacters > 0) items.push(measuredItem(label, blockCharacters));
+		characters += blockText.length;
+		text += blockText;
+		if (blockText.length > 0) items.push(measuredItem(label, blockText, effectiveOptions));
 	}
-	return { characters, items, imageCount };
+	return { characters, text, items, imageCount };
 }
 
 function messageSnippet(message: unknown, maxLength = 48): string {
@@ -109,31 +163,55 @@ function messageSnippet(message: unknown, maxLength = 48): string {
 	return collapsed.length > maxLength ? `${collapsed.slice(0, maxLength - 1)}…` : collapsed;
 }
 
-function providerPromptUsage(message: unknown): string {
-	if (typeof message !== "object" || message === null) return "";
-	const usage = (message as Record<string, unknown>).usage;
-	if (typeof usage !== "object" || usage === null) return "";
+interface ProviderPromptUsage {
+	label: string;
+	reconciliation: RequestTokenReconciliation;
+}
+
+function providerPromptUsage(message: unknown): ProviderPromptUsage | null {
+	if (typeof message !== "object" || message === null) return null;
+	const messageRecord = message as Record<string, unknown>;
+	const usage = messageRecord.usage;
+	if (typeof usage !== "object" || usage === null) return null;
 	const record = usage as Record<string, unknown>;
-	const input = typeof record.input === "number" && record.input >= 0 ? record.input : 0;
-	const cacheRead = typeof record.cacheRead === "number" && record.cacheRead >= 0 ? record.cacheRead : 0;
-	const cacheWrite = typeof record.cacheWrite === "number" && record.cacheWrite >= 0 ? record.cacheWrite : 0;
+	const amount = (value: unknown): number => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0);
+	const input = amount(record.input);
+	const cacheRead = amount(record.cacheRead);
+	const cacheWrite = amount(record.cacheWrite);
 	const promptTokens = input + cacheRead + cacheWrite;
-	if (promptTokens <= 0) return "";
+	if (!Number.isSafeInteger(promptTokens) || promptTokens <= 0) return null;
+	const identity =
+		typeof messageRecord.provider === "string" && typeof messageRecord.model === "string"
+			? { provider: messageRecord.provider, model: messageRecord.model }
+			: {};
+	const reconciliation = reconcileRequestTokens(
+		{
+			tokens: promptTokens,
+			scope: "request-context",
+			provenance: "provider-reported",
+			method: "pi-assistant-usage",
+			...identity,
+		},
+		[],
+	);
 	const cache =
 		cacheRead > 0 || cacheWrite > 0
 			? `; new ${input.toLocaleString()}, cache read ${cacheRead.toLocaleString()}, write ${cacheWrite.toLocaleString()}`
 			: "";
-	return ` · provider-reported request context ${promptTokens.toLocaleString()} tok${cache}`;
+	return {
+		label: ` · provider-reported request context ${promptTokens.toLocaleString()} tok${cache} · unattributed residual ${reconciliation.residual.tokens.toLocaleString()} tok`,
+		reconciliation,
+	};
 }
 
-function entryLabel(entry: SessionEntryLike, imageCount = 0): string {
+function entryLabel(entry: SessionEntryLike, imageCount = 0, providerUsage = ""): string {
 	if (entry.type === "compaction") return "compaction summary";
 	if (entry.type === "branch_summary") return "branch summary";
 	const role = typeof entry.message === "object" && entry.message !== null ? (entry.message as Record<string, unknown>).role : undefined;
 	const prefix = typeof role === "string" ? role : entry.type;
 	const snippet = messageSnippet(entry.message);
 	const images = imageCount > 0 ? ` · ${imageCount} image${imageCount === 1 ? "" : "s"} (token cost unavailable)` : "";
-	return `${snippet ? `${prefix}: ${snippet}` : prefix}${providerPromptUsage(entry.message)}${images}`;
+	return `${snippet ? `${prefix}: ${snippet}` : prefix}${providerUsage}${images}`;
 }
 
 export interface MessageHistoryTree {
@@ -179,6 +257,7 @@ export function buildMessageHistoryTree(
 	roots: ReadonlyArray<SessionTreeNodeLike>,
 	activeEntryIds: ReadonlySet<string>,
 	branchEntryIds?: ReadonlySet<string>,
+	measurementOptions: ContextTokenMeasurementOptions = {},
 ): MessageHistoryTree {
 	const visited = new Set<string>();
 	let truncated = false;
@@ -209,14 +288,19 @@ export function buildMessageHistoryTree(
 	for (let index = order.length - 1; index >= 0; index--) {
 		const frame = order[index]!;
 		const entry = frame.node.entry;
-		const analysis = entry.type === "message" ? analyzeMessageContent(entry.message) : { characters: 0, items: [], imageCount: 0 };
-		const characters =
+		const entryMeasurementOptions = measurementOptions;
+		const analysis =
 			entry.type === "message"
-				? analysis.characters
+				? analyzeMessageContent(entry.message, measurementOptions)
+				: { characters: 0, text: "", items: [], imageCount: 0 };
+		const text =
+			entry.type === "message"
+				? analysis.text
 				: entry.type === "compaction" || entry.type === "branch_summary"
-					? (entry.summary ?? "").length
-					: 0;
-		const tokens = Math.ceil(characters / CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN);
+					? (entry.summary ?? "")
+					: "";
+		const measurement = measurementForText(text, entryMeasurementOptions);
+		const tokens = measurement.tokens;
 		const isActive = activeEntryIds.has(entry.id);
 		if (isActive) activeTokens += tokens;
 		const isOnBranch = branchEntryIds ? branchEntryIds.has(entry.id) : isActive; // no branch set given -- fall back to the old binary active/inactive-branch label
@@ -226,10 +310,13 @@ export function buildMessageHistoryTree(
 		const children = [...contentChildren, ...treeChildren];
 		if (tokens === 0 && children.length === 0 && analysis.imageCount === 0) continue; // no content, no descendants, and no unknown-cost image -- nothing to show
 
-		const label = entryLabel(entry, analysis.imageCount);
+		const promptUsage = providerPromptUsage(entry.message);
+		const label = entryLabel(entry, analysis.imageCount, promptUsage?.label);
 		const item: ContextSegmentItem = {
 			label: isActive ? label : isOnBranch ? `${label} (compacted)` : `${label} (inactive branch)`,
 			estimatedTokens: tokens,
+			measurement,
+			...(promptUsage ? { requestTokenReconciliation: promptUsage.reconciliation } : {}),
 			...(children.length > 0 ? { children } : {}),
 		};
 		itemByIndex.set(index, item);

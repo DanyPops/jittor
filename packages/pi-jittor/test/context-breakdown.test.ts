@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { ContextSegment } from "@danypops/jittor";
+import { type ContextSegment, loadOpenAiTextTokenCounter } from "@danypops/jittor";
 import {
 	basePromptSegment,
 	buildBasePromptItems,
@@ -20,6 +20,7 @@ describe("buildMessageHistoryTree", () => {
 		const result = buildMessageHistoryTree(tree, new Set(["1"]));
 		expect(result.items).toHaveLength(1);
 		expect(result.items[0]!.estimatedTokens).toBe(Math.ceil(40 / 4));
+		expect(result.items[0]!.measurement).toMatchObject({ provenance: "structural-estimate", method: "char/4" });
 		expect(result.activeTokens).toBe(Math.ceil(40 / 4));
 	});
 
@@ -86,6 +87,32 @@ describe("buildMessageHistoryTree", () => {
 		expect(labels.some((label) => label.includes("tool call read arguments") && label.includes("char/4"))).toBe(true);
 	});
 
+	it("uses model-aware exact-text measurements when available while retaining the legacy numeric field", async () => {
+		const counter = await loadOpenAiTextTokenCounter("openai", "gpt-5");
+		if (!counter) throw new Error("expected the gpt-5 tokenizer fixture to be available");
+		const result = buildMessageHistoryTree(
+			[
+				node("1", {
+					type: "message",
+					message: { role: "assistant", provider: "openai", model: "gpt-4", content: "hello world" },
+				}),
+			],
+			new Set(["1"]),
+			undefined,
+			{ provider: "openai", model: "gpt-5", counters: [counter] },
+		);
+		expect(result.items[0]!.estimatedTokens).toBe(2);
+		expect(result.items[0]!.measurement).toEqual({
+			tokens: 2,
+			scope: "context-item",
+			provenance: "tokenizer-exact-text",
+			method: "gpt-tokenizer:o200k_base",
+			provider: "openai",
+			model: "gpt-5",
+		});
+		expect(result.items[0]!.children?.[0]?.measurement?.provenance).toBe("tokenizer-exact-text");
+	});
+
 	it("shows the exact provider-reported aggregate request context on assistant turns without calling it a per-item cost", () => {
 		const result = buildMessageHistoryTree(
 			[
@@ -94,6 +121,8 @@ describe("buildMessageHistoryTree", () => {
 					message: {
 						role: "assistant",
 						content: [{ type: "text", text: "answer" }],
+						provider: "openai",
+						model: "gpt-5",
 						usage: { input: 200, cacheRead: 300, cacheWrite: 50 },
 					},
 				}),
@@ -102,6 +131,27 @@ describe("buildMessageHistoryTree", () => {
 		);
 		expect(result.items[0]!.label).toContain("provider-reported request context 550 tok");
 		expect(result.items[0]!.label).toContain("new 200, cache read 300, write 50");
+		expect(result.items[0]!.label).toContain("unattributed residual 550 tok");
+		expect(result.items[0]!.requestTokenReconciliation).toEqual({
+			aggregate: {
+				tokens: 550,
+				scope: "request-context",
+				provenance: "provider-reported",
+				method: "pi-assistant-usage",
+				provider: "openai",
+				model: "gpt-5",
+			},
+			attributedTokens: 0,
+			residual: {
+				tokens: 550,
+				scope: "unattributed-residual",
+				provenance: "structural-estimate",
+				method: "aggregate-minus-attributed",
+				provider: "openai",
+				model: "gpt-5",
+			},
+			overshootTokens: 0,
+		});
 	});
 
 	it("surfaces image presence while stating that its provider-specific token cost is unavailable", () => {

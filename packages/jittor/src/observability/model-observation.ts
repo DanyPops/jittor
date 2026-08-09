@@ -6,6 +6,7 @@ import {
 } from "../constants.ts";
 import type { MetricObservation, MetricUnit, StoredMetricObservation } from "./metric.ts";
 import { normalizeModelIdentity } from "./model-identity.ts";
+import type { TokenMeasurementScope } from "./token-measurement.ts";
 
 /**
  * Two independent axes, not one flat class: "coding" is a subject-matter domain (which
@@ -131,10 +132,10 @@ export function validateModelRunObservation(value: unknown): ModelRunObservation
 		startedAt,
 		firstTokenAt,
 		completedAt,
-		inputTokens: nonNegative(input.inputTokens, "input tokens"),
-		outputTokens: nonNegative(input.outputTokens, "output tokens"),
-		cacheReadTokens: nonNegative(input.cacheReadTokens, "cache read tokens"),
-		cacheWriteTokens: nonNegative(input.cacheWriteTokens, "cache write tokens"),
+		inputTokens: nonNegative(input.inputTokens, "input tokens", true),
+		outputTokens: nonNegative(input.outputTokens, "output tokens", true),
+		cacheReadTokens: nonNegative(input.cacheReadTokens, "cache read tokens", true),
+		cacheWriteTokens: nonNegative(input.cacheWriteTokens, "cache write tokens", true),
 		costUsd: nonNegative(input.costUsd, "cost"),
 		providerResponses,
 		toolCalls,
@@ -174,14 +175,28 @@ export function modelRunMetrics(value: ModelRunObservation): MetricObservation[]
 		type: run.type,
 		runId: run.runId,
 	};
-	const metric = (name: string, amount: number, unit: MetricUnit): MetricObservation => ({
+	const metric = (name: string, amount: number, unit: MetricUnit, tokenScope?: TokenMeasurementScope): MetricObservation => ({
 		source: "local-model",
 		scope,
 		metric: name,
 		value: amount,
 		unit,
 		observedAt: run.completedAt,
-		attributes,
+		attributes: {
+			...attributes,
+			...(tokenScope
+				? {
+						tokenMeasurement: {
+							tokens: amount,
+							scope: tokenScope,
+							provenance: "provider-reported",
+							method: "pi-assistant-usage",
+							provider: run.provider,
+							model: run.model,
+						},
+					}
+				: {}),
+		},
 	});
 	const wallMs = run.completedAt - run.startedAt;
 	const totalInput = run.inputTokens + run.cacheReadTokens;
@@ -190,10 +205,10 @@ export function modelRunMetrics(value: ModelRunObservation): MetricObservation[]
 	metrics.push(
 		metric("wall-latency", wallMs, "milliseconds"),
 		metric("output-throughput", wallMs === 0 ? 0 : run.outputTokens / (wallMs / 1_000), "tokens-per-second"),
-		metric("input-tokens", run.inputTokens, "tokens"),
-		metric("output-tokens", run.outputTokens, "tokens"),
-		metric("cache-read-tokens", run.cacheReadTokens, "tokens"),
-		metric("cache-write-tokens", run.cacheWriteTokens, "tokens"),
+		metric("input-tokens", run.inputTokens, "tokens", "request-input"),
+		metric("output-tokens", run.outputTokens, "tokens", "response-output"),
+		metric("cache-read-tokens", run.cacheReadTokens, "tokens", "cache-read"),
+		metric("cache-write-tokens", run.cacheWriteTokens, "tokens", "cache-write"),
 		metric("cache-read-ratio", totalInput === 0 ? 0 : run.cacheReadTokens / totalInput, "ratio"),
 		metric("cost", run.costUsd, "usd"),
 		metric("provider-responses", run.providerResponses, "count"),
