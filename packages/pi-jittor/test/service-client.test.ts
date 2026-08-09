@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { JittorClient } from "@danypops/jittor";
-import { callJittor, operationRetryMode, resetJittorClientForTests, setJittorClientConnectorForTests } from "../extension/src/service-client.ts";
+import {
+	callJittor,
+	operationRetryMode,
+	resetJittorClientForTests,
+	setJittorClientConnectorForTests,
+} from "../extension/src/service-client.ts";
 
 afterEach(() => {
 	resetJittorClientForTests();

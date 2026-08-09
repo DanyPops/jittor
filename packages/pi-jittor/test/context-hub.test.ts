@@ -130,7 +130,15 @@ describe("buildContextReport", () => {
 		const children = Array.from({ length: 300 }, (_, index) => ({ label: `child-${index}`, estimatedTokens: 1 }));
 		const report = buildContextReport(
 			breakdown({
-				segments: [{ key: "history", label: "History", estimatedTokens: 300, confidence: "exact-structural", items: [{ label: "root", estimatedTokens: 300, children }] }],
+				segments: [
+					{
+						key: "history",
+						label: "History",
+						estimatedTokens: 300,
+						confidence: "exact-structural",
+						items: [{ label: "root", estimatedTokens: 300, children }],
+					},
+				],
 			}),
 		);
 		expect(report).toContain("more context rows");

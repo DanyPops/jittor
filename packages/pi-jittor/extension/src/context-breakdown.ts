@@ -119,7 +119,10 @@ function providerPromptUsage(message: unknown): string {
 	const cacheWrite = typeof record.cacheWrite === "number" && record.cacheWrite >= 0 ? record.cacheWrite : 0;
 	const promptTokens = input + cacheRead + cacheWrite;
 	if (promptTokens <= 0) return "";
-	const cache = cacheRead > 0 || cacheWrite > 0 ? `; new ${input.toLocaleString()}, cache read ${cacheRead.toLocaleString()}, write ${cacheWrite.toLocaleString()}` : "";
+	const cache =
+		cacheRead > 0 || cacheWrite > 0
+			? `; new ${input.toLocaleString()}, cache read ${cacheRead.toLocaleString()}, write ${cacheWrite.toLocaleString()}`
+			: "";
 	return ` · provider-reported request context ${promptTokens.toLocaleString()} tok${cache}`;
 }
 
@@ -297,7 +300,9 @@ export function buildBasePromptItems(options: BuildSystemPromptOptions, totalCha
 		items.push({
 			label: `Skills catalog (${visibleSkills.length} skills)`,
 			estimatedTokens: toCeilTokens(skillsCharacters),
-			children: visibleSkills.map((skill) => measuredItem(skill.name, skill.name.length + skill.description.length + skill.filePath.length + 20)),
+			children: visibleSkills.map((skill) =>
+				measuredItem(skill.name, skill.name.length + skill.description.length + skill.filePath.length + 20),
+			),
 		});
 	}
 

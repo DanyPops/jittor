@@ -16,7 +16,7 @@ import {
 } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { HistoryChart, ProgressBar, type HistoryChartTheme, type TextMeasure } from "malevich-tui-components";
+import { HistoryChart, type HistoryChartTheme, ProgressBar, type TextMeasure } from "malevich-tui-components";
 import type { UsageBudgetControl } from "./settings.ts";
 import type { JittorPanelClient } from "./tui.ts";
 

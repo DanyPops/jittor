@@ -19,7 +19,9 @@ export function buildContextRowsIterative(segments: readonly MalevichContextSegm
 	const rows: ContextRow[] = [];
 	const denominator = totalTokens ?? segments.reduce((sum, segment) => sum + segment.estimatedTokens, 0);
 	for (const segment of segments) {
-		const items = [...(segment.items ?? [])].filter((item) => item.estimatedTokens > 0).sort((a, b) => b.estimatedTokens - a.estimatedTokens);
+		const items = [...(segment.items ?? [])]
+			.filter((item) => item.estimatedTokens > 0)
+			.sort((a, b) => b.estimatedTokens - a.estimatedTokens);
 		if (segment.estimatedTokens <= 0 && items.length === 0 && !segment.unknown) continue;
 		rows.push({
 			key: segment.key,
@@ -84,6 +86,7 @@ export function buildContextReport(breakdown: ContextBreakdown): string {
 	lines.push("");
 	const visibleRows = rows.slice(0, MAX_REPORT_ROWS);
 	for (const row of visibleRows) lines.push(row.isHeader ? row.text : `${"  ".repeat(row.depth)}${row.text}`);
-	if (rows.length > visibleRows.length) lines.push(`… ${rows.length - visibleRows.length} more context rows (open /context in TUI mode to search and filter)`);
+	if (rows.length > visibleRows.length)
+		lines.push(`… ${rows.length - visibleRows.length} more context rows (open /context in TUI mode to search and filter)`);
 	return lines.join("\n");
 }

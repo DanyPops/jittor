@@ -70,7 +70,10 @@ export function renderBenchmarkView(result: ModelRankingResult, currentIdentity:
 				? "Current model is the top recommendation."
 				: "Current model is outside the ranked candidates.";
 	const table = new Table({
-		columns: [{ header: "#", key: "rank", width: 4 }, { header: "Candidate / evidence", key: "detail" }],
+		columns: [
+			{ header: "#", key: "rank", width: 4 },
+			{ header: "Candidate / evidence", key: "detail" },
+		],
 		rows: benchmarkRows(shown, currentIdentity),
 		headerStyle: theme.bold,
 		measure: hostTextMeasure,

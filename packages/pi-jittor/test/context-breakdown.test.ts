@@ -109,7 +109,13 @@ describe("buildMessageHistoryTree", () => {
 			[
 				node("1", {
 					type: "message",
-					message: { role: "user", content: [{ type: "text", text: "inspect" }, { type: "image", data: "base64" }] },
+					message: {
+						role: "user",
+						content: [
+							{ type: "text", text: "inspect" },
+							{ type: "image", data: "base64" },
+						],
+					},
 				}),
 			],
 			new Set(["1"]),

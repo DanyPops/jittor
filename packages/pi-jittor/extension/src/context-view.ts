@@ -23,12 +23,7 @@ function rowTokens(row: ContextRow): number {
 }
 
 /** Filters the flattened pre-order tree while retaining every ancestor needed to understand a match. */
-export function filterContextRows(
-	rows: readonly ContextRow[],
-	query: string,
-	scope: ContextRowScope,
-	minimumTokens: number,
-): ContextRow[] {
+export function filterContextRows(rows: readonly ContextRow[], query: string, scope: ContextRowScope, minimumTokens: number): ContextRow[] {
 	const terms = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
 	const included = rows.map(() => false);
 	const parentByIndex: Array<number | null> = [];
@@ -160,7 +155,9 @@ class ContextViewport {
 				),
 			);
 		}
-		lines.push(theme.fg("dim", "Item sizes marked ≈ use char/4; provider request totals are aggregate usage, not per-item tokenizer counts."));
+		lines.push(
+			theme.fg("dim", "Item sizes marked ≈ use char/4; provider request totals are aggregate usage, not per-item tokenizer counts."),
+		);
 		lines.push("");
 
 		const rowsTheme: ContextRowsTheme = { colorFor, header: (s) => theme.bold(s) };
@@ -176,12 +173,21 @@ class ContextViewport {
 		const filterState = `scope: ${this.scope} · min: ${minimum === 0 ? "any" : `${formatTokenCount(minimum)} tok`}`;
 		lines.push(
 			truncateToWidth(
-				this.searchMode ? theme.fg("accent", `Search: ${this.query}▌ · ${filterState}`) : theme.fg("muted", `${this.query ? `search: ${this.query} · ` : ""}${filterState}`),
+				this.searchMode
+					? theme.fg("accent", `Search: ${this.query}▌ · ${filterState}`)
+					: theme.fg("muted", `${this.query ? `search: ${this.query} · ` : ""}${filterState}`),
 				contentWidth,
 				"",
 			),
 		);
-		lines.push(theme.fg("dim", this.searchMode ? "type to search · backspace edit · enter apply · esc clear" : "/ search · f scope · m min tokens · g/G top/bottom · ↑↓ scroll · esc close"));
+		lines.push(
+			theme.fg(
+				"dim",
+				this.searchMode
+					? "type to search · backspace edit · enter apply · esc clear"
+					: "/ search · f scope · m min tokens · g/G top/bottom · ↑↓ scroll · esc close",
+			),
+		);
 		lines.push(border);
 		return lines;
 	}
