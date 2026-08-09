@@ -1,4 +1,9 @@
-import type { CacheEconomicsModelSummary, CacheEconomicsSummary } from "@danypops/jittor";
+import type {
+	CacheEconomicsAggregateTotals,
+	CacheEconomicsModelSummary,
+	CacheEconomicsSummary,
+	CacheEconomicsTaskSummary,
+} from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 export interface CacheEconomicsPanelClient {
@@ -14,15 +19,22 @@ function costField(amountUsd: number | null, basis: "provider-reported" | "catal
 	return basis === "catalog-estimate" ? `${formatUsd(amountUsd)} (est.)` : formatUsd(amountUsd);
 }
 
-function modelLine(model: CacheEconomicsModelSummary): string {
-	const payback = model.paybackAchieved === null ? "n/a" : model.paybackAchieved ? "yes" : "not yet";
+function aggregateFields(totals: CacheEconomicsAggregateTotals): string {
+	const payback = totals.paybackAchieved === null ? "n/a" : totals.paybackAchieved ? "yes" : "not yet";
 	return [
-		`${model.provider}/${model.model}:`,
-		`read ${model.cacheReadTokens.toLocaleString()} tok (${costField(model.cacheReadCostUsd, model.cacheReadCostBasis)})`,
-		`write ${model.cacheWriteTokens.toLocaleString()} tok (${costField(model.cacheWriteCostUsd, model.cacheWriteCostBasis)})`,
-		`savings ${model.savingsUsd === null ? "unknown" : formatUsd(model.savingsUsd)}`,
+		`read ${totals.cacheReadTokens.toLocaleString()} tok (${costField(totals.cacheReadCostUsd, totals.cacheReadCostBasis)})`,
+		`write ${totals.cacheWriteTokens.toLocaleString()} tok (${costField(totals.cacheWriteCostUsd, totals.cacheWriteCostBasis)})`,
+		`savings ${totals.savingsUsd === null ? "unknown" : formatUsd(totals.savingsUsd)}`,
 		`payback ${payback}`,
 	].join(" · ");
+}
+
+function modelLine(model: CacheEconomicsModelSummary): string {
+	return `${model.provider}/${model.model}: ${aggregateFields(model)}`;
+}
+
+function taskLine(task: CacheEconomicsTaskSummary): string {
+	return `${task.taskId}: ${aggregateFields(task)}`;
 }
 
 /** Plain multi-line text, shared by TUI notify and non-TUI notify -- a full interactive panel is deferred; this already satisfies "bounded query plus Pi presentation" without a new widget. */
@@ -32,6 +44,16 @@ export function renderCacheEconomicsView(summary: CacheEconomicsSummary): string
 	];
 	if (summary.models.length === 0) lines.push("No cache activity recorded in this window.");
 	else lines.push(...summary.models.map((model) => `- ${modelLine(model)}`));
+	if (summary.tasks.length > 0) {
+		lines.push(`By task: ${summary.tasks.length}`);
+		lines.push(...summary.tasks.map((task) => `- ${taskLine(task)}`));
+	}
+	const unattributed = summary.unattributedCacheActivity;
+	if (unattributed.cacheReadTokens > 0 || unattributed.cacheWriteTokens > 0) {
+		lines.push(
+			`Unattributed (no task focused): read ${unattributed.cacheReadTokens.toLocaleString()} tok (${costField(unattributed.cacheReadCostUsd, unattributed.cacheReadCostBasis)}) · write ${unattributed.cacheWriteTokens.toLocaleString()} tok (${costField(unattributed.cacheWriteCostUsd, unattributed.cacheWriteCostBasis)})`,
+		);
+	}
 	if (summary.missedOpportunities.length > 0) {
 		lines.push(`Candidate missed-cache opportunities: ${summary.missedOpportunities.length}`);
 		for (const candidate of summary.missedOpportunities.slice(0, 10)) {

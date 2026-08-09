@@ -1,4 +1,10 @@
-import type { CacheEconomicsModelSummary, CacheEconomicsSummary } from "../observability/cache-economics.ts";
+import type {
+	CacheEconomicsAggregateTotals,
+	CacheEconomicsModelSummary,
+	CacheEconomicsSummary,
+	CacheEconomicsTaskSummary,
+	CacheEconomicsUnattributedActivity,
+} from "../observability/cache-economics.ts";
 import { type CliDependencies, callAndPrint, humanField } from "./support.ts";
 
 export const CACHE_USAGE_LINES = ["  cache economics --since <ms> --until <ms> [--json]"];
@@ -43,16 +49,31 @@ function formatCostField(amountUsd: number | null, basis: "provider-reported" | 
 	return amountUsd === null ? "unknown" : `${formatUsdAmount(amountUsd)}${basisSuffix(basis)}`;
 }
 
-function formatModelLine(model: CacheEconomicsModelSummary): string {
-	const payback = model.paybackAchieved === null ? "n/a" : model.paybackAchieved ? "yes" : "not yet";
+function formatAggregateFields(totals: CacheEconomicsAggregateTotals): string {
+	const payback = totals.paybackAchieved === null ? "n/a" : totals.paybackAchieved ? "yes" : "not yet";
 	return [
-		`- ${humanField(model.provider)}/${humanField(model.model)}:`,
-		`read ${model.cacheReadTokens.toLocaleString()} tok (${formatCostField(model.cacheReadCostUsd, model.cacheReadCostBasis)})`,
-		`write ${model.cacheWriteTokens.toLocaleString()} tok (${formatCostField(model.cacheWriteCostUsd, model.cacheWriteCostBasis)})`,
-		`savings ${model.savingsUsd === null ? "unknown" : formatUsdAmount(model.savingsUsd)}`,
-		`premium ${model.cacheWritePremiumUsd === null ? "unknown" : formatUsdAmount(model.cacheWritePremiumUsd)}`,
-		`break-even ${model.breakEvenReadTokens === null ? "unknown" : `${model.breakEvenReadTokens.toLocaleString()} tok`}`,
+		`read ${totals.cacheReadTokens.toLocaleString()} tok (${formatCostField(totals.cacheReadCostUsd, totals.cacheReadCostBasis)})`,
+		`write ${totals.cacheWriteTokens.toLocaleString()} tok (${formatCostField(totals.cacheWriteCostUsd, totals.cacheWriteCostBasis)})`,
+		`savings ${totals.savingsUsd === null ? "unknown" : formatUsdAmount(totals.savingsUsd)}`,
+		`premium ${totals.cacheWritePremiumUsd === null ? "unknown" : formatUsdAmount(totals.cacheWritePremiumUsd)}`,
+		`break-even ${totals.breakEvenReadTokens === null ? "unknown" : `${totals.breakEvenReadTokens.toLocaleString()} tok`}`,
 		`payback ${payback}`,
+	].join(" · ");
+}
+
+function formatModelLine(model: CacheEconomicsModelSummary): string {
+	return `- ${humanField(model.provider)}/${humanField(model.model)}: ${formatAggregateFields(model)}`;
+}
+
+function formatTaskLine(task: CacheEconomicsTaskSummary): string {
+	return `- ${humanField(task.taskId)}: ${formatAggregateFields(task)}`;
+}
+
+function formatUnattributedLine(activity: CacheEconomicsUnattributedActivity): string {
+	return [
+		`Unattributed cache activity (no Papyrus task focused):`,
+		`read ${activity.cacheReadTokens.toLocaleString()} tok (${formatCostField(activity.cacheReadCostUsd, activity.cacheReadCostBasis)})`,
+		`write ${activity.cacheWriteTokens.toLocaleString()} tok (${formatCostField(activity.cacheWriteCostUsd, activity.cacheWriteCostBasis)})`,
 	].join(" · ");
 }
 
@@ -60,6 +81,9 @@ export function formatCacheEconomics(summary: CacheEconomicsSummary): string {
 	const lines = [
 		`Cache economics: ${summary.models.length.toLocaleString()} model(s)${summary.truncated ? " (query limit reached; totals are a lower bound)" : ""}`,
 		...summary.models.map(formatModelLine),
+		`By task: ${summary.tasks.length.toLocaleString()} task(s)`,
+		...summary.tasks.map(formatTaskLine),
+		formatUnattributedLine(summary.unattributedCacheActivity),
 		`Candidate missed-cache opportunities: ${summary.missedOpportunities.length.toLocaleString()}`,
 		...summary.missedOpportunities.map(
 			(candidate) =>

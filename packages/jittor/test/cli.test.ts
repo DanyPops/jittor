@@ -512,6 +512,33 @@ describe("Jittor CLI context telemetry parity", () => {
 					paybackAchieved: null,
 				},
 			],
+			tasks: [
+				{
+					taskId: "ship-feature-x",
+					inputTokens: 1_000_000,
+					cacheReadTokens: 500_000,
+					cacheWriteTokens: 200_000,
+					cacheReadCostUsd: 0.15,
+					cacheReadCostBasis: "provider-reported",
+					cacheWriteCostUsd: 0.75,
+					cacheWriteCostBasis: "provider-reported",
+					effectiveInputRateUsdPerToken: 0.000003,
+					counterfactualNoCacheCostUsd: 1.5,
+					counterfactualBasis: "provider-reported",
+					savingsUsd: 1.35,
+					cacheWritePremiumUsd: 0.15,
+					breakEvenReadTokens: 55_556,
+					paybackAchieved: true,
+				},
+			],
+			unattributedCacheActivity: {
+				cacheReadTokens: 10,
+				cacheWriteTokens: 0,
+				cacheReadCostUsd: null,
+				cacheReadCostBasis: "unknown",
+				cacheWriteCostUsd: 0,
+				cacheWriteCostBasis: "provider-reported",
+			},
 			missedOpportunities: [
 				{
 					sessionId: "session-1",
@@ -530,6 +557,8 @@ describe("Jittor CLI context telemetry parity", () => {
 		expect(text).toContain("unknown");
 		expect(text).toContain("session session-1");
 		expect(text).toContain("model-changed");
+		expect(text).toContain("ship-feature-x");
+		expect(text).toContain("Unattributed cache activity");
 	});
 
 	it("renders actionable human output and rejects invalid bounds", async () => {

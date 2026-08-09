@@ -18,12 +18,15 @@ export {
 export {
 	buildCacheEconomicsSummary,
 	type CacheCostBasis,
+	type CacheEconomicsAggregateTotals,
 	type CacheEconomicsMissedOpportunity,
 	type CacheEconomicsModelSummary,
 	type CacheEconomicsPricing,
 	type CacheEconomicsPricingLookup,
 	type CacheEconomicsSummary,
 	type CacheEconomicsSummaryOptions,
+	type CacheEconomicsTaskSummary,
+	type CacheEconomicsUnattributedActivity,
 } from "./observability/cache-economics.ts";
 export {
 	CONTEXT_SEGMENT_SOURCES,

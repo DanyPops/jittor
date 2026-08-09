@@ -177,6 +177,80 @@ describe("cache economics", () => {
 		expect(summary.models.map((model) => model.cacheReadTokens).sort()).toEqual([1_000, 4_000]);
 	});
 
+	it("rolls economics up per Papyrus task, mirroring task-cost.ts's own attributes.taskId grouping", () => {
+		const rows = [
+			usageRow({
+				observedAt: 1_000,
+				metric: "cache-read-tokens",
+				value: 1_000,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", taskId: "task-a" },
+			}),
+			usageRow({
+				observedAt: 1_000,
+				metric: "cache-write-tokens",
+				value: 200,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", taskId: "task-a" },
+			}),
+			usageRow({
+				observedAt: 2_000,
+				metric: "cache-read-tokens",
+				value: 9_000,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", taskId: "task-b" },
+			}),
+		];
+		const summary = buildCacheEconomicsSummary(rows, [], noPricing, { since: 0, until: 3_000 });
+		expect(summary.tasks).toHaveLength(2);
+		const byId = new Map(summary.tasks.map((task) => [task.taskId, task]));
+		expect(byId.get("task-a")).toMatchObject({ cacheReadTokens: 1_000, cacheWriteTokens: 200 });
+		expect(byId.get("task-b")).toMatchObject({ cacheReadTokens: 9_000, cacheWriteTokens: 0 });
+		// The per-model rollup is untouched by adding the per-task one -- both models/tasks describe the same
+		// underlying rows from two different, independent groupings, not a replacement of one by the other.
+		expect(summary.models).toHaveLength(1);
+		expect(summary.models[0]!.cacheReadTokens).toBe(10_000);
+	});
+
+	it("tracks cache activity with no focused task separately as unattributed, never folding it into a fabricated 'unknown task' bucket", () => {
+		const rows = [
+			usageRow({
+				observedAt: 1_000,
+				metric: "cache-read-tokens",
+				value: 500,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", taskId: "task-a" },
+			}),
+			// A different turn (distinct timestamp), no taskId at all -- nothing was focused when it was recorded.
+			usageRow({
+				observedAt: 1_500,
+				metric: "cache-read-tokens",
+				value: 700,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5" },
+			}),
+		];
+		const summary = buildCacheEconomicsSummary(rows, [], noPricing, { since: 0, until: 2_000 });
+		expect(summary.tasks).toHaveLength(1);
+		expect(summary.tasks[0]).toMatchObject({ taskId: "task-a", cacheReadTokens: 500 });
+		expect(summary.unattributedCacheActivity.cacheReadTokens).toBe(700);
+		// Real cache activity, but no pricing evidence of any kind (no catalog, no provider-reported cost) --
+		// unknown, not silently dropped and not an invented catalog estimate either.
+		expect(summary.unattributedCacheActivity.cacheReadCostUsd).toBeNull();
+		expect(summary.unattributedCacheActivity.cacheReadCostBasis).toBe("unknown");
+	});
+
+	it("prices a task's own runs against catalog rates the same way model-level pricing does, when the task stayed on one model", () => {
+		const rows = [
+			usageRow({
+				observedAt: 1_000,
+				metric: "cache-read-tokens",
+				value: 500_000,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", taskId: "task-a" },
+			}),
+		];
+		const pricing = new FakePricing({ "anthropic/claude-sonnet-5": { cacheRead: 0.3 } });
+		const summary = buildCacheEconomicsSummary(rows, [], pricing, { since: 0, until: 2_000 });
+		const task = summary.tasks[0]!;
+		expect(task.cacheReadCostBasis).toBe("catalog-estimate");
+		expect(task.cacheReadCostUsd).toBeCloseTo(0.15, 10);
+	});
+
 	it("falls back to an unknown/unknown model bucket for rows recorded before provider/model attribution existed, rather than dropping them", () => {
 		const rows = [usageRow({ observedAt: 1_000, metric: "cache-read-tokens", value: 10, attributes: {} })];
 		const summary = buildCacheEconomicsSummary(rows, [], noPricing, { since: 0, until: 2_000 });

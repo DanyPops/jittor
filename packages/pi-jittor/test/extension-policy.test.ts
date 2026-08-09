@@ -628,6 +628,15 @@ describe("Jittor Pi actuator", () => {
 					paybackAchieved: true,
 				},
 			],
+			tasks: [],
+			unattributedCacheActivity: {
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				cacheReadCostUsd: 0,
+				cacheReadCostBasis: "provider-reported",
+				cacheWriteCostUsd: 0,
+				cacheWriteCostBasis: "provider-reported",
+			},
 			missedOpportunities: [],
 			truncated: false,
 		};

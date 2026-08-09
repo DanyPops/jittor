@@ -2,6 +2,7 @@ import {
 	CACHE_ECONOMICS_LOSS_CORRELATION_WINDOW_MS,
 	CACHE_ECONOMICS_MAX_MISSED_OPPORTUNITIES,
 	CACHE_ECONOMICS_MAX_MODEL_GROUPS,
+	CACHE_ECONOMICS_MAX_TASK_GROUPS,
 	CATALOG_PRICE_TOKEN_UNIT,
 } from "../constants.ts";
 import type { ContextPrefixResetReason } from "./context-delta.ts";
@@ -34,9 +35,12 @@ export interface CacheEconomicsPricingLookup {
 	priceFor(provider: string, model: string, contextSizeTokens: number): CacheEconomicsPricing | null;
 }
 
-export interface CacheEconomicsModelSummary {
-	provider: string;
-	model: string;
+/**
+ * Every derived economics figure this domain produces, independent of which dimension (model,
+ * task) it's grouped by -- see CacheEconomicsModelSummary/CacheEconomicsTaskSummary, which each add
+ * only their own grouping key on top of this.
+ */
+export interface CacheEconomicsAggregateTotals {
 	inputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
@@ -55,10 +59,41 @@ export interface CacheEconomicsModelSummary {
 	savingsUsd: number | null;
 	/** The premium actually paid for cache-write tokens over what plain input billing would have cost. */
 	cacheWritePremiumUsd: number | null;
-	/** How many cache-read tokens, at the observed/estimated read rate, would be needed to offset the write premium. Zero when no premium was paid; null when undeterminable. An aggregate approximation over the whole window/model, not resolved per run. */
+	/** How many cache-read tokens, at the observed/estimated read rate, would be needed to offset the write premium. Zero when no premium was paid; null when undeterminable. An aggregate approximation over the whole window/group, not resolved per run. */
 	breakEvenReadTokens: number | null;
 	/** Whether observed savings already met or exceeded the write premium. Null when there was no cache write to evaluate, or the comparison is undeterminable. */
 	paybackAchieved: boolean | null;
+}
+
+export interface CacheEconomicsModelSummary extends CacheEconomicsAggregateTotals {
+	provider: string;
+	model: string;
+}
+
+/**
+ * The same figures as CacheEconomicsModelSummary, rolled up by the Papyrus task focused when each
+ * row was recorded instead of by provider/model -- mirrors task-cost.ts's own attributes.taskId
+ * grouping for token/cost metrics. A task that stayed on one model gets the same tiered-catalog
+ * pricing precision as the model-level rollup; a task that spanned several models still sums
+ * correctly (each run was already priced against its own real context size before this rollup ever
+ * runs) but skips the single extra break-even catalog lookup that only makes sense for one model.
+ */
+export interface CacheEconomicsTaskSummary extends CacheEconomicsAggregateTotals {
+	taskId: string;
+}
+
+/**
+ * Cache activity recorded with no Papyrus task focused. Real spend/activity, just not attributable
+ * to any task -- reported separately (mirroring task-cost.ts's own unattributedCostUsd) rather than
+ * silently dropped or folded into a fabricated "unknown task" bucket.
+ */
+export interface CacheEconomicsUnattributedActivity {
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	cacheReadCostUsd: number | null;
+	cacheReadCostBasis: CacheCostBasis;
+	cacheWriteCostUsd: number | null;
+	cacheWriteCostBasis: CacheCostBasis;
 }
 
 /** A context-prefix reset (session/provider/model change) followed shortly by a same-session cache-write is *evidence*, not proof, that the reset forced a cache rewrite -- correlation, never asserted causality. */
@@ -75,8 +110,10 @@ export interface CacheEconomicsSummary {
 	since: number;
 	until: number;
 	models: CacheEconomicsModelSummary[];
+	tasks: CacheEconomicsTaskSummary[];
+	unattributedCacheActivity: CacheEconomicsUnattributedActivity;
 	missedOpportunities: CacheEconomicsMissedOpportunity[];
-	/** True when either the model-group list or the missed-opportunity list was cut off at its bound. */
+	/** True when the model-group list, the task-group list, or the missed-opportunity list was cut off at its bound. */
 	truncated: boolean;
 }
 
@@ -102,6 +139,8 @@ function runKeyFor(row: StoredMetricObservation): string {
 interface RunAccumulator {
 	provider: string;
 	model: string;
+	/** The Papyrus task focused when this turn's rows were recorded, or undefined when nothing was focused -- undefined is a real, distinct state from any task id string, never coerced to "unknown". */
+	taskId: string | undefined;
 	inputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
@@ -113,10 +152,11 @@ interface RunAccumulator {
 	sawCacheWriteCost: boolean;
 }
 
-function newRunAccumulator(provider: string, model: string): RunAccumulator {
+function newRunAccumulator(provider: string, model: string, taskId: string | undefined): RunAccumulator {
 	return {
 		provider,
 		model,
+		taskId,
 		inputTokens: 0,
 		cacheReadTokens: 0,
 		cacheWriteTokens: 0,
@@ -173,6 +213,9 @@ function actualCost(
 }
 
 interface RunPricingResult {
+	provider: string;
+	model: string;
+	taskId: string | undefined;
 	inputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
@@ -223,6 +266,9 @@ function priceRun(run: RunAccumulator, pricing: CacheEconomicsPricingLookup): Ru
 	else if (baselineRate !== null && write.costUsd !== null) cacheWritePremiumUsd = write.costUsd - run.cacheWriteTokens * baselineRate;
 
 	return {
+		provider: run.provider,
+		model: run.model,
+		taskId: run.taskId,
 		inputTokens: run.inputTokens,
 		cacheReadTokens: run.cacheReadTokens,
 		cacheWriteTokens: run.cacheWriteTokens,
@@ -239,18 +285,27 @@ function priceRun(run: RunAccumulator, pricing: CacheEconomicsPricingLookup): Ru
 }
 
 /**
- * Sums already-run-priced dollar figures into one model's window totals, then derives
- * break-even/payback from those totals plus one whole-window catalog lookup -- an intentional,
+ * A single provider/model to resolve one extra, approximate whole-window catalog lookup against
+ * for the break-even projection below -- only meaningful when every run being aggregated actually
+ * shares this same provider/model (a per-model rollup always does; a per-task rollup only does when
+ * that task stayed on one model the whole time). Pass null to skip that refinement rather than
+ * guessing which of several different models' rates should stand in for the blend.
+ */
+interface SingleModelPricingContext {
+	provider: string;
+	model: string;
+	pricing: CacheEconomicsPricingLookup;
+}
+
+/**
+ * Sums already-run-priced dollar figures into one group's (model's, or task's) window totals, then
+ * derives break-even/payback from those totals plus -- when catalogContext identifies a single real
+ * provider/model to resolve against -- one whole-window catalog lookup. This is an intentional,
  * documented approximation: unlike the dollar totals above (correctly tiered per run), a single
  * "how many more read tokens would it take" projection over a blended window has no one real
  * request size to resolve a tier against either.
  */
-function aggregateRuns(
-	provider: string,
-	model: string,
-	runs: RunPricingResult[],
-	pricing: CacheEconomicsPricingLookup,
-): CacheEconomicsModelSummary {
+function aggregateRunTotals(runs: RunPricingResult[], catalogContext: SingleModelPricingContext | null): CacheEconomicsAggregateTotals {
 	const inputTokens = runs.reduce((sum, run) => sum + run.inputTokens, 0);
 	const cacheReadTokens = runs.reduce((sum, run) => sum + run.cacheReadTokens, 0);
 	const cacheWriteTokens = runs.reduce((sum, run) => sum + run.cacheWriteTokens, 0);
@@ -271,7 +326,11 @@ function aggregateRuns(
 	let breakEvenReadTokens: number | null = null;
 	if (cacheWriteTokens === 0) breakEvenReadTokens = 0;
 	else if (cacheWritePremiumUsd !== null) {
-		const catalogPrices = pricing.priceFor(provider, model, inputTokens + cacheReadTokens + cacheWriteTokens);
+		const catalogPrices = catalogContext?.pricing.priceFor(
+			catalogContext.provider,
+			catalogContext.model,
+			inputTokens + cacheReadTokens + cacheWriteTokens,
+		);
 		const baselineRate =
 			effectiveInputRateUsdPerToken ?? (catalogPrices?.input !== undefined ? catalogPrices.input / CATALOG_PRICE_TOKEN_UNIT : null);
 		const readRate =
@@ -289,8 +348,6 @@ function aggregateRuns(
 		cacheWriteTokens === 0 ? null : savingsUsd !== null && cacheWritePremiumUsd !== null ? savingsUsd >= cacheWritePremiumUsd : null;
 
 	return {
-		provider,
-		model,
 		inputTokens,
 		cacheReadTokens,
 		cacheWriteTokens,
@@ -306,6 +363,23 @@ function aggregateRuns(
 		breakEvenReadTokens,
 		paybackAchieved,
 	};
+}
+
+function buildModelSummary(
+	provider: string,
+	model: string,
+	runs: RunPricingResult[],
+	pricing: CacheEconomicsPricingLookup,
+): CacheEconomicsModelSummary {
+	return { provider, model, ...aggregateRunTotals(runs, { provider, model, pricing }) };
+}
+
+/** A single-model catalog context only when every run in this task's group really did share one provider/model -- never guesses a representative model for a task that switched partway through. */
+function buildTaskSummary(taskId: string, runs: RunPricingResult[], pricing: CacheEconomicsPricingLookup): CacheEconomicsTaskSummary {
+	const firstRun = runs[0]!;
+	const singleModel = runs.every((run) => run.provider === firstRun.provider && run.model === firstRun.model);
+	const catalogContext = singleModel ? { provider: firstRun.provider, model: firstRun.model, pricing } : null;
+	return { taskId, ...aggregateRunTotals(runs, catalogContext) };
 }
 
 interface ResetEvent {
@@ -393,8 +467,9 @@ export function buildCacheEconomicsSummary(
 			}
 			admittedModels.add(modelKey);
 		}
+		const taskId = typeof row.attributes.taskId === "string" && row.attributes.taskId.length > 0 ? row.attributes.taskId : undefined;
 		const runKey = `${modelKey}\u0000${runKeyFor(row)}`;
-		const run = byRun.get(runKey) ?? newRunAccumulator(provider, model);
+		const run = byRun.get(runKey) ?? newRunAccumulator(provider, model, taskId);
 		byRun.set(runKey, run);
 		if (row.metric === "input-tokens" && row.unit === "tokens") run.inputTokens += row.value;
 		else if (row.metric === "cache-read-tokens" && row.unit === "tokens") run.cacheReadTokens += row.value;
@@ -411,21 +486,57 @@ export function buildCacheEconomicsSummary(
 		}
 	}
 
+	const allPriced = [...byRun.values()].map((run) => priceRun(run, pricing));
+
 	const runsByModel = new Map<string, { provider: string; model: string; runs: RunPricingResult[] }>();
-	for (const run of byRun.values()) {
-		const modelKey = `${run.provider}\u0000${run.model}`;
-		const priced = priceRun(run, pricing);
-		const existing = runsByModel.get(modelKey);
-		if (existing) existing.runs.push(priced);
-		else runsByModel.set(modelKey, { provider: run.provider, model: run.model, runs: [priced] });
+	const runsByTask = new Map<string, RunPricingResult[]>();
+	const unattributedRuns: RunPricingResult[] = [];
+	for (const priced of allPriced) {
+		const modelKey = `${priced.provider}\u0000${priced.model}`;
+		const existingModel = runsByModel.get(modelKey);
+		if (existingModel) existingModel.runs.push(priced);
+		else runsByModel.set(modelKey, { provider: priced.provider, model: priced.model, runs: [priced] });
+
+		if (priced.taskId === undefined) {
+			unattributedRuns.push(priced);
+			continue;
+		}
+		const existingTask = runsByTask.get(priced.taskId);
+		if (existingTask) existingTask.push(priced);
+		else runsByTask.set(priced.taskId, [priced]);
 	}
 	const models = [...runsByModel.values()]
-		.map(({ provider, model, runs }) => aggregateRuns(provider, model, runs, pricing))
+		.map(({ provider, model, runs }) => buildModelSummary(provider, model, runs, pricing))
 		.sort(
 			(left, right) =>
 				right.cacheReadTokens + right.cacheWriteTokens - (left.cacheReadTokens + left.cacheWriteTokens) ||
 				left.model.localeCompare(right.model),
 		);
+
+	const allTasks = [...runsByTask.entries()]
+		.map(([taskId, runs]) => buildTaskSummary(taskId, runs, pricing))
+		.sort(
+			(left, right) =>
+				right.cacheReadTokens + right.cacheWriteTokens - (left.cacheReadTokens + left.cacheWriteTokens) ||
+				left.taskId.localeCompare(right.taskId),
+		);
+	const taskGroupsTruncated = allTasks.length > CACHE_ECONOMICS_MAX_TASK_GROUPS;
+	const tasks = allTasks.slice(0, CACHE_ECONOMICS_MAX_TASK_GROUPS);
+
+	const unattributedCacheRead = combineDollarField(
+		unattributedRuns.map((run) => ({ amount: run.cacheReadCostUsd, basis: run.cacheReadCostBasis })),
+	);
+	const unattributedCacheWrite = combineDollarField(
+		unattributedRuns.map((run) => ({ amount: run.cacheWriteCostUsd, basis: run.cacheWriteCostBasis })),
+	);
+	const unattributedCacheActivity: CacheEconomicsUnattributedActivity = {
+		cacheReadTokens: unattributedRuns.reduce((sum, run) => sum + run.cacheReadTokens, 0),
+		cacheWriteTokens: unattributedRuns.reduce((sum, run) => sum + run.cacheWriteTokens, 0),
+		cacheReadCostUsd: unattributedCacheRead.amount,
+		cacheReadCostBasis: unattributedCacheRead.basis,
+		cacheWriteCostUsd: unattributedCacheWrite.amount,
+		cacheWriteCostBasis: unattributedCacheWrite.basis,
+	};
 
 	const allMissed = findMissedOpportunities(
 		usageRows.filter((row) => row.observedAt >= options.since && row.observedAt <= options.until),
@@ -438,7 +549,9 @@ export function buildCacheEconomicsSummary(
 		since: options.since,
 		until: options.until,
 		models,
+		tasks,
+		unattributedCacheActivity,
 		missedOpportunities,
-		truncated: modelGroupsTruncated || missedTruncated,
+		truncated: modelGroupsTruncated || taskGroupsTruncated || missedTruncated,
 	};
 }

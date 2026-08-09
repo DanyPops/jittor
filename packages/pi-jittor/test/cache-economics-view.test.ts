@@ -3,7 +3,23 @@ import type { CacheEconomicsSummary } from "@danypops/jittor";
 import { renderCacheEconomicsView, showCacheEconomicsView } from "../extension/src/observability/cache-economics-view.ts";
 
 function summary(overrides: Partial<CacheEconomicsSummary> = {}): CacheEconomicsSummary {
-	return { since: 0, until: 1_000, models: [], missedOpportunities: [], truncated: false, ...overrides };
+	return {
+		since: 0,
+		until: 1_000,
+		models: [],
+		tasks: [],
+		unattributedCacheActivity: {
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			cacheReadCostUsd: 0,
+			cacheReadCostBasis: "provider-reported",
+			cacheWriteCostUsd: 0,
+			cacheWriteCostBasis: "provider-reported",
+		},
+		missedOpportunities: [],
+		truncated: false,
+		...overrides,
+	};
 }
 
 describe("cache economics view", () => {
@@ -43,6 +59,46 @@ describe("cache economics view", () => {
 		expect(text).toContain("$0.75 (est.)");
 		expect(text).toContain("savings $1.35");
 		expect(text).toContain("payback yes");
+	});
+
+	it("renders each task's read/write tokens and payback status, and separately surfaces unattributed activity", () => {
+		const lines = renderCacheEconomicsView(
+			summary({
+				tasks: [
+					{
+						taskId: "ship-feature-x",
+						inputTokens: 1_000_000,
+						cacheReadTokens: 500_000,
+						cacheWriteTokens: 200_000,
+						cacheReadCostUsd: 0.15,
+						cacheReadCostBasis: "provider-reported",
+						cacheWriteCostUsd: 0.75,
+						cacheWriteCostBasis: "provider-reported",
+						effectiveInputRateUsdPerToken: 0.000003,
+						counterfactualNoCacheCostUsd: 1.5,
+						counterfactualBasis: "provider-reported",
+						savingsUsd: 1.35,
+						cacheWritePremiumUsd: 0.15,
+						breakEvenReadTokens: 55_556,
+						paybackAchieved: true,
+					},
+				],
+				unattributedCacheActivity: {
+					cacheReadTokens: 42,
+					cacheWriteTokens: 0,
+					cacheReadCostUsd: null,
+					cacheReadCostBasis: "unknown",
+					cacheWriteCostUsd: 0,
+					cacheWriteCostBasis: "provider-reported",
+				},
+			}),
+		);
+		const text = lines.join("\n");
+		expect(text).toContain("By task: 1");
+		expect(text).toContain("ship-feature-x");
+		expect(text).toContain("payback yes");
+		expect(text).toContain("Unattributed (no task focused)");
+		expect(text).toContain("42 tok");
 	});
 
 	it("lists candidate missed-cache opportunities without asserting causality", () => {
