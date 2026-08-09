@@ -602,9 +602,15 @@ describe("Jittor Pi actuator", () => {
 		expect(rendered).toContain("ADVISORY");
 	});
 
-	it("queries and renders cache economics for the trailing 7-day window through /jittor cache", async () => {
+	it("queries and renders cache economics for the trailing 7-day window through /jittor cache's interactive panel", async () => {
 		const client = new FakeClient();
 		const app = harness(client);
+		let rendered = "";
+		(app.ctx.ui as any).custom = async (factory: Function) => {
+			const component = factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
+			rendered = component.render(200).join("\n");
+			return "close";
+		};
 		client.cacheEconomics = {
 			since: 0,
 			until: 1,
@@ -647,8 +653,9 @@ describe("Jittor Pi actuator", () => {
 		expect(typeof since).toBe("number");
 		expect(typeof until).toBe("number");
 		expect(until - since).toBe(7 * 24 * 60 * 60 * 1_000);
-		expect(app.notifications.at(-1)).toContain("anthropic/claude-sonnet-5");
-		expect(app.notifications.at(-1)).toContain("$1.35");
+		expect(rendered).toContain("Jittor Cache Economics");
+		expect(rendered).toContain("anthropic/claude-sonnet-5");
+		expect(rendered).toContain("$1.35");
 	});
 
 	it("resolves domain and type from /jittor benchmarks as two independent, order-free positional words", async () => {

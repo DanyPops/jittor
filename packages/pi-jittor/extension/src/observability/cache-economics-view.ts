@@ -5,6 +5,17 @@ import type {
 	CacheEconomicsTaskSummary,
 } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { BorderedSelectPanel, type TextMeasure } from "malevich-tui-components";
+
+export interface CacheEconomicsPanelTheme {
+	fg(color: string, text: string): string;
+	bold(text: string): string;
+}
+
+type CacheEconomicsPanelAction = "refresh" | "close";
+
+const hostTextMeasure: TextMeasure = { visibleWidth, truncateToWidth };
 
 export interface CacheEconomicsPanelClient {
 	call(operation: string, input: unknown): Promise<any>;
@@ -87,4 +98,58 @@ export async function showCacheEconomicsView(
 	const since = Math.max(0, until - windowMs);
 	const summary = (await client.call("cache.economics", { since, until })) as CacheEconomicsSummary;
 	ctx.ui.notify(renderCacheEconomicsView(summary).join("\n"), "info");
+}
+
+/** The same content as renderCacheEconomicsView, wrapped in a titled, bordered, scrollable frame -- mirrors optimization/model-selection-panel.ts's renderBenchmarkView/BorderedSelectPanel pattern. */
+export function renderCacheEconomicsPanel(summary: CacheEconomicsSummary, width: number, theme: CacheEconomicsPanelTheme): string[] {
+	const safeWidth = Math.max(1, width);
+	const lines = renderCacheEconomicsView(summary);
+	const content = {
+		invalidate: () => {},
+		render: (availableWidth: number): string[] => lines.map((line) => truncateToWidth(line, availableWidth, "…")),
+	};
+	return new BorderedSelectPanel({
+		title: "Jittor Cache Economics",
+		list: content,
+		helpText: "r refresh · Esc close",
+		theme: {
+			border: (text) => theme.fg("borderMuted", text),
+			title: theme.bold,
+			help: (text) => theme.fg("dim", text),
+		},
+		measure: hostTextMeasure,
+	}).render(safeWidth);
+}
+
+/**
+ * Interactive scrollable panel for /jittor cache, mirroring showBenchmarkPanel: a plain notify
+ * outside TUI mode (unchanged from showCacheEconomicsView's own behavior), an interactive
+ * BorderedSelectPanel with an 'r' refresh keybinding inside it.
+ */
+export async function showCacheEconomicsPanel(
+	ctx: ExtensionCommandContext,
+	client: CacheEconomicsPanelClient,
+	windowMs: number,
+	now: () => number = Date.now,
+): Promise<void> {
+	for (;;) {
+		const until = now();
+		const since = Math.max(0, until - windowMs);
+		const summary = (await client.call("cache.economics", { since, until })) as CacheEconomicsSummary;
+		if (ctx.mode !== "tui") {
+			ctx.ui.notify(renderCacheEconomicsView(summary).join("\n"), "info");
+			return;
+		}
+		const action = await ctx.ui.custom<CacheEconomicsPanelAction>((_tui, theme, _keybindings, done) => ({
+			invalidate() {},
+			render(width: number): string[] {
+				return renderCacheEconomicsPanel(summary, width, theme);
+			},
+			handleInput(data: string): void {
+				if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) done("close");
+				else if (data === "r") done("refresh");
+			},
+		}));
+		if (!action || action === "close") return;
+	}
 }

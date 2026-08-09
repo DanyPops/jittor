@@ -1,6 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { CacheEconomicsSummary } from "@danypops/jittor";
-import { renderCacheEconomicsView, showCacheEconomicsView } from "../extension/src/observability/cache-economics-view.ts";
+import {
+	renderCacheEconomicsPanel,
+	renderCacheEconomicsView,
+	showCacheEconomicsPanel,
+	showCacheEconomicsView,
+} from "../extension/src/observability/cache-economics-view.ts";
+
+const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 
 function summary(overrides: Partial<CacheEconomicsSummary> = {}): CacheEconomicsSummary {
 	return {
@@ -170,5 +177,71 @@ describe("cache economics view", () => {
 		expect(calls).toEqual([{ operation: "cache.economics", input: { since: 40_000, until: 100_000 } }]);
 		expect(notifications).toHaveLength(1);
 		expect(notifications[0]).toContain("No cache activity recorded in this window.");
+	});
+
+	it("renders the same content inside a titled, bordered panel frame", () => {
+		const lines = renderCacheEconomicsPanel(summary(), 80, plainTheme);
+		const text = lines.join("\n");
+		expect(text).toContain("Jittor Cache Economics");
+		expect(text).toContain("No cache activity recorded in this window.");
+		expect(text).toContain("refresh");
+	});
+
+	it("falls back to a plain notify, not the interactive panel, outside TUI mode", async () => {
+		const client = {
+			async call() {
+				return summary();
+			},
+		};
+		const notifications: string[] = [];
+		let customCalled = false;
+		const ctx = {
+			mode: "headless",
+			ui: {
+				notify: (message: string) => notifications.push(message),
+				custom: async () => {
+					customCalled = true;
+					return "close";
+				},
+			},
+		} as never;
+		await showCacheEconomicsPanel(ctx, client, 60_000, () => 100_000);
+		expect(customCalled).toBe(false);
+		expect(notifications).toHaveLength(1);
+		expect(notifications[0]).toContain("No cache activity recorded in this window.");
+	});
+
+	it("opens an interactive scrollable panel in TUI mode, and re-queries the daemon on refresh", async () => {
+		const calls: Array<{ operation: string; input: unknown }> = [];
+		const client = {
+			async call(operation: string, input: unknown) {
+				calls.push({ operation, input });
+				return summary({ since: (input as { since: number }).since, until: (input as { until: number }).until });
+			},
+		};
+		let customCallCount = 0;
+		let renderedOnce = "";
+		const ctx = {
+			mode: "tui",
+			ui: {
+				notify: () => {
+					throw new Error("should not fall back to notify in TUI mode");
+				},
+				custom: async (factory: (...args: unknown[]) => { render(width: number): string[]; handleInput(data: string): void }) => {
+					customCallCount += 1;
+					const component = factory({ requestRender() {} }, plainTheme, {}, () => undefined);
+					renderedOnce = component.render(80).join("\n");
+					if (customCallCount === 1) {
+						component.handleInput("r");
+						return "refresh";
+					}
+					return "close";
+				},
+			},
+		} as never;
+		await showCacheEconomicsPanel(ctx, client, 60_000, () => 100_000);
+		expect(calls).toHaveLength(2); // initial fetch + one refresh
+		expect(customCallCount).toBe(2);
+		expect(renderedOnce).toContain("Jittor Cache Economics");
 	});
 });

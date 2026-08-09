@@ -34,7 +34,7 @@ import {
 	validateTaskFocusEvent,
 } from "@danypops/jittor";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { showCacheEconomicsView } from "./observability/cache-economics-view.ts";
+import { showCacheEconomicsPanel } from "./observability/cache-economics-view.ts";
 import {
 	basePromptSegment,
 	buildBasePromptItems,
@@ -625,7 +625,7 @@ export function registerJittorExtension(
 				return;
 			}
 			if (action === "cache") {
-				await showCacheEconomicsView(ctx, client, 7 * MILLISECONDS_PER_DAY);
+				await showCacheEconomicsPanel(ctx, client, 7 * MILLISECONDS_PER_DAY);
 				return;
 			}
 			if (action === "outcome accepted" || action === "outcome rejected") {
