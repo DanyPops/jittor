@@ -62,6 +62,11 @@ export type ProviderBudget =
 			label: string;
 			valueText: string;
 			observedAt?: number;
+	  }
+	| {
+			kind: "unavailable";
+			label: string;
+			valueText: string;
 	  };
 
 export interface CompactionProgress {
@@ -221,9 +226,11 @@ function budgetSegment(
 	if (budget === undefined) return undefined;
 	const w = barWidth(width);
 	if (!budget) return `budget ${theme.fg("dim", progressBar(null, w))} ?`;
+	if (budget.kind === "unavailable") return `${budget.label} ${theme.fg("warning", budget.valueText)}`;
 	const stale = budget.observedAt !== undefined && now - budget.observedAt > TELEMETRY_STALE_AFTER_MS;
 	const staleText = stale ? ` ${theme.fg("warning", "stale")}` : "";
 	if (budget.kind === "unbounded") return `${budget.label} ${budget.valueText}${staleText}`;
+	if (budget.resetsAt !== undefined && budget.resetsAt <= now) return `${budget.label} ${theme.fg("warning", "reset pending")}`;
 	const remaining = Math.min(1, Math.max(0, budget.remainingFraction));
 	const bar = theme.fg(fillColor(1 - remaining), progressBar(remaining, w));
 	const value = `${compact ? Math.round(remaining * 100) : (remaining * 100).toFixed(1)}% left`;

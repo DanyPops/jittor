@@ -2,17 +2,17 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-const tmpDirs: string[] = [];
-afterEach(() => {
-	for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
 import {
 	CodexSubscriptionTelemetryAdapter,
 	loadCodexFileCredentials,
 	parseCodexRateLimitHeaders,
 	parseCodexUsage,
 } from "../src/providers/codex.ts";
+
+const tmpDirs: string[] = [];
+afterEach(() => {
+	for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 function response(value: unknown, status = 200): Response {
 	return Response.json(value, { status });

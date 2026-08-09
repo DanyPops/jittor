@@ -1089,10 +1089,10 @@ describe("Jittor footer status", () => {
 			currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
 			availableRoutes: [],
 		};
-		const budget = buildFooterBudget(routeStatus, metrics);
+		const budget = buildFooterBudget(routeStatus, metrics, 2);
 		expect(budget).toMatchObject({ kind: "bounded", label: "W", resetsAt: 1_800_000_000_000 });
 		expect(budget?.kind === "bounded" ? budget.remainingFraction : null).toBeCloseTo(0.58);
-		expect(formatFooterStatus(routeStatus, metrics)).toBe("W 58.0% left");
+		expect(formatFooterStatus(routeStatus, metrics, 2)).toBe("W 58.0% left");
 	});
 
 	it("selects a named additional Codex limit only for its matching model", () => {
@@ -1107,6 +1107,7 @@ describe("Jittor footer status", () => {
 				availableRoutes: [],
 			},
 			metrics,
+			3,
 		);
 		expect(budget).toMatchObject({ kind: "bounded", label: "W", remainingFraction: 1, resetsAt: 1_800_100_000_000 });
 	});

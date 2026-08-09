@@ -146,6 +146,21 @@ describe("Jittor daemon state", () => {
 			await new Promise((resolve) => setTimeout(resolve, 50));
 			const client = connectJittorClient(paths);
 			expect(await client.health()).toEqual({ ok: true, version: VERSION });
+			const poll = await client.call("telemetry.poll", {});
+			expect(poll.sources).toEqual([
+				{
+					id: "codex-subscription",
+					provider: "openai-codex",
+					ok: false,
+					metrics: 0,
+					observedAt: expect.any(Number),
+					error: "poll failed",
+				},
+			]);
+			expect(JSON.stringify(poll)).not.toContain(root);
+			expect(JSON.stringify(poll)).not.toContain("auth.json");
+			const status = await client.call("router.status", {});
+			expect(status.sources).toEqual(poll.sources);
 		} finally {
 			await daemon.stop();
 		}

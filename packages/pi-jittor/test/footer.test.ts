@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { RouterStatus, StoredMetricObservation } from "@danypops/jittor";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { type ProviderBudget, renderFooterLines } from "../extension/src/footer.ts";
+import { buildFooterBudget } from "../extension/src/tui.ts";
 
 const colorCalls: Array<{ color: string; text: string }> = [];
 const theme = {
@@ -182,6 +184,115 @@ describe("Jittor integrated footer", () => {
 		);
 		expect(spend[0]).toContain("spend $12.346");
 		expect(spend[0]).not.toMatch(/spend [█░]+/);
+	});
+
+	it("does not present a historical Codex percentage when the active daemon has no Codex source", () => {
+		const now = 1_000_000;
+		const status: RouterStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: null,
+			override: null,
+			currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+			availableRoutes: [],
+		};
+		const metrics = [
+			{
+				id: 1,
+				source: "codex-subscription",
+				scope: "codex:secondary",
+				metric: "used-fraction",
+				value: 0.98,
+				unit: "ratio" as const,
+				observedAt: 1,
+				attributes: { limitId: "codex", windowSeconds: 604_800, resetsAt: 2_000 },
+			},
+		];
+		const budget = buildFooterBudget(status, metrics, now);
+		expect(budget).toEqual({ kind: "unavailable", label: "W", valueText: "telemetry unavailable" });
+		const line = renderFooterLines(context(), footerData, theme, budget, "high", 180, now)[0]!;
+		expect(line).toContain("W telemetry unavailable");
+		expect(line).not.toContain("2.0% left");
+
+		const failed = buildFooterBudget(
+			{
+				...status,
+				ready: false,
+				sources: [{ id: "codex-subscription", provider: "openai-codex", ok: false, metrics: 0, observedAt: now }],
+			},
+			metrics,
+			now,
+		);
+		expect(failed).toEqual({ kind: "unavailable", label: "W", valueText: "telemetry failed" });
+	});
+
+	it("renders reset-pending instead of assuming either the expired percentage or a replenished budget", () => {
+		const now = 2_000_000;
+		const retainedBeforeReset: ProviderBudget = {
+			kind: "bounded",
+			label: "W",
+			remainingFraction: 0.02,
+			observedAt: now - 1_000,
+			resetsAt: now - 1,
+		};
+		const retainedLine = renderFooterLines(context(), footerData, theme, retainedBeforeReset, "high", 180, now)[0]!;
+		expect(retainedLine).toContain("W reset pending");
+		expect(retainedLine).not.toContain("2.0% left");
+
+		const status: RouterStatus = {
+			ready: true,
+			paused: false,
+			sources: [{ id: "codex-subscription", provider: "openai-codex", ok: true, metrics: 1, observedAt: now }],
+			lastDecision: null,
+			override: null,
+			currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+			availableRoutes: [],
+		};
+		const metrics = [
+			{
+				id: 1,
+				source: "codex-subscription",
+				scope: "codex:secondary",
+				metric: "used-fraction",
+				value: 0.98,
+				unit: "ratio" as const,
+				observedAt: now - 1_000,
+				attributes: { limitId: "codex", windowSeconds: 604_800, resetsAt: (now - 1) / 1_000 },
+			},
+		];
+		const budget = buildFooterBudget(status, metrics, now);
+		expect(budget).toEqual({ kind: "unavailable", label: "W", valueText: "reset pending" });
+		const line = renderFooterLines(context(), footerData, theme, budget, "high", 180, now)[0]!;
+		expect(line).toContain("W reset pending");
+		expect(line).not.toMatch(/(?:2\.0|100\.0)% left/);
+	});
+
+	it("preserves a fresh response-header Codex observation even without a polling source", () => {
+		const now = 3_000_000;
+		const status: RouterStatus = {
+			ready: true,
+			paused: false,
+			sources: [],
+			lastDecision: null,
+			override: null,
+			currentRoute: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+			availableRoutes: [],
+		};
+		const metrics: StoredMetricObservation[] = [
+			{
+				id: 1,
+				source: "codex-subscription",
+				scope: "codex:secondary",
+				metric: "used-fraction",
+				value: 0.25,
+				unit: "ratio",
+				observedAt: now,
+				attributes: { limitId: "codex", windowSeconds: 604_800, resetsAt: 4_000 },
+			},
+		];
+		const budget = buildFooterBudget(status, metrics, now);
+		expect(budget).toMatchObject({ kind: "bounded", label: "W", remainingFraction: 0.75 });
 	});
 
 	it("keeps every responsive line within narrow terminal width", () => {

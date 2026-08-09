@@ -6,6 +6,7 @@ import {
 	type Route,
 	type RouterStatus,
 	type StoredMetricObservation,
+	TELEMETRY_STALE_AFTER_MS,
 } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
@@ -104,20 +105,56 @@ function windowName(seconds: number): string {
  * could ever read -- see google-vertex-contracts.ts); the footer omits the segment entirely rather
  * than showing a `?` that can never resolve.
  */
-export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObservation[]): ProviderBudget | null | undefined {
-	if (!status.ready || !status.currentRoute) return null;
+type CodexTelemetryState = "available" | "missing" | "failed" | "stale";
+
+function codexTelemetryState(status: RouterStatus, now: number): CodexTelemetryState {
+	const source = status.sources.find((candidate) => candidate.id === "codex-subscription");
+	if (!source) return "missing";
+	if (!source.ok) return "failed";
+	if (source.observedAt !== undefined && now - source.observedAt > TELEMETRY_STALE_AFTER_MS) return "stale";
+	return "available";
+}
+
+function unavailableCodexBudget(
+	label: string,
+	reason: "reset pending" | "telemetry unavailable" | "telemetry failed" | "telemetry stale",
+): ProviderBudget {
+	return { kind: "unavailable", label, valueText: reason };
+}
+
+export function buildFooterBudget(
+	status: RouterStatus,
+	metrics: StoredMetricObservation[],
+	now = Date.now(),
+): ProviderBudget | null | undefined {
+	if (!status.currentRoute) return null;
 	if (status.currentRoute.provider === "openai-codex") {
 		const codex = codexWindowForModel(metrics, status.currentRoute.model);
-		if (!codex || typeof codex.value !== "number") return null;
+		const sourceState = codexTelemetryState(status, now);
+		if (!codex || typeof codex.value !== "number") {
+			if (sourceState === "missing") return unavailableCodexBudget("Codex", "telemetry unavailable");
+			if (sourceState === "failed") return unavailableCodexBudget("Codex", "telemetry failed");
+			if (sourceState === "stale") return unavailableCodexBudget("Codex", "telemetry stale");
+			return null;
+		}
+		const label = compactWindowName(Number(codex.attributes.windowSeconds ?? 0));
 		const resetsAtSeconds = Number(codex.attributes.resetsAt);
+		const resetsAt = Number.isFinite(resetsAtSeconds) && resetsAtSeconds > 0 ? resetsAtSeconds * 1_000 : undefined;
+		if (resetsAt !== undefined && resetsAt <= now) return unavailableCodexBudget(label, "reset pending");
+		if (now - codex.observedAt > TELEMETRY_STALE_AFTER_MS) {
+			if (sourceState === "missing") return unavailableCodexBudget(label, "telemetry unavailable");
+			if (sourceState === "failed") return unavailableCodexBudget(label, "telemetry failed");
+			return unavailableCodexBudget(label, "telemetry stale");
+		}
 		return {
 			kind: "bounded",
-			label: compactWindowName(Number(codex.attributes.windowSeconds ?? 0)),
+			label,
 			remainingFraction: 1 - codex.value,
 			observedAt: codex.observedAt,
-			...(Number.isFinite(resetsAtSeconds) && resetsAtSeconds > 0 ? { resetsAt: resetsAtSeconds * 1_000 } : {}),
+			...(resetsAt !== undefined ? { resetsAt } : {}),
 		};
 	}
+	if (!status.ready) return null;
 	if (status.currentRoute.provider === "anthropic") {
 		const anthropic =
 			latest(
@@ -188,10 +225,12 @@ export function buildFooterBudget(status: RouterStatus, metrics: StoredMetricObs
 	return undefined;
 }
 
-export function formatFooterStatus(status: RouterStatus, metrics: StoredMetricObservation[]): string {
-	const budget = buildFooterBudget(status, metrics);
+export function formatFooterStatus(status: RouterStatus, metrics: StoredMetricObservation[], now = Date.now()): string {
+	const budget = buildFooterBudget(status, metrics, now);
 	if (!budget) return "";
-	return budget.kind === "unbounded" ? budget.valueText : `${budget.label} ${(budget.remainingFraction * 100).toFixed(1)}% left`;
+	if (budget.kind === "unbounded") return budget.valueText;
+	if (budget.kind === "unavailable") return `${budget.label} ${budget.valueText}`;
+	return `${budget.label} ${(budget.remainingFraction * 100).toFixed(1)}% left`;
 }
 
 function nextAction(action: PolicyAction | undefined): string {
@@ -238,10 +277,14 @@ function burnLine(rows: StoredMetricObservation[], current: StoredMetricObservat
 export function buildStatusView(status: RouterStatus, metrics: StoredMetricObservation[], now = Date.now()): string[] {
 	const lines = [status.ready ? "Ready" : "Not ready"];
 	const codex = status.currentRoute?.provider === "openai-codex" ? codexWindowForModel(metrics, status.currentRoute.model) : undefined;
-	if (codex && typeof codex.value === "number") {
+	const budget = buildFooterBudget(status, metrics, now);
+	if (codex && typeof codex.value === "number" && budget?.kind === "bounded") {
 		const seconds = Number(codex.attributes.windowSeconds ?? 0);
 		lines.push(`Codex ${windowName(seconds)}: ${((1 - codex.value) * 100).toFixed(1)}% left`);
 		lines.push(burnLine(metrics, codex, now));
+	} else if (status.currentRoute?.provider === "openai-codex" && budget?.kind === "unavailable") {
+		const seconds = Number(codex?.attributes.windowSeconds ?? 0);
+		lines.push(`Codex ${codex ? windowName(seconds) : "subscription"}: ${budget.valueText}`);
 	}
 	const openRouter =
 		status.currentRoute?.provider === "openrouter"
@@ -270,6 +313,8 @@ export function buildStatusView(status: RouterStatus, metrics: StoredMetricObser
 	lines.push(`Next: ${nextAction(status.lastDecision?.action)}`);
 	lines.push("Telemetry:");
 	const providerSources = status.sources.filter((source) => source.provider === status.currentRoute?.provider);
+	if (status.currentRoute?.provider === "openai-codex" && providerSources.length === 0)
+		lines.push("  codex-subscription: unavailable · not configured by active daemon");
 	for (const source of providerSources.slice(0, HUMAN_STATUS_MAX_SOURCES)) {
 		const freshness = !source.ok ? "failed" : source.observedAt !== undefined && now - source.observedAt > 120_000 ? "stale" : "fresh";
 		lines.push(`  ${sanitizedText(source.id)}: ${freshness} · ${source.metrics} metrics`);
