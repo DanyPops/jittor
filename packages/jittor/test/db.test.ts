@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteMetricStore } from "../src/adapters/sqlite-metric-store.ts";
 import { openJittorDb } from "../src/db.ts";
 
 const stores: SQLiteMetricStore[] = [];
+const tmpDirs: string[] = [];
 afterEach(() => {
 	for (const store of stores.splice(0)) store.close();
+	for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 function fixture() {
-	const path = join(mkdtempSync(join(tmpdir(), "jittor-db-")), "jittor.db");
+	const dir = mkdtempSync(join(tmpdir(), "jittor-db-"));
+	tmpDirs.push(dir);
+	const path = join(dir, "jittor.db");
 	const db = openJittorDb(path);
 	const store = new SQLiteMetricStore(db);
 	stores.push(store);

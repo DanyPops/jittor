@@ -1,5 +1,5 @@
-import { describe, expect, it, spyOn } from "bun:test";
-import { mkdtempSync, statSync } from "node:fs";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { mkdtempSync as mkdtempSyncRaw, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderSystemdUnit } from "../src/cli.ts";
@@ -7,6 +7,16 @@ import { connectJittorClient } from "../src/client.ts";
 import { benchmarkSourcesFromEnvironment, reportMaintenanceFailure, startDaemon, telemetrySourcesFromEnvironment } from "../src/daemon.ts";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, writeDaemonHandle } from "../src/state.ts";
 import { VERSION } from "../src/version.ts";
+
+const tmpDirs: string[] = [];
+function mkdtempSync(prefix: string): string {
+	const dir = mkdtempSyncRaw(prefix);
+	tmpDirs.push(dir);
+	return dir;
+}
+afterEach(() => {
+	for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 describe("reportMaintenanceFailure", () => {
 	// This is the seam that replaced `void somePromise()` with no .catch at

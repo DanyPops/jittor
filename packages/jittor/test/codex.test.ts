@@ -1,7 +1,12 @@
-import { describe, expect, it } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const tmpDirs: string[] = [];
+afterEach(() => {
+	for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 import {
 	CodexSubscriptionTelemetryAdapter,
 	loadCodexFileCredentials,
@@ -149,6 +154,7 @@ describe("experimental Codex subscription telemetry", () => {
 
 	it("loads only the required fields from explicitly configured file credentials", () => {
 		const directory = mkdtempSync(join(tmpdir(), "codex-auth-"));
+		tmpDirs.push(directory);
 		const path = join(directory, "auth.json");
 		writeFileSync(
 			path,
