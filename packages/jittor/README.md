@@ -20,7 +20,7 @@ Token and context observability, optimization policies, provider integrations, s
 
 Dependencies point toward `observability/` and `optimization/`; provider, SQLite, Vehicle, CLI, and Pi models are translated at their boundaries. SQLite runs in WAL mode with versioned migrations, bounded queries, pruning, and checkpoints.
 
-Operations currently include bounded metric recording/query/pruning, benchmark refresh/status/query, context assessment, routing control, telemetry polling, and service checkpointing. Every operation is exposed through the authenticated typed client; benchmark operations also have CLI parity.
+Operations currently include bounded metric recording/query/pruning, benchmark refresh/status/query, context assessment and content-free snapshot deltas, routing control, telemetry polling, and service checkpointing. Every operation is exposed through the authenticated typed client; benchmark operations also have CLI parity.
 
 Token counts carry explicit scope and provenance (`provider-reported`, `provider-count-api`, `tokenizer-exact-text`, or `structural-estimate`). Provider aggregates remain authoritative, exact local tokenization is labeled exact for text only, and envelope/media/provider residuals remain explicit instead of being assigned to individual context items. See [`docs/TOKEN_MEASUREMENT.md`](docs/TOKEN_MEASUREMENT.md) for the contract, OpenAI-family adapter, privacy boundary, module benchmark, and E2E test layers.
 
@@ -65,7 +65,7 @@ Jittor separately records content-free local model observations from Pi's public
 
 Papyrus emits content-free prompt-injection observations through Pi's shared extension event bus. Jittor validates and records their exact Rule/Task character sizes, prompt share, fingerprint repetition, and explicitly estimated token size. Jittor also records completed, aborted, and unmatched Pi compactions with duration, reason, retry state, pre-compaction context usage, and bounded turns/injection/provider/cache usage since the previous compaction.
 
-`jittor context [--since <epoch-ms>] [--until <epoch-ms>] [--json]` reports bounded average/p95/max injection, Rule/Task mix, unchanged rate, compaction frequency/duration/reasons, and between-compaction provider/cache facts. Repeated prompt content is not labeled billed waste: provider-reported input/cache usage and an injection-disabled control are required before making cost or compaction-causality claims.
+`jittor context [--since <epoch-ms>] [--until <epoch-ms>] [--json]` reports bounded average/p95/max injection, Rule/Task mix, unchanged rate, compaction frequency/duration/reasons, and between-compaction provider/cache facts. `jittor context delta --session-id <opaque-id> [--json]` exposes the latest content-free structural delta; Pi's `/context` view resolves that opaque identity itself. Repeated prompt content is not labeled billed waste: provider-reported input/cache usage and an injection-disabled control are required before making cost or compaction-causality claims. See [`docs/CONTEXT_SNAPSHOTS.md`](docs/CONTEXT_SNAPSHOTS.md) for privacy, lifecycle, truncation, persistence, and stable-prefix semantics.
 
 ## CLI operations
 

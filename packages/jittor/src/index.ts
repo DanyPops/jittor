@@ -16,6 +16,24 @@ export {
 	googleVertexFailureMetrics,
 } from "./google-vertex/failures.ts";
 export {
+	CONTEXT_SEGMENT_SOURCES,
+	CONTEXT_SEGMENT_STATES,
+	CONTEXT_SNAPSHOT_MAX_SEGMENTS,
+	type ContextDelta,
+	type ContextFingerprinter,
+	type ContextPrefixResetReason,
+	type ContextSegmentChange,
+	type ContextSegmentLifecycle,
+	type ContextSegmentSource,
+	type ContextSegmentState,
+	type ContextSnapshot,
+	type ContextSnapshotSegment,
+	type ContextSourceGrowth,
+	compareContextSnapshots,
+	HmacContextFingerprinter,
+	validateContextSnapshot,
+} from "./observability/context-delta.ts";
+export {
 	type ContextConfidenceTier,
 	type ContextContribution,
 	type ContextSegment,
@@ -29,6 +47,10 @@ export {
 	validateContextContribution,
 	validateContextSegment,
 } from "./observability/context-hub.ts";
+export {
+	type ContextSnapshotHistory,
+	MetricContextSnapshotHistory,
+} from "./observability/context-snapshot-history.ts";
 export {
 	assessContextTelemetry,
 	type CompactionDurationEstimate,

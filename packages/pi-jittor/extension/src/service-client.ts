@@ -29,6 +29,8 @@ const OPERATION_RETRY_MODE = {
 	"session.release": "once",
 	"models.rank": "once",
 	"context.assess": "retry",
+	"context.delta": "retry",
+	"context.snapshot": "once",
 	"compaction.estimate": "retry",
 	"service.checkpoint": "once",
 	"telemetry.poll": "retry",

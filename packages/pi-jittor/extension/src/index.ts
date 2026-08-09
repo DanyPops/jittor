@@ -1,4 +1,4 @@
-import type { ContextSegmentItem } from "@danypops/jittor";
+import type { ContextSegmentItem, ContextSnapshot } from "@danypops/jittor";
 import {
 	applyTaskFocusEvent,
 	CONTEXT_ESTIMATE_CHARACTERS_PER_TOKEN,
@@ -7,6 +7,7 @@ import {
 	CompactionTelemetry,
 	type ContextAssessment,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
+	HmacContextFingerprinter,
 	loadOpenAiTextTokenCounter,
 	MAX_DYNAMIC_ROUTES,
 	type MetricObservation,
@@ -45,6 +46,7 @@ import { ContextHubCapability } from "./observability/context-hub.ts";
 import { showContextView } from "./observability/context-view.ts";
 import { type CompactionProgress, type IntegratedFooterState, installIntegratedFooter } from "./observability/footer.ts";
 import { LocalRunTelemetry } from "./observability/model-run.ts";
+import { captureProviderContextSnapshot } from "./observability/provider-context-snapshot.ts";
 import { ProviderResponseTelemetry } from "./observability/provider-response.ts";
 import { buildFooterBudget, providerBudgetMetricQuery, showJittorPanel } from "./observability/status.ts";
 import { showUsagePanel } from "./observability/usage.ts";
@@ -364,6 +366,52 @@ export function registerJittorExtension(
 	const providerResponseTelemetry = new ProviderResponseTelemetry();
 	const codexRecoveryCapability = new CodexRecoveryCapability(pi, codexRecovery, recoveryRuntime);
 	const contextHub = new ContextHubCapability();
+	const contextFingerprintKey = new Uint8Array(32);
+	crypto.getRandomValues(contextFingerprintKey);
+	const contextFingerprinter = new HmacContextFingerprinter(contextFingerprintKey);
+	let contextCaptureSequence = 0;
+	pi.on("before_provider_request", (event, ctx) => {
+		try {
+			const sessionId = ctx.sessionManager.getSessionId();
+			let history:
+				| {
+						roots: SessionTreeNodeLike[];
+						activeEntryIds: Set<string>;
+						branchEntryIds: Set<string>;
+				  }
+				| undefined;
+			try {
+				history = {
+					roots: ctx.sessionManager.getTree() as SessionTreeNodeLike[],
+					activeEntryIds: new Set((ctx.sessionManager.buildContextEntries() as SessionEntryLike[]).map((entry) => entry.id)),
+					branchEntryIds: new Set((ctx.sessionManager.getBranch() as SessionEntryLike[]).map((entry) => entry.id)),
+				};
+			} catch {
+				// Older/custom SessionManager implementations may not expose tree projections.
+			}
+			const captureInput = {
+				payload: event.payload,
+				captureId: `${++contextCaptureSequence}`,
+				sessionId,
+				provider: ctx.model?.provider ?? "unknown",
+				model: ctx.model?.id ?? "unknown",
+				capturedAt: Date.now(),
+				fingerprinter: contextFingerprinter,
+			};
+			let snapshot: ContextSnapshot;
+			try {
+				snapshot = captureProviderContextSnapshot({ ...captureInput, ...(history ? { history } : {}) });
+			} catch {
+				// A custom SessionManager tree shape must not suppress the real request-payload snapshot.
+				snapshot = captureProviderContextSnapshot(captureInput);
+			}
+			// Observation must never delay, alter, or abort the provider request. The daemon operation is
+			// a single-execution local write and receives only bounded token sizes and keyed fingerprints.
+			void client.call("context.snapshot", snapshot).catch(() => undefined);
+		} catch {
+			// Snapshot collection is strictly failure-isolated from provider delivery.
+		}
+	});
 	const stopContextHub = pi.events?.on?.(CONTEXT_HUB_CONTRIBUTION_CHANNEL, (payload) => contextHub.observe(payload));
 	// Cached from the most recent before_agent_start observation: Pi's own base system prompt is
 	// only ever visible transiently inside that hook's event, so /context reuses this rather than
@@ -630,7 +678,9 @@ export function registerJittorExtension(
 				contextWindow: ctx.model?.contextWindow ?? null,
 				segments: [...ownSegments, ...contextHub.contributedSegments()],
 			});
-			await showContextView(ctx, breakdown);
+			const opaqueSessionId = contextFingerprinter.fingerprint(`session:${ctx.sessionManager.getSessionId()}`);
+			const delta = await client.call("context.delta", { session_id: opaqueSessionId }).catch(() => null);
+			await showContextView(ctx, breakdown, delta);
 		},
 	});
 

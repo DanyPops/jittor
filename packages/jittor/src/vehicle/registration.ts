@@ -92,6 +92,8 @@ const OPERATION_META: Record<OperationName, OperationMeta> = {
 		effect: "local-write",
 	},
 	"context.assess": { description: "Assesses context-injection/compaction health within a bounded time window.", effect: "read" },
+	"context.delta": { description: "Returns the latest bounded content-free context delta for one opaque session.", effect: "read" },
+	"context.snapshot": { description: "Records one bounded content-free context snapshot and computes its delta.", effect: "local-write" },
 	"compaction.estimate": { description: "Estimates compaction duration from recorded samples.", effect: "read" },
 	"service.checkpoint": { description: "Flushes the metric store's write-ahead log.", effect: "local-write" },
 	"telemetry.poll": { description: "Polls external telemetry provider status.", effect: "read" },

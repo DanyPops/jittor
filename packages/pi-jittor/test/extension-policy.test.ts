@@ -38,6 +38,7 @@ class FakeClient implements JittorExtensionClient {
 		availableRoutes: [],
 	};
 	metrics: any[] = [];
+	contextDelta: any = null;
 	compactionEstimate: { ms: number | null; confidence: "cold-start" | "learned"; sampleSize: number; observedAt: number } = {
 		ms: null,
 		confidence: "cold-start",
@@ -47,6 +48,7 @@ class FakeClient implements JittorExtensionClient {
 	async call(operation: string, input: unknown): Promise<any> {
 		this.calls.push({ operation, input });
 		if (operation === "compaction.estimate") return this.compactionEstimate;
+		if (operation === "context.delta") return this.contextDelta;
 		if (operation === "router.decide") return this.decisionQueue.shift() ?? this.decision;
 		if (operation === "router.current_route") {
 			const { provider, model, thinking } = input as { provider: string; model: string; thinking: string };
@@ -259,6 +261,37 @@ describe("Jittor Pi actuator", () => {
 		expect(app.handlers.get("session_compact")).toHaveLength(1);
 		expect(app.handlers.get("agent_settled")).toHaveLength(1);
 		expect(app.handlers.get("session_shutdown")).toHaveLength(1);
+	});
+
+	it("captures the real final provider payload as a content-free bounded snapshot without modifying the request", async () => {
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, { provider: "faux", id: "faux-1" });
+		const privatePayload = {
+			instructions: "private system prompt",
+			tools: [{ name: "read", description: "private tool" }],
+			messages: [{ role: "user", content: "private user request" }],
+		};
+		const handler = app.handlers.get("before_provider_request")?.[0];
+		expect(handler).toBeDefined();
+		expect(await handler!({ payload: privatePayload }, app.ctx)).toBeUndefined();
+		const call = client.calls.find((candidate) => candidate.operation === "context.snapshot");
+		expect(call).toBeDefined();
+		const snapshot = call!.input as Record<string, unknown> & { segments: Array<Record<string, unknown>> };
+		expect(snapshot.sessionId).toMatch(/^[A-Za-z0-9_-]{32,64}$/);
+		expect(snapshot.segments.map((segment) => segment.source)).toEqual(["base-prompt", "tool-definitions", "conversation-message"]);
+		expect(JSON.stringify(snapshot)).not.toContain("private");
+		expect(JSON.stringify(snapshot)).not.toContain("read");
+	});
+
+	it("queries the current opaque session delta when /context opens", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		Object.assign(app.ctx.sessionManager, { getTree: () => [], getBranch: () => [], buildContextEntries: () => [] });
+		await app.commands.get("context").handler("", app.ctx);
+		const call = client.calls.find((candidate) => candidate.operation === "context.delta");
+		expect(call).toBeDefined();
+		expect((call!.input as { session_id: string }).session_id).toMatch(/^[A-Za-z0-9_-]{32,64}$/);
+		expect((call!.input as { session_id: string }).session_id).not.toContain("test-session");
 	});
 
 	it("resets context-growth observations when compaction completes", async () => {

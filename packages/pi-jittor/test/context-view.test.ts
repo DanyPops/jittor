@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { ContextSegment, ContextSegmentItem } from "@danypops/jittor";
+import type { ContextDelta, ContextSegment, ContextSegmentItem } from "@danypops/jittor";
 import { renderToTerminal } from "@danypops/pi-tui-harness";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ContextBreakdown } from "../extension/src/observability/context-breakdown.ts";
@@ -102,6 +102,46 @@ describe("showContextView", () => {
 		expect(rendered).toContain("model tokenizer");
 		expect(rendered).toContain("provider request totals remain aggregate");
 		expect(rendered).toContain("esc close");
+	});
+
+	it("renders latest stable-prefix churn, lifecycle, and per-source growth evidence", async () => {
+		let rendered = "";
+		const delta: ContextDelta = {
+			previousSnapshotId: "a".repeat(32),
+			currentSnapshotId: "b".repeat(32),
+			capturedAt: 2_000,
+			truncated: false,
+			stablePrefixTokens: 1_234,
+			firstChangedSegment: { id: "c".repeat(32), source: "tool-definitions", requestPosition: 2 },
+			resetReason: null,
+			changes: [
+				{
+					id: "c".repeat(32),
+					source: "tool-definitions",
+					lifecycle: "changed",
+					previousTokens: 100,
+					currentTokens: 120,
+					deltaTokens: 20,
+					requestPosition: 2,
+				},
+			],
+			growthBySource: [{ source: "tool-definitions", deltaTokens: 20 }],
+		};
+		const ctx = {
+			mode: "tui",
+			ui: {
+				async custom(factory: Function) {
+					const component = factory({ requestRender() {} }, theme, {}, () => undefined);
+					rendered = component.render(100).join("\n");
+				},
+			},
+		} as unknown as ExtensionCommandContext;
+		await showContextView(ctx, breakdown(), delta);
+		expect(rendered).toContain("Stable prefix 1,234 tok");
+		expect(rendered).toContain("first change: tool-definitions @ request 2");
+		expect(rendered).toContain("changed 1");
+		expect(rendered).toContain("tool-definitions +20 tok");
+		expect(rendered).toContain("structural evidence, not provider cache proof");
 	});
 
 	it("shows an overshoot warning line when known segments exceed the real total", async () => {

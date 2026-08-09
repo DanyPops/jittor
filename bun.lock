@@ -40,7 +40,7 @@
       "name": "@danypops/pi-jittor",
       "version": "0.2.1",
       "dependencies": {
-        "@danypops/jittor": "workspace:*",
+        "@danypops/jittor": "workspace:^",
         "@danypops/vehicle-client": "^0.5.1",
         "@danypops/vehicle-core": "^0.12.1",
         "@danypops/vehicle-server": "^0.17.0",
@@ -50,6 +50,7 @@
         "@danypops/pi-extension-harness": "^0.6.2",
         "@danypops/pi-process-harness": "^0.1.1",
         "@danypops/pi-tui-harness": "^0.0.2",
+        "@earendil-works/pi-ai": "*",
         "bun-types": "latest",
       },
       "peerDependencies": {

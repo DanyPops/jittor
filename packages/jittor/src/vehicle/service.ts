@@ -2,6 +2,8 @@ import { VehicleRegistry } from "@danypops/vehicle-server";
 import { createVehicleHttpApp } from "@danypops/vehicle-server/http";
 import { errorResponse, healthResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
 import { SERVICE_MAX_BODY_BYTES, SERVICE_MAX_RESPONSE_BYTES } from "../constants.ts";
+import type { ContextDelta, ContextSnapshot } from "../observability/context-delta.ts";
+import { type ContextSnapshotHistory, MetricContextSnapshotHistory } from "../observability/context-snapshot-history.ts";
 import type { CompactionDurationEstimate, ContextAssessment } from "../observability/context-telemetry.ts";
 import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../observability/metric.ts";
 import type { MetricStore } from "../observability/store.ts";
@@ -40,6 +42,8 @@ export const EXPECTED_OPERATION_NAMES = [
 	"session.release",
 	"models.rank",
 	"context.assess",
+	"context.delta",
+	"context.snapshot",
 	"compaction.estimate",
 	"service.checkpoint",
 	"telemetry.poll",
@@ -73,6 +77,8 @@ export interface OperationInputs {
 	"benchmark.query": BenchmarkQuery;
 	"models.rank": ModelRecommendationInput & RouterScopeInput;
 	"context.assess": { since?: number; until?: number };
+	"context.delta": { session_id: string };
+	"context.snapshot": ContextSnapshot;
 	"compaction.estimate": Record<string, never>;
 	"service.checkpoint": Record<string, never>;
 	"telemetry.poll": Record<string, never>;
@@ -100,6 +106,8 @@ export interface OperationOutputs {
 	"benchmark.query": BenchmarkQueryResult;
 	"models.rank": ModelRankingResult;
 	"context.assess": ContextAssessment;
+	"context.delta": ContextDelta | null;
+	"context.snapshot": ContextDelta;
 	"compaction.estimate": CompactionDurationEstimate;
 	"service.checkpoint": { ok: true };
 	"telemetry.poll": TelemetryPollResult;
@@ -191,6 +199,7 @@ export class JittorService {
 		benchmarks: BenchmarkController = new UnavailableBenchmarkController(),
 		modelRanker: ModelRanker = new UnavailableModelRanker(),
 		sessionIdentity?: SessionIdentity,
+		contextSnapshots: ContextSnapshotHistory = new MetricContextSnapshotHistory(metrics),
 	) {
 		this.router = router;
 		const authorize = routerMutationAuthorizer(sessionIdentity);
@@ -200,7 +209,7 @@ export class JittorService {
 		this.operations = {
 			...metricsOperations(metrics),
 			...benchmarkOperations(benchmarks),
-			...contextOperations(metrics),
+			...contextOperations(metrics, contextSnapshots),
 			...routerOperations(router, authorize),
 			...modelRankingOperations(modelRanker, router, authorize),
 			...sessionIdentityOperations(sessionIdentity),

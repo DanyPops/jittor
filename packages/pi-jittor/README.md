@@ -65,6 +65,8 @@ Conversation entries drill into text, thinking, tool-call arguments, shell comma
 
 Assistant turns also expose the authoritative **provider-reported aggregate request context** (`input + cacheRead + cacheWrite`). The aggregate stays separate from individual item costs, with an explicit unattributed residual rather than proportional allocation. Images, message envelopes, chat templates, tool schemas, cache-control serialization, and provider rewrites remain provider/model-specific, so exact local text counts are never described as exact requests or billing. Measurements retain only bounded provenance/identity metadata; tokenizer input and prompt/response content are never persisted. See [`../jittor/docs/TOKEN_MEASUREMENT.md`](../jittor/docs/TOKEN_MEASUREMENT.md).
 
+At Pi's `before_provider_request` boundary, Jittor also records a bounded content-free snapshot of final request structure plus compaction-aware/inactive session history. `/context` shows the latest stable-prefix size, first changed segment, lifecycle counts, per-source growth, and truncation state. These keyed-HMAC correlations are structural evidence, never proof of provider cache behavior. See [`../jittor/docs/CONTEXT_SNAPSHOTS.md`](../jittor/docs/CONTEXT_SNAPSHOTS.md).
+
 ### Context pressure
 
 Run `/jittor context` for the in-session summary of Papyrus prompt-injection and Pi compaction telemetry; see `@danypops/jittor`'s README for what is recorded and the equivalent CLI command.

@@ -48,6 +48,8 @@ describe("Jittor vehicle-client retrying client wiring", () => {
 		});
 
 		expect(operationRetryMode("metrics.record")).toBe("once");
+		expect(operationRetryMode("context.snapshot")).toBe("once");
+		expect(operationRetryMode("context.delta")).toBe("retry");
 		expect(operationRetryMode("router.pause")).toBe("once");
 		await expect(call("metrics.record", {})).rejects.toThrow(TypeError);
 		expect(connectorCalls).toBe(1);

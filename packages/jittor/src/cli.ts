@@ -2,7 +2,7 @@
 import { fileURLToPath } from "node:url";
 import { BENCHMARKS_USAGE_LINES, runBenchmarksCommand } from "./cli-commands/benchmarks.ts";
 import { runCompactionCommand } from "./cli-commands/compaction.ts";
-import { CONTEXT_USAGE_LINES, formatContextAssessment, runContextCommand } from "./cli-commands/context.ts";
+import { CONTEXT_USAGE_LINES, formatContextAssessment, formatContextDelta, runContextCommand } from "./cli-commands/context.ts";
 import { formatCostByTask, formatMetricsQuery, METRICS_USAGE_LINES, runMetricsCommand } from "./cli-commands/metrics.ts";
 import { OP_USAGE_LINES, runOpCommand } from "./cli-commands/op.ts";
 import { formatRouterStatus, ROUTER_USAGE_LINES, runRouterCommand, runTelemetryCommand } from "./cli-commands/router.ts";
@@ -15,7 +15,7 @@ import { connectJittorClient } from "./vehicle/client.ts";
 // Re-exported for external callers (tests, daemon.ts's systemd-unit test) that import these
 // directly from cli.ts rather than reaching into src/cli-commands/*.
 export type { CliDependencies };
-export { formatContextAssessment, formatCostByTask, formatMetricsQuery, formatRouterStatus, renderSystemdUnit };
+export { formatContextAssessment, formatContextDelta, formatCostByTask, formatMetricsQuery, formatRouterStatus, renderSystemdUnit };
 
 const DEFAULT_DEPENDENCIES: CliDependencies = {
 	get client() {

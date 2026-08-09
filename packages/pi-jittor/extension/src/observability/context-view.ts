@@ -1,4 +1,4 @@
-import type { ContextSegment } from "@danypops/jittor";
+import type { ContextDelta, ContextSegment } from "@danypops/jittor";
 import type { ExtensionCommandContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { matchesKey, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import {
@@ -77,6 +77,26 @@ function percentOf(part: number, whole: number): string {
 	return whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : "—";
 }
 
+function contextDeltaLines(delta: ContextDelta): string[] {
+	const lifecycle = new Map<string, number>();
+	for (const change of delta.changes) lifecycle.set(change.lifecycle, (lifecycle.get(change.lifecycle) ?? 0) + 1);
+	const lifecycleText = [...lifecycle.entries()].map(([name, count]) => `${name} ${count}`).join(" · ") || "none";
+	const growthText = delta.growthBySource
+		.filter((growth) => growth.deltaTokens !== 0)
+		.map((growth) => `${growth.source} ${growth.deltaTokens > 0 ? "+" : ""}${growth.deltaTokens.toLocaleString()} tok`)
+		.join(" · ");
+	const changed = delta.firstChangedSegment
+		? `first change: ${delta.firstChangedSegment.source} @ request ${delta.firstChangedSegment.requestPosition ?? "historical"}`
+		: delta.resetReason
+			? `comparison reset: ${delta.resetReason}`
+			: "request structure unchanged";
+	return [
+		`Stable prefix ${delta.stablePrefixTokens.toLocaleString()} tok · ${changed}`,
+		`Lifecycle ${lifecycleText} · growth ${growthText || "none"}${delta.truncated ? " · bounded snapshot (truncated)" : ""}`,
+		"Stable-prefix correlation is structural evidence, not provider cache proof.",
+	];
+}
+
 /** Folds each segment's confidence tier into its label so it survives Malevich's confidence-unaware row builder. */
 function withConfidenceLabel(segment: ContextSegment): MalevichContextSegment {
 	return {
@@ -101,6 +121,7 @@ class ContextViewport {
 		private readonly tui: TUI,
 		private readonly theme: Theme,
 		private readonly breakdown: ContextBreakdown,
+		private readonly delta: ContextDelta | null,
 		private readonly close: () => void,
 	) {
 		// Heaviest-first: Malevich renders segments in the order given, so sorting by weight for a
@@ -156,6 +177,9 @@ class ContextViewport {
 			);
 		}
 		lines.push(theme.fg("dim", "Exact-text items name the model tokenizer; ≈ uses char/4; provider request totals remain aggregate."));
+		if (this.delta) {
+			for (const line of contextDeltaLines(this.delta)) lines.push(truncateToWidth(theme.fg("muted", line), contentWidth, ""));
+		}
 		lines.push("");
 
 		const rowsTheme: ContextRowsTheme = { colorFor, header: (s) => theme.bold(s) };
@@ -227,10 +251,14 @@ class ContextViewport {
 }
 
 /** Interactive scrollable Context Hub view in TUI mode; the same plain-text report as /context's non-interactive path otherwise. */
-export async function showContextView(ctx: ExtensionCommandContext, breakdown: ContextBreakdown): Promise<void> {
+export async function showContextView(
+	ctx: ExtensionCommandContext,
+	breakdown: ContextBreakdown,
+	delta: ContextDelta | null = null,
+): Promise<void> {
 	if (ctx.mode !== "tui") {
-		ctx.ui.notify(buildContextReport(breakdown), "info");
+		ctx.ui.notify([buildContextReport(breakdown), ...(delta ? ["", ...contextDeltaLines(delta)] : [])].join("\n"), "info");
 		return;
 	}
-	await ctx.ui.custom<void>((tui, theme, _keybindings, done) => new ContextViewport(tui, theme, breakdown, done));
+	await ctx.ui.custom<void>((tui, theme, _keybindings, done) => new ContextViewport(tui, theme, breakdown, delta, done));
 }

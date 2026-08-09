@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { formatCostByTask, formatMetricsQuery, formatRouterStatus, runCli } from "../src/cli.ts";
+import { formatContextDelta, formatCostByTask, formatMetricsQuery, formatRouterStatus, runCli } from "../src/cli.ts";
+import type { ContextDelta } from "../src/observability/context-delta.ts";
 import type { ContextAssessment } from "../src/observability/context-telemetry.ts";
 import type { StoredMetricObservation } from "../src/observability/metric.ts";
 import type { TaskCostSummary } from "../src/observability/task-cost.ts";
@@ -58,6 +59,53 @@ describe("Jittor CLI context telemetry parity", () => {
 		expect(code).toBe(0);
 		expect(calls).toEqual([{ operation: "context.assess", input: { since: 1_000, until: 2_000 } }]);
 		expect(JSON.parse(output.join("\n"))).toEqual(summary);
+	});
+
+	it("queries the latest context delta with machine and bounded human parity", async () => {
+		const sessionId = "q".repeat(32);
+		const delta: ContextDelta = {
+			previousSnapshotId: "s".repeat(32),
+			currentSnapshotId: "t".repeat(32),
+			capturedAt: 2_000,
+			truncated: false,
+			stablePrefixTokens: 100,
+			firstChangedSegment: { id: "b".repeat(32), source: "tool-definitions", requestPosition: 1 },
+			resetReason: null,
+			changes: [
+				{
+					id: "b".repeat(32),
+					source: "tool-definitions",
+					lifecycle: "changed",
+					previousTokens: 50,
+					currentTokens: 60,
+					deltaTokens: 10,
+					requestPosition: 1,
+				},
+			],
+			growthBySource: [{ source: "tool-definitions", deltaTokens: 10 }],
+		};
+		const output: string[] = [];
+		const calls: Array<{ operation: string; input: unknown }> = [];
+		const client = {
+			async call(operation: string, input: unknown) {
+				calls.push({ operation, input });
+				return delta;
+			},
+		};
+		const deps = {
+			client: client as never,
+			stdout: (line: string) => output.push(line),
+			stderr: () => {},
+			systemctl: () => {},
+			installService: () => {},
+			serve: async () => {},
+		};
+		expect(await runCli(["context", "delta", "--session-id", sessionId, "--json"], deps)).toBe(0);
+		expect(calls).toEqual([{ operation: "context.delta", input: { session_id: sessionId } }]);
+		expect(JSON.parse(output.pop()!)).toEqual(delta);
+		expect(formatContextDelta(delta)).toContain("Stable prefix: 100 tokens");
+		expect(formatContextDelta(delta)).toContain("first change tool-definitions at request position 1");
+		expect(formatContextDelta(delta)).toContain("tool-definitions +10 tokens");
 	});
 
 	it("exposes benchmark refresh and query through independent JSON and human presenters", async () => {
