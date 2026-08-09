@@ -161,6 +161,23 @@ interface PiRouteModel {
 	cost?: { input?: number; output?: number };
 }
 
+/**
+ * Pi's own `--models`/`enabledModels` scoping (`ctx.scopedModels`, the same set the `/scoped-models`
+ * command shows) is the authority for which models a session may actually use -- e.g. a "work"
+ * profile scoped to one provider/model set versus a "personal" profile scoped to a different one.
+ * `ctx.modelRegistry.getAvailable()` enumerates every authenticated model on the host regardless of
+ * that restriction (Pi's own docs warn against using it for a model picker for exactly this reason:
+ * "instead of enumerating the whole catalogue via ctx.modelRegistry.getAvailable()"). Every Jittor
+ * call site that builds a candidate/route set for routing or ranking must prefer the scoped set
+ * when one is configured, or a scoped session keeps seeing -- and can be automatically routed onto
+ * -- another profile's models. An empty scopedModels list means "no scoping configured" (matching
+ * Pi's own semantics), not "scoped to nothing", so it still falls back to the full catalog.
+ */
+function scopedOrAvailableModels(ctx: ExtensionContext): PiRouteModel[] {
+	if (ctx.scopedModels.length > 0) return ctx.scopedModels.map((entry) => entry.model as PiRouteModel);
+	return ctx.modelRegistry.getAvailable() as PiRouteModel[];
+}
+
 const THINKING_DESCENDING = ["max", "xhigh", "high", "medium", "low", "minimal", "off"] as const;
 
 function supportsThinking(model: PiRouteModel, level: string): boolean {
@@ -237,7 +254,7 @@ async function syncAvailableRoutes(pi: ExtensionAPI, client: JittorExtensionClie
 		await client.call("router.available_routes", { routes: [], session_id, ...secret });
 		return;
 	}
-	const models = ctx.modelRegistry.getAvailable() as PiRouteModel[];
+	const models = scopedOrAvailableModels(ctx);
 	const routes = routesFromPi(models, ctx.model as PiRouteModel, pi.getThinkingLevel());
 	await client.call("router.available_routes", { routes, session_id, ...secret });
 }
@@ -569,7 +586,7 @@ export function registerJittorExtension(
 					ctx.ui.notify("Usage: /jittor benchmarks [coding|general] [research|planning|general]", "warning");
 					return;
 				}
-				const candidates = benchmarkCandidatesFromPi(ctx.modelRegistry.getAvailable() as PiRouteModel[], pi.getThinkingLevel());
+				const candidates = benchmarkCandidatesFromPi(scopedOrAvailableModels(ctx), pi.getThinkingLevel());
 				await showBenchmarkPanel(
 					ctx,
 					client,

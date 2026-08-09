@@ -694,6 +694,33 @@ describe("Jittor Pi actuator", () => {
 		expect(routerCalls.every((call) => (call.input as Record<string, unknown>).session_id === "test-session")).toBe(true);
 	});
 
+	it("restricts synced routes to Pi's own scoped-models set instead of leaking every authenticated model from another profile's scope", async () => {
+		// Real-world shape: a "work" Pi profile configured with --models/enabledModels scoped to its
+		// own google-vertex model, while the same authenticated daemon/host also has a "personal"
+		// profile's openrouter model available in the full catalog. ctx.scopedModels ("the same set the
+		// /scoped-models command shows", per Pi's own docs) is the authority for what this session may
+		// actually use; ctx.modelRegistry.getAvailable() enumerates every authenticated model regardless
+		// of that restriction and must never be used directly wherever a scope is configured.
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, { provider: "google-vertex", id: "gemini-work" });
+		(app.ctx.modelRegistry as { getAvailable(): unknown[] }).getAvailable = () => [
+			{ provider: "google-vertex", id: "gemini-work" },
+			{ provider: "openrouter", id: "openai/gpt-4.1-mini" }, // belongs only to the personal profile's scope
+		];
+		(app.ctx as unknown as { scopedModels: Array<{ model: { provider: string; id: string } }> }).scopedModels = [
+			{ model: { provider: "google-vertex", id: "gemini-work" } },
+		];
+
+		await app.handlers.get("session_start")![0]!({}, app.ctx);
+
+		const availableRoutesCall = client.calls.filter((call) => call.operation === "router.available_routes").at(-1)!;
+		const routedIdentities = (availableRoutesCall.input as { routes: Array<{ provider: string; model: string }> }).routes.map(
+			(route) => `${route.provider}/${route.model}`,
+		);
+		expect(routedIdentities).not.toContain("openrouter/openai/gpt-4.1-mini");
+		expect(routedIdentities.every((identity) => identity.startsWith("google-vertex/"))).toBe(true);
+	});
+
 	it("registers this Pi session's identity at session_start, forwards its secret on router mutations, and releases it at shutdown", async () => {
 		const client = new FakeClient();
 		const app = harness(client);
