@@ -46,7 +46,8 @@ describe("benchmark recommendation TUI", () => {
 		expect(lines.every((line) => visibleWidth(line) <= 48)).toBe(true);
 		expect(lines.join("\n")).toContain("ADVISORY");
 		expect(lines.join("\n")).toContain("more candidates omitted");
-		expect(lines.filter((line) => /^ \d+\./.test(line)).length).toBe(BENCHMARK_TUI_MAX_CANDIDATES);
+		expect(lines.filter((line) => /^\d+\.\s/.test(line)).length).toBe(BENCHMARK_TUI_MAX_CANDIDATES);
+		expect(lines.join("\n")).toContain("Candidate / evidence");
 	});
 
 	it("shows utility components confidence local sample evidence and provenance freshness", () => {

@@ -1,6 +1,7 @@
 import { USAGE_PERIODS, type UsagePeriod } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { BorderedSelectPanel, Menu, type MenuTheme, type TextMeasure } from "malevich-tui-components";
 import type { CodexRecoveryControl, EnforcementControl, UsageBudgetControl } from "./settings.ts";
 
 export interface SettingsSnapshot {
@@ -56,16 +57,53 @@ export function settingsSnapshot(
 	};
 }
 
+const hostTextMeasure: TextMeasure = { visibleWidth, truncateToWidth };
+
+function menuTheme(theme: SettingsTheme): MenuTheme {
+	return {
+		border: () => "",
+		selected: (text) => theme.fg("accent", text),
+		normal: (text) => text,
+		dim: (text) => theme.fg("dim", text),
+		title: theme.bold,
+	};
+}
+
+function createSettingsPanel(
+	snapshot: SettingsSnapshot,
+	theme: SettingsTheme,
+	onAction: (action: SettingsAction) => void,
+	selected = 0,
+): BorderedSelectPanel {
+	const menu = new Menu({
+		items: SETTINGS_KEYS.map((key) => ({ label: rowText(key, snapshot, theme), action: () => onAction({ kind: "activate", key }) })),
+		theme: menuTheme(theme),
+		onClose: () => onAction({ kind: "close" }),
+		measure: hostTextMeasure,
+		matchesKey: (data, key) => {
+			if (key === "enter") return matchesKey(data, "enter") || matchesKey(data, "space");
+			if (key === "escape") return matchesKey(data, "escape") || matchesKey(data, "ctrl+c");
+			if (key === "up") return matchesKey(data, "up");
+			if (key === "down") return matchesKey(data, "down");
+			return false;
+		},
+	});
+	for (let index = 0; index < selected; index += 1) menu.handleInput("\x1b[B");
+	return new BorderedSelectPanel({
+		title: "Jittor Settings",
+		list: menu,
+		helpText: "Token budgets are user values; provider quotas remain separate. · ↑/↓ select · Enter edit · Esc close",
+		theme: {
+			border: (text) => theme.fg("borderMuted", text),
+			title: theme.bold,
+			help: (text) => theme.fg("dim", text),
+		},
+		measure: hostTextMeasure,
+	});
+}
+
 export function renderSettingsView(snapshot: SettingsSnapshot, selected: number, width: number, theme: SettingsTheme): string[] {
-	const safeWidth = Math.max(20, width);
-	const lines = [theme.bold("Jittor Settings"), theme.fg("dim", "Token budgets are user values; provider quotas remain separate."), ""];
-	for (let index = 0; index < SETTINGS_KEYS.length; index += 1) {
-		const selectedRow = index === selected;
-		const prefix = selectedRow ? theme.fg("accent", "› ") : "  ";
-		lines.push(`${prefix}${rowText(SETTINGS_KEYS[index]!, snapshot, theme)}`);
-	}
-	lines.push("", theme.fg("dim", "↑/↓ select · Enter edit · Esc close"));
-	return lines.map((line) => (visibleWidth(line) <= safeWidth ? line : truncateToWidth(line, safeWidth, "…")));
+	return createSettingsPanel(snapshot, theme, () => undefined, Math.max(0, selected)).render(Math.max(20, width));
 }
 
 function plainTheme(): SettingsTheme {
@@ -104,33 +142,20 @@ export async function showSettingsPanel(
 	},
 ): Promise<void> {
 	if (ctx.mode !== "tui") {
-		ctx.ui.notify(
-			renderSettingsView(settingsSnapshot(enforcement, recovery, budgets), -1, 100, plainTheme())
-				.slice(0, -2)
-				.join("\n"),
-			"info",
-		);
+		const snapshot = settingsSnapshot(enforcement, recovery, budgets);
+		ctx.ui.notify(["Jittor Settings", ...SETTINGS_KEYS.map((key) => rowText(key, snapshot, plainTheme()))].join("\n"), "info");
 		return;
 	}
 	for (;;) {
 		const snapshot = settingsSnapshot(enforcement, recovery, budgets);
 		const action = await ctx.ui.custom<SettingsAction>((tui, theme, _keybindings, done) => {
-			let selected = 0;
+			const panel = createSettingsPanel(snapshot, theme, done);
 			return {
-				invalidate() {},
-				render(width: number): string[] {
-					return renderSettingsView(snapshot, selected, width, theme);
-				},
-				handleInput(data: string): void {
-					if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c") || data === "q") done({ kind: "close" });
-					else if (matchesKey(data, "up")) {
-						selected = (selected - 1 + SETTINGS_KEYS.length) % SETTINGS_KEYS.length;
-						tui.requestRender();
-					} else if (matchesKey(data, "down")) {
-						selected = (selected + 1) % SETTINGS_KEYS.length;
-						tui.requestRender();
-					} else if (matchesKey(data, "return") || matchesKey(data, "enter") || matchesKey(data, "space"))
-						done({ kind: "activate", key: SETTINGS_KEYS[selected]! });
+				invalidate: () => panel.invalidate(),
+				render: (width) => panel.render(width),
+				handleInput(data: string) {
+					panel.handleInput(data);
+					tui.requestRender();
 				},
 			};
 		});

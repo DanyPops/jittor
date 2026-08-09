@@ -14,7 +14,8 @@ import {
 	type UtilityComponentName,
 } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { BorderedSelectPanel, Table, type TextMeasure } from "malevich-tui-components";
 import { sessionSecretField } from "./session-identity.ts";
 
 export interface BenchmarkPanelClient {
@@ -36,18 +37,25 @@ function componentText(item: RankedModel): string {
 		.join(" · ");
 }
 
-function candidateLines(item: RankedModel, index: number, currentIdentity: string): string[] {
-	const current = item.identity.startsWith(`${currentIdentity}:`);
-	const localSamples = item.components.find((component) => component.name === "reliability")?.evidenceCount ?? 0;
-	const provenance = item.provenance
-		.slice(0, BENCHMARK_TUI_MAX_PROVENANCE_PER_CANDIDATE)
-		.map((source) => `${source.sourceId}@${source.revision} ${source.freshness}`)
-		.join(" · ");
-	return [
-		` ${index + 1}. ${item.identity}${index === 0 ? "  recommended" : ""}${current ? "  current" : ""}`,
-		`    utility ${item.utility === null ? "?" : item.utility.toFixed(3)} · confidence ${(item.confidence * 100).toFixed(0)}% · ${componentText(item)}`,
-		`    local n=${localSamples}${provenance ? ` · ${provenance}` : " · no external provenance"}`,
-	];
+const hostTextMeasure: TextMeasure = { visibleWidth, truncateToWidth };
+
+function benchmarkRows(shown: RankedModel[], currentIdentity: string): Record<string, string>[] {
+	return shown.flatMap((item, index) => {
+		const current = item.identity.startsWith(`${currentIdentity}:`);
+		const localSamples = item.components.find((component) => component.name === "reliability")?.evidenceCount ?? 0;
+		const provenance = item.provenance
+			.slice(0, BENCHMARK_TUI_MAX_PROVENANCE_PER_CANDIDATE)
+			.map((source) => `${source.sourceId}@${source.revision} ${source.freshness}`)
+			.join(" · ");
+		return [
+			{ rank: `${index + 1}.`, detail: `${item.identity}${index === 0 ? "  recommended" : ""}${current ? "  current" : ""}` },
+			{
+				rank: "",
+				detail: `utility ${item.utility === null ? "?" : item.utility.toFixed(3)} · confidence ${(item.confidence * 100).toFixed(0)}% · ${componentText(item)}`,
+			},
+			{ rank: "", detail: `local n=${localSamples}${provenance ? ` · ${provenance}` : " · no external provenance"}` },
+		];
+	});
 }
 
 export function renderBenchmarkView(result: ModelRankingResult, currentIdentity: string, width: number, theme: BenchmarkTheme): string[] {
@@ -61,21 +69,42 @@ export function renderBenchmarkView(result: ModelRankingResult, currentIdentity:
 			: recommended && currentIndex === 0
 				? "Current model is the top recommendation."
 				: "Current model is outside the ranked candidates.";
-	const lines = [
-		theme.fg("borderMuted", "─".repeat(safeWidth)),
-		theme.bold("Jittor Benchmark Recommendations"),
-		result.scopeAuthority === "exact-session"
-			? "Scope: exact session"
-			: "Scope: available models · ADVISORY (exact session scope unavailable)",
-		`Domain: ${result.domain} · Type: ${result.type} · evidence ${result.completeness}`,
-		reason,
-		...shown.flatMap((item, index) => candidateLines(item, index, currentIdentity)),
-		...(result.ranked.length > shown.length ? [` … ${result.ranked.length - shown.length} more candidates omitted`] : []),
-		...(result.scopeWarning ? [result.scopeWarning] : []),
-		theme.fg("dim", "r refresh · Esc close"),
-		theme.fg("borderMuted", "─".repeat(safeWidth)),
-	];
-	return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
+	const table = new Table({
+		columns: [{ header: "#", key: "rank", width: 4 }, { header: "Candidate / evidence", key: "detail" }],
+		rows: benchmarkRows(shown, currentIdentity),
+		headerStyle: theme.bold,
+		measure: hostTextMeasure,
+	});
+	const content = {
+		invalidate: () => table.invalidate(),
+		render: (availableWidth: number): string[] => [
+			truncateToWidth(
+				result.scopeAuthority === "exact-session"
+					? "Scope: exact session"
+					: "Scope: available models · ADVISORY (exact session scope unavailable)",
+				availableWidth,
+				"…",
+			),
+			truncateToWidth(`Domain: ${result.domain} · Type: ${result.type} · evidence ${result.completeness}`, availableWidth, "…"),
+			truncateToWidth(reason, availableWidth, "…"),
+			...table.render(availableWidth),
+			...(result.ranked.length > shown.length
+				? [truncateToWidth(`… ${result.ranked.length - shown.length} more candidates omitted`, availableWidth, "…")]
+				: []),
+			...(result.scopeWarning ? [truncateToWidth(result.scopeWarning, availableWidth, "…")] : []),
+		],
+	};
+	return new BorderedSelectPanel({
+		title: "Jittor Benchmark Recommendations",
+		list: content,
+		helpText: "r refresh · Esc close",
+		theme: {
+			border: (text) => theme.fg("borderMuted", text),
+			title: theme.bold,
+			help: (text) => theme.fg("dim", text),
+		},
+		measure: hostTextMeasure,
+	}).render(safeWidth);
 }
 
 export async function showBenchmarkPanel(

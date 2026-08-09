@@ -52,6 +52,30 @@ describe("Jittor settings TUI", () => {
 		expect(lines.every((line) => visibleWidth(line) <= 40)).toBe(true);
 	});
 
+	it("delegates navigation and activation to the Malevich menu", async () => {
+		const settings = control();
+		let panels = 0;
+		const ctx = {
+			mode: "tui",
+			ui: {
+				async custom(factory: Function) {
+					let result: unknown;
+					const component = factory({ requestRender() {} }, theme, {}, (value: unknown) => {
+						result = value;
+					});
+					if (panels++ === 0) {
+						component.handleInput("\x1b[B");
+						component.handleInput("\r");
+					} else component.handleInput("\x1b");
+					return result;
+				},
+			},
+		} as unknown as ExtensionCommandContext;
+		await showSettingsPanel(ctx, settings, settings, settings);
+		expect(settings.values.footerEnabled).toBe(false);
+		expect(panels).toBe(2);
+	});
+
 	it("requires confirmation for weaker enforcement and recovery changes", async () => {
 		const settings = control();
 		const actions = [{ kind: "activate", key: "enforcement" }, { kind: "activate", key: "recovery" }, { kind: "close" }];
