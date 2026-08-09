@@ -637,6 +637,7 @@ describe("Jittor Pi actuator", () => {
 				cacheWriteCostUsd: 0,
 				cacheWriteCostBasis: "provider-reported",
 			},
+			stablePrefixChurn: [],
 			missedOpportunities: [],
 			truncated: false,
 		};

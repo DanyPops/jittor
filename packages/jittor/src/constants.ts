@@ -73,6 +73,8 @@ export const CACHE_ECONOMICS_QUERY_LIMIT = 10_000;
 export const CACHE_ECONOMICS_MAX_MODEL_GROUPS = 500;
 /** Bounds the per-task rollup the same way CACHE_ECONOMICS_MAX_MODEL_GROUPS bounds the per-model one -- applied post-hoc (sorted by activity, then sliced) rather than at row-intake time, since realistic task cardinality in one window is small. */
 export const CACHE_ECONOMICS_MAX_TASK_GROUPS = 500;
+/** Bounds the stable-prefix-churn time series; the most recent points are kept (oldest dropped first) since a trend view cares most about what's recent. */
+export const CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS = 500;
 export const CACHE_ECONOMICS_MAX_MISSED_OPPORTUNITIES = 100;
 /** How soon after a context-prefix reset (session/provider/model change) a same-session cache-write still counts as a candidate cache-loss consequence of that reset, not an unrelated later write. */
 export const CACHE_ECONOMICS_LOSS_CORRELATION_WINDOW_MS = 5 * MILLISECONDS_PER_MINUTE;

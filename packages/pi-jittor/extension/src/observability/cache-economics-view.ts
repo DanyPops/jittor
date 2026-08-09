@@ -58,6 +58,14 @@ export function renderCacheEconomicsView(summary: CacheEconomicsSummary): string
 			`Unattributed (no task focused): read ${unattributed.cacheReadTokens.toLocaleString()} tok (${costField(unattributed.cacheReadCostUsd, unattributed.cacheReadCostBasis)}) · write ${unattributed.cacheWriteTokens.toLocaleString()} tok (${costField(unattributed.cacheWriteCostUsd, unattributed.cacheWriteCostBasis)})`,
 		);
 	}
+	if (summary.stablePrefixChurn.length > 0) {
+		lines.push(`Stable-prefix churn (${summary.stablePrefixChurn.length} snapshot(s), oldest first):`);
+		for (const point of summary.stablePrefixChurn) {
+			lines.push(
+				`- ${new Date(point.observedAt).toISOString()} session ${point.sessionId}: ${point.stablePrefixTokens.toLocaleString()} tok${point.resetReason === null ? "" : ` (${point.resetReason} reset)`}`,
+			);
+		}
+	}
 	if (summary.missedOpportunities.length > 0) {
 		lines.push(`Candidate missed-cache opportunities: ${summary.missedOpportunities.length}`);
 		for (const candidate of summary.missedOpportunities.slice(0, 10)) {

@@ -543,6 +543,7 @@ describe("Jittor CLI context telemetry parity", () => {
 				cacheWriteCostBasis: "provider-reported",
 				catalogFreshness: null,
 			},
+			stablePrefixChurn: [{ sessionId: "session-1", observedAt: 500, stablePrefixTokens: 12_000, resetReason: "model-changed" }],
 			missedOpportunities: [
 				{
 					sessionId: "session-1",
@@ -564,6 +565,9 @@ describe("Jittor CLI context telemetry parity", () => {
 		expect(text).toContain("ship-feature-x");
 		expect(text).toContain("Unattributed cache activity");
 		expect(text).toContain("stale catalog");
+		expect(text).toContain("Stable-prefix churn");
+		expect(text).toContain("12,000 tok");
+		expect(text).toContain("model-changed");
 	});
 
 	it("renders actionable human output and rejects invalid bounds", async () => {

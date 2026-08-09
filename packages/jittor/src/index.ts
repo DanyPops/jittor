@@ -23,6 +23,7 @@ export {
 	type CacheEconomicsModelSummary,
 	type CacheEconomicsPricing,
 	type CacheEconomicsPricingLookup,
+	type CacheEconomicsStablePrefixPoint,
 	type CacheEconomicsSummary,
 	type CacheEconomicsSummaryOptions,
 	type CacheEconomicsTaskSummary,

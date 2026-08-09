@@ -2,6 +2,7 @@ import {
 	CACHE_ECONOMICS_LOSS_CORRELATION_WINDOW_MS,
 	CACHE_ECONOMICS_MAX_MISSED_OPPORTUNITIES,
 	CACHE_ECONOMICS_MAX_MODEL_GROUPS,
+	CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS,
 	CACHE_ECONOMICS_MAX_TASK_GROUPS,
 	CATALOG_PRICE_TOKEN_UNIT,
 } from "../constants.ts";
@@ -101,6 +102,19 @@ export interface CacheEconomicsUnattributedActivity {
 	catalogFreshness: "fresh" | "stale" | null;
 }
 
+/**
+ * One snapshot's own stable-prefix-token measurement at one point in time -- the same raw evidence
+ * findMissedOpportunities correlates internally, made directly visible instead of only ever feeding
+ * a derived diagnostic. A sharp drop, especially alongside a non-null resetReason, is what a missed
+ * cache write actually looks like in this series; still just evidence, not a causal claim.
+ */
+export interface CacheEconomicsStablePrefixPoint {
+	sessionId: string;
+	observedAt: number;
+	stablePrefixTokens: number;
+	resetReason: ContextPrefixResetReason;
+}
+
 /** A context-prefix reset (session/provider/model change) followed shortly by a same-session cache-write is *evidence*, not proof, that the reset forced a cache rewrite -- correlation, never asserted causality. */
 export interface CacheEconomicsMissedOpportunity {
 	sessionId: string;
@@ -118,7 +132,9 @@ export interface CacheEconomicsSummary {
 	tasks: CacheEconomicsTaskSummary[];
 	unattributedCacheActivity: CacheEconomicsUnattributedActivity;
 	missedOpportunities: CacheEconomicsMissedOpportunity[];
-	/** True when the model-group list, the task-group list, or the missed-opportunity list was cut off at its bound. */
+	/** Chronological (oldest first), bounded to the most recent CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS. */
+	stablePrefixChurn: CacheEconomicsStablePrefixPoint[];
+	/** True when the model-group list, the task-group list, the stable-prefix-churn series, or the missed-opportunity list was cut off at its bound. */
 	truncated: boolean;
 }
 
@@ -420,6 +436,25 @@ function resetEventFromRow(row: StoredMetricObservation): ResetEvent | null {
 	return { sessionId: row.scope, occurredAt: row.observedAt, resetReason: resetReason as Exclude<ContextPrefixResetReason, null> };
 }
 
+function stablePrefixChurnFrom(snapshotRows: StoredMetricObservation[]): CacheEconomicsStablePrefixPoint[] {
+	return snapshotRows
+		.filter(
+			(row): row is StoredMetricObservation =>
+				row.source === "pi-context-snapshot" &&
+				row.metric === "snapshot" &&
+				typeof row.value === "number" &&
+				typeof row.scope === "string" &&
+				row.scope.length > 0,
+		)
+		.map((row) => ({
+			sessionId: row.scope as string,
+			observedAt: row.observedAt,
+			stablePrefixTokens: row.value as number,
+			resetReason: (row.attributes.resetReason ?? null) as ContextPrefixResetReason,
+		}))
+		.sort((left, right) => left.observedAt - right.observedAt);
+}
+
 function findMissedOpportunities(
 	usageRows: StoredMetricObservation[],
 	snapshotRows: StoredMetricObservation[],
@@ -563,12 +598,17 @@ export function buildCacheEconomicsSummary(
 		catalogFreshness: combineFreshness(unattributedRuns.map((run) => run.catalogFreshness)),
 	};
 
+	const windowedSnapshotRows = snapshotRows.filter((row) => row.observedAt >= options.since && row.observedAt <= options.until);
 	const allMissed = findMissedOpportunities(
 		usageRows.filter((row) => row.observedAt >= options.since && row.observedAt <= options.until),
-		snapshotRows.filter((row) => row.observedAt >= options.since && row.observedAt <= options.until),
+		windowedSnapshotRows,
 	);
 	const missedTruncated = allMissed.length > CACHE_ECONOMICS_MAX_MISSED_OPPORTUNITIES;
 	const missedOpportunities = allMissed.slice(0, CACHE_ECONOMICS_MAX_MISSED_OPPORTUNITIES);
+
+	const allChurn = stablePrefixChurnFrom(windowedSnapshotRows);
+	const churnTruncated = allChurn.length > CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS;
+	const stablePrefixChurn = allChurn.slice(-CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS);
 
 	return {
 		since: options.since,
@@ -577,6 +617,7 @@ export function buildCacheEconomicsSummary(
 		tasks,
 		unattributedCacheActivity,
 		missedOpportunities,
-		truncated: modelGroupsTruncated || taskGroupsTruncated || missedTruncated,
+		stablePrefixChurn,
+		truncated: modelGroupsTruncated || taskGroupsTruncated || missedTruncated || churnTruncated,
 	};
 }

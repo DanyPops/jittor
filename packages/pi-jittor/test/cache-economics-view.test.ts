@@ -17,6 +17,7 @@ function summary(overrides: Partial<CacheEconomicsSummary> = {}): CacheEconomics
 			cacheWriteCostBasis: "provider-reported",
 			catalogFreshness: null,
 		},
+		stablePrefixChurn: [],
 		missedOpportunities: [],
 		truncated: false,
 		...overrides,
@@ -106,6 +107,27 @@ describe("cache economics view", () => {
 		expect(text).toContain("payback yes");
 		expect(text).toContain("Unattributed (no task focused)");
 		expect(text).toContain("42 tok");
+	});
+
+	it("surfaces stable-prefix-token churn over time, aligned with each snapshot's own reset reason", () => {
+		const lines = renderCacheEconomicsView(
+			summary({
+				stablePrefixChurn: [
+					{ sessionId: "session-1", observedAt: 1_000, stablePrefixTokens: 5_000, resetReason: null },
+					{ sessionId: "session-1", observedAt: 2_000, stablePrefixTokens: 500, resetReason: "model-changed" },
+				],
+			}),
+		);
+		const text = lines.join("\n");
+		expect(text).toContain("Stable-prefix churn");
+		expect(text).toContain("5,000 tok");
+		expect(text).toContain("500 tok");
+		expect(text).toContain("model-changed");
+	});
+
+	it("omits the stable-prefix-churn section entirely when there is no snapshot evidence in the window", () => {
+		const text = renderCacheEconomicsView(summary()).join("\n");
+		expect(text).not.toContain("Stable-prefix churn");
 	});
 
 	it("lists candidate missed-cache opportunities without asserting causality", () => {

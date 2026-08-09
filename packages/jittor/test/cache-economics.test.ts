@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS } from "../src/constants.ts";
 import {
 	buildCacheEconomicsSummary,
 	type CacheEconomicsPricing,
@@ -386,5 +387,40 @@ describe("cache economics", () => {
 	it("reports the requested window and an untruncated result for a normal bounded query", () => {
 		const summary = buildCacheEconomicsSummary([], [], noPricing, { since: 10, until: 20 });
 		expect(summary).toMatchObject({ since: 10, until: 20, models: [], missedOpportunities: [], truncated: false });
+	});
+
+	it("reports stable-prefix-token churn over time, aligned with each snapshot's own reset reason -- the evidence side of the correlation, made visible", () => {
+		const rows = [
+			snapshotHeaderRow({ observedAt: 1_000, scope: "session-1", value: 5_000, attributes: { resetReason: null } }),
+			snapshotHeaderRow({ observedAt: 2_000, scope: "session-1", value: 500, attributes: { resetReason: "model-changed" } }),
+		];
+		const summary = buildCacheEconomicsSummary([], rows, noPricing, { since: 0, until: 3_000 });
+		expect(summary.stablePrefixChurn).toEqual([
+			{ sessionId: "session-1", observedAt: 1_000, stablePrefixTokens: 5_000, resetReason: null },
+			{ sessionId: "session-1", observedAt: 2_000, stablePrefixTokens: 500, resetReason: "model-changed" },
+		]);
+	});
+
+	it("orders stable-prefix churn chronologically regardless of row arrival order, and ignores rows outside the window", () => {
+		const rows = [
+			snapshotHeaderRow({ observedAt: 2_000, scope: "session-1", value: 200, attributes: { resetReason: null } }),
+			snapshotHeaderRow({ observedAt: 500, scope: "session-1", value: 999, attributes: { resetReason: null } }), // before window
+			snapshotHeaderRow({ observedAt: 1_000, scope: "session-1", value: 100, attributes: { resetReason: null } }),
+		];
+		const summary = buildCacheEconomicsSummary([], rows, noPricing, { since: 1_000, until: 3_000 });
+		expect(summary.stablePrefixChurn.map((point) => point.observedAt)).toEqual([1_000, 2_000]);
+	});
+
+	it("bounds the number of reported stable-prefix churn points, keeping the most recent ones", () => {
+		const rows = Array.from({ length: CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS + 5 }, (_unused, index) =>
+			snapshotHeaderRow({ observedAt: 1_000 + index, scope: "session-1", value: index, attributes: { resetReason: null } }),
+		);
+		const summary = buildCacheEconomicsSummary([], rows, noPricing, {
+			since: 0,
+			until: 1_000 + CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS + 10,
+		});
+		expect(summary.stablePrefixChurn).toHaveLength(CACHE_ECONOMICS_MAX_STABLE_PREFIX_POINTS);
+		expect(summary.stablePrefixChurn[0]!.observedAt).toBe(1_000 + 5);
+		expect(summary.truncated).toBe(true);
 	});
 });

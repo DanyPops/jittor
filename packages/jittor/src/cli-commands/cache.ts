@@ -1,6 +1,7 @@
 import type {
 	CacheEconomicsAggregateTotals,
 	CacheEconomicsModelSummary,
+	CacheEconomicsStablePrefixPoint,
 	CacheEconomicsSummary,
 	CacheEconomicsTaskSummary,
 	CacheEconomicsUnattributedActivity,
@@ -81,6 +82,10 @@ function formatUnattributedLine(activity: CacheEconomicsUnattributedActivity): s
 	].join(" · ");
 }
 
+function formatChurnPoint(point: CacheEconomicsStablePrefixPoint): string {
+	return `- ${new Date(point.observedAt).toISOString()} session ${humanField(point.sessionId)}: ${point.stablePrefixTokens.toLocaleString()} tok${point.resetReason === null ? "" : ` (${point.resetReason} reset)`}`;
+}
+
 export function formatCacheEconomics(summary: CacheEconomicsSummary): string {
 	const lines = [
 		`Cache economics: ${summary.models.length.toLocaleString()} model(s)${summary.truncated ? " (query limit reached; totals are a lower bound)" : ""}`,
@@ -88,6 +93,12 @@ export function formatCacheEconomics(summary: CacheEconomicsSummary): string {
 		`By task: ${summary.tasks.length.toLocaleString()} task(s)`,
 		...summary.tasks.map(formatTaskLine),
 		formatUnattributedLine(summary.unattributedCacheActivity),
+		...(summary.stablePrefixChurn.length > 0
+			? [
+					`Stable-prefix churn (${summary.stablePrefixChurn.length.toLocaleString()} snapshot(s), oldest first):`,
+					...summary.stablePrefixChurn.map(formatChurnPoint),
+				]
+			: []),
 		`Candidate missed-cache opportunities: ${summary.missedOpportunities.length.toLocaleString()}`,
 		...summary.missedOpportunities.map(
 			(candidate) =>
