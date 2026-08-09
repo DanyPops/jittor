@@ -52,9 +52,10 @@ class CatalogCacheEconomicsPricing implements CacheEconomicsPricingLookup {
 
 	priceFor(provider: string, model: string, contextSizeTokens: number): CacheEconomicsPricing | null {
 		try {
-			const entry = this.catalog.query({ provider, model, limit: 1 }).entries[0];
+			const result = this.catalog.query({ provider, model, limit: 1 });
+			const entry = result.entries[0];
 			if (!entry?.pricing) return null;
-			return resolveTieredCatalogPrice(entry.pricing, contextSizeTokens);
+			return { ...resolveTieredCatalogPrice(entry.pricing, contextSizeTokens), freshness: result.freshness };
 		} catch {
 			return null;
 		}

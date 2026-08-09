@@ -492,6 +492,7 @@ describe("Jittor CLI context telemetry parity", () => {
 					cacheWritePremiumUsd: 0.15,
 					breakEvenReadTokens: 55_556,
 					paybackAchieved: true,
+					catalogFreshness: "stale",
 				},
 				{
 					provider: "openrouter",
@@ -510,6 +511,7 @@ describe("Jittor CLI context telemetry parity", () => {
 					cacheWritePremiumUsd: 0,
 					breakEvenReadTokens: 0,
 					paybackAchieved: null,
+					catalogFreshness: null,
 				},
 			],
 			tasks: [
@@ -529,6 +531,7 @@ describe("Jittor CLI context telemetry parity", () => {
 					cacheWritePremiumUsd: 0.15,
 					breakEvenReadTokens: 55_556,
 					paybackAchieved: true,
+					catalogFreshness: null,
 				},
 			],
 			unattributedCacheActivity: {
@@ -538,6 +541,7 @@ describe("Jittor CLI context telemetry parity", () => {
 				cacheReadCostBasis: "unknown",
 				cacheWriteCostUsd: 0,
 				cacheWriteCostBasis: "provider-reported",
+				catalogFreshness: null,
 			},
 			missedOpportunities: [
 				{
@@ -559,6 +563,7 @@ describe("Jittor CLI context telemetry parity", () => {
 		expect(text).toContain("model-changed");
 		expect(text).toContain("ship-feature-x");
 		expect(text).toContain("Unattributed cache activity");
+		expect(text).toContain("stale catalog");
 	});
 
 	it("renders actionable human output and rejects invalid bounds", async () => {

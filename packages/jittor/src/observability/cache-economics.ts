@@ -22,6 +22,8 @@ export interface CacheEconomicsPricing {
 	input?: number;
 	cacheRead?: number;
 	cacheWrite?: number;
+	/** Whether the catalog snapshot this price was resolved from was still fresh at query time. Only meaningful when this pricing is actually used for a catalog-estimate figure; the lookup may omit it (e.g. a fake with no notion of freshness). */
+	freshness?: "fresh" | "stale";
 }
 
 /**
@@ -63,6 +65,8 @@ export interface CacheEconomicsAggregateTotals {
 	breakEvenReadTokens: number | null;
 	/** Whether observed savings already met or exceeded the write premium. Null when there was no cache write to evaluate, or the comparison is undeterminable. */
 	paybackAchieved: boolean | null;
+	/** Worst ("stale" wins) freshness among every catalog-estimate figure this group actually used. Null when no catalog estimate was used at all -- everything was provider-reported, or nothing was derivable. Never set from a catalog price that was resolved but ended up unused (e.g. provider-reported cost took precedence). */
+	catalogFreshness: "fresh" | "stale" | null;
 }
 
 export interface CacheEconomicsModelSummary extends CacheEconomicsAggregateTotals {
@@ -94,6 +98,7 @@ export interface CacheEconomicsUnattributedActivity {
 	cacheReadCostBasis: CacheCostBasis;
 	cacheWriteCostUsd: number | null;
 	cacheWriteCostBasis: CacheCostBasis;
+	catalogFreshness: "fresh" | "stale" | null;
 }
 
 /** A context-prefix reset (session/provider/model change) followed shortly by a same-session cache-write is *evidence*, not proof, that the reset forced a cache rewrite -- correlation, never asserted causality. */
@@ -199,6 +204,17 @@ function combineNullableSum(values: Array<number | null>): number | null {
 	return total;
 }
 
+/** "stale" outvotes "fresh"; both outvote "never used a catalog estimate at all" (null). */
+function combineFreshness(values: Array<"fresh" | "stale" | undefined>): "fresh" | "stale" | null {
+	let result: "fresh" | "stale" | null = null;
+	for (const value of values) {
+		if (value === undefined) continue;
+		if (value === "stale") return "stale";
+		result = "fresh";
+	}
+	return result;
+}
+
 function actualCost(
 	tokens: number,
 	sawCost: boolean,
@@ -228,6 +244,8 @@ interface RunPricingResult {
 	counterfactualNoCacheCostUsd: number | null;
 	counterfactualBasis: CacheCostBasis;
 	cacheWritePremiumUsd: number | null;
+	/** This run's own catalog freshness, only when a catalog-estimate price actually ended up used for one of this run's figures; undefined otherwise (never fabricated from an unused lookup result). */
+	catalogFreshness: "fresh" | "stale" | undefined;
 }
 
 /**
@@ -265,6 +283,10 @@ function priceRun(run: RunAccumulator, pricing: CacheEconomicsPricingLookup): Ru
 	if (run.cacheWriteTokens === 0) cacheWritePremiumUsd = 0;
 	else if (baselineRate !== null && write.costUsd !== null) cacheWritePremiumUsd = write.costUsd - run.cacheWriteTokens * baselineRate;
 
+	const finalCounterfactualBasis = run.cacheReadTokens === 0 ? "provider-reported" : combineBasis(baselineBasis, counterfactualBasis);
+	const usedCatalog =
+		read.basis === "catalog-estimate" || write.basis === "catalog-estimate" || finalCounterfactualBasis === "catalog-estimate";
+
 	return {
 		provider: run.provider,
 		model: run.model,
@@ -279,8 +301,9 @@ function priceRun(run: RunAccumulator, pricing: CacheEconomicsPricingLookup): Ru
 		cacheWriteCostUsd: write.costUsd,
 		cacheWriteCostBasis: write.basis,
 		counterfactualNoCacheCostUsd,
-		counterfactualBasis: run.cacheReadTokens === 0 ? "provider-reported" : combineBasis(baselineBasis, counterfactualBasis),
+		counterfactualBasis: finalCounterfactualBasis,
 		cacheWritePremiumUsd,
+		catalogFreshness: usedCatalog ? catalogPrices?.freshness : undefined,
 	};
 }
 
@@ -362,6 +385,7 @@ function aggregateRunTotals(runs: RunPricingResult[], catalogContext: SingleMode
 		cacheWritePremiumUsd,
 		breakEvenReadTokens,
 		paybackAchieved,
+		catalogFreshness: combineFreshness(runs.map((run) => run.catalogFreshness)),
 	};
 }
 
@@ -536,6 +560,7 @@ export function buildCacheEconomicsSummary(
 		cacheReadCostBasis: unattributedCacheRead.basis,
 		cacheWriteCostUsd: unattributedCacheWrite.amount,
 		cacheWriteCostBasis: unattributedCacheWrite.basis,
+		catalogFreshness: combineFreshness(unattributedRuns.map((run) => run.catalogFreshness)),
 	};
 
 	const allMissed = findMissedOpportunities(

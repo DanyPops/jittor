@@ -15,6 +15,7 @@ function summary(overrides: Partial<CacheEconomicsSummary> = {}): CacheEconomics
 			cacheReadCostBasis: "provider-reported",
 			cacheWriteCostUsd: 0,
 			cacheWriteCostBasis: "provider-reported",
+			catalogFreshness: null,
 		},
 		missedOpportunities: [],
 		truncated: false,
@@ -49,6 +50,7 @@ describe("cache economics view", () => {
 						cacheWritePremiumUsd: 0.15,
 						breakEvenReadTokens: 55_556,
 						paybackAchieved: true,
+						catalogFreshness: "stale",
 					},
 				],
 			}),
@@ -59,6 +61,9 @@ describe("cache economics view", () => {
 		expect(text).toContain("$0.75 (est.)");
 		expect(text).toContain("savings $1.35");
 		expect(text).toContain("payback yes");
+		// The catalog-estimate write cost was resolved from a stale snapshot -- must be visibly distinguishable
+		// from a fresh one, not silently identical.
+		expect(text).toContain("stale catalog");
 	});
 
 	it("renders each task's read/write tokens and payback status, and separately surfaces unattributed activity", () => {
@@ -81,6 +86,7 @@ describe("cache economics view", () => {
 						cacheWritePremiumUsd: 0.15,
 						breakEvenReadTokens: 55_556,
 						paybackAchieved: true,
+						catalogFreshness: null,
 					},
 				],
 				unattributedCacheActivity: {
@@ -90,6 +96,7 @@ describe("cache economics view", () => {
 					cacheReadCostBasis: "unknown",
 					cacheWriteCostUsd: 0,
 					cacheWriteCostBasis: "provider-reported",
+					catalogFreshness: null,
 				},
 			}),
 		);

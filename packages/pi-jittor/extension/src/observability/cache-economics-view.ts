@@ -29,12 +29,16 @@ function aggregateFields(totals: CacheEconomicsAggregateTotals): string {
 	].join(" · ");
 }
 
+function freshnessSuffix(catalogFreshness: "fresh" | "stale" | null): string {
+	return catalogFreshness === "stale" ? " -- stale catalog snapshot used for the estimate(s) above" : "";
+}
+
 function modelLine(model: CacheEconomicsModelSummary): string {
-	return `${model.provider}/${model.model}: ${aggregateFields(model)}`;
+	return `${model.provider}/${model.model}: ${aggregateFields(model)}${freshnessSuffix(model.catalogFreshness)}`;
 }
 
 function taskLine(task: CacheEconomicsTaskSummary): string {
-	return `${task.taskId}: ${aggregateFields(task)}`;
+	return `${task.taskId}: ${aggregateFields(task)}${freshnessSuffix(task.catalogFreshness)}`;
 }
 
 /** Plain multi-line text, shared by TUI notify and non-TUI notify -- a full interactive panel is deferred; this already satisfies "bounded query plus Pi presentation" without a new widget. */

@@ -61,12 +61,16 @@ function formatAggregateFields(totals: CacheEconomicsAggregateTotals): string {
 	].join(" · ");
 }
 
+function formatFreshnessSuffix(catalogFreshness: "fresh" | "stale" | null): string {
+	return catalogFreshness === "stale" ? " (stale catalog snapshot used for the estimate(s) above)" : "";
+}
+
 function formatModelLine(model: CacheEconomicsModelSummary): string {
-	return `- ${humanField(model.provider)}/${humanField(model.model)}: ${formatAggregateFields(model)}`;
+	return `- ${humanField(model.provider)}/${humanField(model.model)}: ${formatAggregateFields(model)}${formatFreshnessSuffix(model.catalogFreshness)}`;
 }
 
 function formatTaskLine(task: CacheEconomicsTaskSummary): string {
-	return `- ${humanField(task.taskId)}: ${formatAggregateFields(task)}`;
+	return `- ${humanField(task.taskId)}: ${formatAggregateFields(task)}${formatFreshnessSuffix(task.catalogFreshness)}`;
 }
 
 function formatUnattributedLine(activity: CacheEconomicsUnattributedActivity): string {

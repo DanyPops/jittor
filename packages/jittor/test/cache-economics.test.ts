@@ -161,6 +161,49 @@ describe("cache economics", () => {
 		expect(model.cacheReadCostBasis).toBe("catalog-estimate");
 	});
 
+	it("reports no catalog freshness at all when every figure was provider-reported -- freshness is only a catalog-estimate concern", () => {
+		const rows = [
+			usageRow({ observedAt: 1_000, metric: "cache-read-tokens", value: 1_000 }),
+			usageRow({ observedAt: 1_000, metric: "cache-read-cost", value: 0.01, unit: "usd" }),
+		];
+		const summary = buildCacheEconomicsSummary(rows, [], noPricing, { since: 0, until: 2_000 });
+		expect(summary.models[0]!.catalogFreshness).toBeNull();
+	});
+
+	it("labels a catalog-estimate figure with the freshness of the catalog snapshot it was resolved from", () => {
+		const freshPricing: CacheEconomicsPricingLookup = { priceFor: () => ({ cacheRead: 0.3, freshness: "fresh" }) };
+		const stalePricing: CacheEconomicsPricingLookup = { priceFor: () => ({ cacheRead: 0.3, freshness: "stale" }) };
+		const rows = [usageRow({ observedAt: 1_000, metric: "cache-read-tokens", value: 1_000 })];
+		expect(buildCacheEconomicsSummary(rows, [], freshPricing, { since: 0, until: 2_000 }).models[0]!.catalogFreshness).toBe("fresh");
+		expect(buildCacheEconomicsSummary(rows, [], stalePricing, { since: 0, until: 2_000 }).models[0]!.catalogFreshness).toBe("stale");
+	});
+
+	it("lets a stale run outvote a fresh one -- worst observed freshness wins for a model that blends both", () => {
+		let call = 0;
+		const mixedPricing: CacheEconomicsPricingLookup = {
+			priceFor: () => {
+				call += 1;
+				return { cacheRead: 0.3, freshness: call === 1 ? "fresh" : "stale" };
+			},
+		};
+		const rows = [
+			usageRow({
+				observedAt: 1_000,
+				metric: "cache-read-tokens",
+				value: 1_000,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", runId: "run-1" },
+			}),
+			usageRow({
+				observedAt: 2_000,
+				metric: "cache-read-tokens",
+				value: 1_000,
+				attributes: { provider: "anthropic", model: "claude-sonnet-5", runId: "run-2" },
+			}),
+		];
+		const summary = buildCacheEconomicsSummary(rows, [], mixedPricing, { since: 0, until: 3_000 });
+		expect(summary.models[0]!.catalogFreshness).toBe("stale");
+	});
+
 	it("isolates economics per provider/model, since pricing and cache behavior differ by model", () => {
 		const rows = [
 			usageRow({ observedAt: 1_000, metric: "cache-read-tokens", value: 1_000 }),

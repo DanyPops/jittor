@@ -144,6 +144,48 @@ class TieredFixtureCatalog implements ModelCatalogController {
 	}
 }
 
+class StaleFixtureCatalog implements ModelCatalogController {
+	async refresh(): Promise<ModelCatalogStatus> {
+		return this.status();
+	}
+	status(): ModelCatalogStatus {
+		return { configured: true, ok: true, hasSnapshot: true, lastAttemptAt: 1, lastSuccessAt: 1, entries: 1, revision: "rev" };
+	}
+	query(input: ModelCatalogQuery = {}): ModelCatalogQueryResult {
+		const matches = input.provider === "anthropic" && input.model === "claude-sonnet-5";
+		return {
+			snapshotId: "rev",
+			provenance: {
+				sourceId: "models.dev",
+				sourceUrl: "https://models.dev/api.json",
+				revision: "rev",
+				retrievedAt: 1,
+				freshUntil: 2,
+				license: "MIT",
+			},
+			freshness: "stale",
+			completeness: "complete",
+			entries: matches
+				? [
+						{
+							provider: "anthropic",
+							model: "claude-sonnet-5",
+							canonical: "anthropic/claude-sonnet-5",
+							aliases: [],
+							name: "Claude Sonnet 5",
+							status: "active",
+							capabilities: { attachment: true, reasoning: true, toolCall: true, structuredOutput: true },
+							modalities: { input: ["text"], output: ["text"] },
+							limits: { context: 200_000, output: 8_000 },
+							pricing: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+							fieldAuthority: {},
+						},
+					]
+				: [],
+		};
+	}
+}
+
 function row(overrides: Partial<StoredMetricObservation> & { observedAt: number; metric: string; value: number }): StoredMetricObservation {
 	return {
 		id: 0,
@@ -285,5 +327,16 @@ describe("cache.economics operation", () => {
 		// run-small: 100,000 tok @ tier rate 0.3/1M = 0.03; run-large: 300,000 tok @ contextOver200k rate 0.1/1M = 0.03
 		expect(summary.models[0]!.cacheReadCostBasis).toBe("catalog-estimate");
 		expect(summary.models[0]!.cacheReadCostUsd).toBeCloseTo(0.03 + 0.03, 10);
+	});
+
+	it("labels a catalog-estimate figure as resolved from a stale catalog snapshot, end to end through the real query() freshness field", () => {
+		const store = new FakeMetricStore();
+		store.record(row({ observedAt: 1_000, metric: "cache-read-tokens", value: 1_000_000 }));
+		const freshOperations = cacheEconomicsOperations(store, new FixtureCatalog());
+		const staleOperations = cacheEconomicsOperations(store, new StaleFixtureCatalog());
+		const freshSummary = freshOperations["cache.economics"]!({ since: 0, until: 2_000 }) as { models: Array<Record<string, unknown>> };
+		const staleSummary = staleOperations["cache.economics"]!({ since: 0, until: 2_000 }) as { models: Array<Record<string, unknown>> };
+		expect(freshSummary.models[0]).toMatchObject({ catalogFreshness: "fresh" });
+		expect(staleSummary.models[0]).toMatchObject({ catalogFreshness: "stale" });
 	});
 });
