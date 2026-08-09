@@ -128,6 +128,16 @@ export {
 	usagePeriod,
 	usagePeriodStart,
 } from "./observability/usage.ts";
+export {
+	HistoricalUsageImporter,
+	type HistoricalUsageRecord,
+	type HistoricalUsageScan,
+	type HistoricalUsageSource,
+	type UsageImportController,
+	type UsageImportResult,
+	type UsageImportStatus,
+	type UsageImportStore,
+} from "./observability/usage-import.ts";
 export { loadOpenAiTextTokenCounter, OpenAiTextTokenCounter } from "./openai/token-counter.ts";
 export {
 	ModelCatalog,
@@ -185,6 +195,7 @@ export {
 	type Route,
 	type TelemetryFreshness,
 } from "./optimization/routing/policy.ts";
+export { PiSessionUsageSource, type PiSessionUsageSourceOptions } from "./pi/session-usage-source.ts";
 export {
 	connectJittorClient,
 	type FetchTransport,

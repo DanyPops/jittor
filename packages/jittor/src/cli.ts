@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { fileURLToPath } from "node:url";
+import { BACKFILL_USAGE_LINES, formatUsageImportResult, formatUsageImportStatus, runBackfillCommand } from "./cli-commands/backfill.ts";
 import { BENCHMARKS_USAGE_LINES, runBenchmarksCommand } from "./cli-commands/benchmarks.ts";
 import { CATALOG_USAGE_LINES, formatCatalogQuery, formatCatalogStatus, runCatalogCommand } from "./cli-commands/catalog.ts";
 import { runCompactionCommand } from "./cli-commands/compaction.ts";
@@ -24,6 +25,8 @@ export {
 	formatCostByTask,
 	formatMetricsQuery,
 	formatRouterStatus,
+	formatUsageImportResult,
+	formatUsageImportStatus,
 	renderSystemdUnit,
 };
 
@@ -44,6 +47,7 @@ function usage(stderr: (line: string) => void): number {
 			"Usage: jittor <command> [options]",
 			"  serve",
 			...SERVICE_USAGE_LINES,
+			...BACKFILL_USAGE_LINES,
 			...CONTEXT_USAGE_LINES,
 			...BENCHMARKS_USAGE_LINES,
 			...CATALOG_USAGE_LINES,
@@ -72,6 +76,7 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 		return 0;
 	}
 	if (command === "session") return runSessionCommand(action, rest, deps, fail);
+	if (command === "backfill") return runBackfillCommand(action, rest, deps, fail);
 	if (command === "metrics") return runMetricsCommand(action, rest, deps, fail);
 	if (command === "telemetry") return runTelemetryCommand(action, rest, deps, fail);
 	if (command === "compaction") return runCompactionCommand(action, rest, deps, fail);

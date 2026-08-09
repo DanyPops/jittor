@@ -88,6 +88,9 @@ const OPERATION_META: Record<OperationName, OperationMeta> = {
 	"catalog.refresh": { description: "Refreshes the opt-in models.dev metadata snapshot.", effect: "external-write" },
 	"catalog.status": { description: "Reports model-catalog configuration and last-good snapshot status.", effect: "read" },
 	"catalog.query": { description: "Queries bounded provenance-bearing model metadata.", effect: "read" },
+	"usage.import": { description: "Imports bounded content-free usage from persisted Pi sessions.", effect: "local-write" },
+	"usage.import_status": { description: "Reports durable historical usage import progress.", effect: "read" },
+	"usage.import_cancel": { description: "Requests cancellation of active historical usage imports.", effect: "local-write" },
 	"session.register": { description: "Registers a Pi session identity, issuing a session secret.", effect: "local-write" },
 	"session.release": { description: "Releases a registered Pi session identity.", effect: "local-write" },
 	"models.rank": {

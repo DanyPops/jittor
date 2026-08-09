@@ -65,6 +65,10 @@ The ranking operation (`optimization/model-selection/ranking.ts`) accepts an exp
 
 Jittor separately records content-free local model observations from Pi's public lifecycle: TTFT, wall latency, output throughput, token/cache/cost efficiency, provider retries, tool-loop counts, failures, and two independent classifications derived only from bounded tool names: domain (subject matter, e.g. `coding`) and type (activity, e.g. `research`, `planning`). Prompts, responses, tool arguments/results, credentials, and project paths are never retained. Robust aggregates report sample size, median, p90, median absolute deviation, recency, and confidence without merging local observations into external benchmark facts.
 
+## Historical Pi usage backfill
+
+`jittor backfill status|dry-run|run|cancel [--json]` imports only persisted content-free Pi usage facts into the same charts as live observations. Opaque identities and atomic SQLite claims make reimport, concurrency, moved sessions, and restart safe; scans and progress are bounded and cancelable. See [`docs/USAGE_BACKFILL.md`](docs/USAGE_BACKFILL.md).
+
 ## Context pressure
 
 Papyrus emits content-free prompt-injection observations through Pi's shared extension event bus. Jittor validates and records their exact Rule/Task character sizes, prompt share, fingerprint repetition, and explicitly estimated token size. Jittor also records completed, aborted, and unmatched Pi compactions with duration, reason, retry state, provenance-bearing pre/post context, summary size, reduction, regrowth milestones, mechanism identity, and bounded turns/injection/provider/cache/tool/outcome counters since the previous compaction. See [`docs/COMPACTION_EFFECTIVENESS.md`](docs/COMPACTION_EFFECTIVENESS.md).
@@ -86,6 +90,7 @@ jittor service checkpoint [--json]
 jittor telemetry poll [--json]
 jittor compaction estimate [--json]
 jittor catalog status|refresh|list [--provider <id>] [--model <id>] [--limit <n>] [--json]
+jittor backfill status|dry-run|run|cancel [--json]
 jittor session register --session-id <id> [--json]
 jittor session release --session-id <id> [--session-secret <secret>] [--json]
 jittor router status|decide|pause|resume|clear-override [--session-id <id>] [--session-secret <secret>] [--json]

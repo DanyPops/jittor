@@ -9,6 +9,7 @@ import type { MetricObservation, MetricQuery, StoredMetricObservation } from "..
 import type { MetricStore } from "../observability/store.ts";
 import type { TaskCostSummary } from "../observability/task-cost.ts";
 import type { UsageAggregateRow } from "../observability/usage.ts";
+import type { UsageImportController, UsageImportResult, UsageImportStatus } from "../observability/usage-import.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "../optimization/model-selection/benchmark.ts";
 import type {
 	ModelCatalogController,
@@ -33,6 +34,7 @@ import type { OperationHandlerMap } from "./operation-types.ts";
 import { registerJittorVehicleOperations } from "./registration.ts";
 import { routerOperations } from "./routing-operations.ts";
 import { sessionIdentityOperations } from "./session-operations.ts";
+import { usageImportOperations } from "./usage-import-operations.ts";
 
 export const EXPECTED_OPERATION_NAMES = [
 	"metrics.record",
@@ -48,6 +50,9 @@ export const EXPECTED_OPERATION_NAMES = [
 	"catalog.refresh",
 	"catalog.status",
 	"catalog.query",
+	"usage.import",
+	"usage.import_status",
+	"usage.import_cancel",
 	"session.register",
 	"session.release",
 	"models.rank",
@@ -88,6 +93,9 @@ export interface OperationInputs {
 	"catalog.refresh": { force?: boolean };
 	"catalog.status": Record<string, never>;
 	"catalog.query": ModelCatalogQuery;
+	"usage.import": { dryRun?: boolean };
+	"usage.import_status": Record<string, never>;
+	"usage.import_cancel": Record<string, never>;
 	"models.rank": ModelRecommendationInput & RouterScopeInput;
 	"context.assess": { since?: number; until?: number };
 	"context.delta": { session_id: string };
@@ -120,6 +128,9 @@ export interface OperationOutputs {
 	"catalog.refresh": ModelCatalogStatus;
 	"catalog.status": ModelCatalogStatus;
 	"catalog.query": ModelCatalogQueryResult;
+	"usage.import": UsageImportResult;
+	"usage.import_status": UsageImportStatus;
+	"usage.import_cancel": UsageImportStatus;
 	"models.rank": ModelRankingResult;
 	"context.assess": ContextAssessment;
 	"context.delta": ContextDelta | null;
@@ -139,6 +150,18 @@ export interface OperationOutputs {
 
 export class UnknownOperationError extends Error {}
 export { InvalidSessionSecretError };
+
+class UnavailableUsageImporter implements UsageImportController {
+	async run(): Promise<UsageImportResult> {
+		throw new Error("historical usage import is not configured");
+	}
+	status(): UsageImportStatus {
+		return { running: false, cancelRequested: false, lastResult: null };
+	}
+	cancel(): UsageImportStatus {
+		return this.status();
+	}
+}
 
 class UnavailableModelCatalog implements ModelCatalogController {
 	async refresh(): Promise<ModelCatalogStatus> {
@@ -237,6 +260,7 @@ export class JittorService {
 		sessionIdentity?: SessionIdentity,
 		contextSnapshots: ContextSnapshotHistory = new MetricContextSnapshotHistory(metrics),
 		catalog: ModelCatalogController = new UnavailableModelCatalog(),
+		usageImporter: UsageImportController = new UnavailableUsageImporter(),
 	) {
 		this.router = router;
 		const authorize = routerMutationAuthorizer(sessionIdentity);
@@ -247,6 +271,7 @@ export class JittorService {
 			...metricsOperations(metrics),
 			...benchmarkOperations(benchmarks),
 			...catalogOperations(catalog),
+			...usageImportOperations(usageImporter),
 			...contextOperations(metrics, contextSnapshots),
 			...routerOperations(router, authorize),
 			...modelRankingOperations(modelRanker, router, authorize),

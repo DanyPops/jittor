@@ -30,6 +30,18 @@ CREATE INDEX session_identities_last_seen_idx
 	ON session_identities(last_seen_at);
 `;
 
+const USAGE_IMPORT_SCHEMA = `
+CREATE TABLE usage_import_identities (
+	identity    TEXT PRIMARY KEY,
+	imported_at INTEGER NOT NULL CHECK(imported_at >= 0)
+);
+CREATE TABLE usage_import_state (
+	id         INTEGER PRIMARY KEY CHECK(id = 1),
+	status     TEXT NOT NULL CHECK(json_valid(status)),
+	updated_at INTEGER NOT NULL CHECK(updated_at >= 0)
+);
+`;
+
 /**
  * Delegates bootstrap (pragmas, migration engine) to `@danypops/vehicle-server/storage`, which
  * generalizes the byte-identical pragma/PRAGMA-user_version skeleton jittor's own db.ts used to
@@ -42,6 +54,7 @@ export function openJittorDb(path: string): Database {
 		migrations: [
 			{ version: 1, up: (db) => db.exec(INITIAL_SCHEMA) },
 			{ version: 2, up: (db) => db.exec(SESSION_IDENTITY_SCHEMA) },
+			{ version: 3, up: (db) => db.exec(USAGE_IMPORT_SCHEMA) },
 		],
 	});
 }

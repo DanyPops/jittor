@@ -26,7 +26,7 @@ describe("SQLite metric store", () => {
 	it("migrates an indexed WAL time-series schema", () => {
 		const { db } = fixture();
 		expect((db.query("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");
-		expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+		expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
 		const indexes = db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'metric_observations'").all() as Array<{
 			name: string;
 		}>;

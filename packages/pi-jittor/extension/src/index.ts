@@ -307,6 +307,9 @@ function assistantUsageMetrics(
 	const value = message as Record<string, unknown>;
 	if (value.role !== "assistant" || typeof value.usage !== "object" || value.usage === null) return [];
 	const usage = value.usage as Record<string, unknown>;
+	const messageTimestamp = value.timestamp;
+	const metricObservedAt =
+		typeof messageTimestamp === "number" && Number.isSafeInteger(messageTimestamp) && messageTimestamp >= 0 ? messageTimestamp : observedAt;
 	const provider = typeof value.provider === "string" ? value.provider : "unknown";
 	const model = typeof value.model === "string" ? value.model : "unknown";
 	const scope = `${provider}:${model}`;
@@ -331,7 +334,7 @@ function assistantUsageMetrics(
 				metric,
 				value: amount,
 				unit: "tokens",
-				observedAt,
+				observedAt: metricObservedAt,
 				attributes: {
 					...attributes,
 					tokenMeasurement: {
@@ -347,7 +350,7 @@ function assistantUsageMetrics(
 	}
 	const cost = typeof usage.cost === "object" && usage.cost !== null ? (usage.cost as Record<string, unknown>).total : undefined;
 	if (typeof cost === "number" && Number.isFinite(cost))
-		metrics.push({ source: "pi", scope, metric: "cost", value: cost, unit: "usd", observedAt, attributes });
+		metrics.push({ source: "pi", scope, metric: "cost", value: cost, unit: "usd", observedAt: metricObservedAt, attributes });
 	return metrics;
 }
 
