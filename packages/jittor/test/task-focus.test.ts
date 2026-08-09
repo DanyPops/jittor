@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { applyTaskFocusEvent, validateTaskFocusEvent } from "../src/domain/task-focus.ts";
+import { applyTaskFocusEvent, validateTaskFocusEvent } from "../src/observability/task-focus.ts";
 
 function payload(overrides: Record<string, unknown> = {}) {
 	return {

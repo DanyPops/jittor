@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { hasAnthropicRateLimitHeaders, parseAnthropicRateLimitHeaders } from "../src/providers/anthropic-contracts.ts";
+import { hasAnthropicRateLimitHeaders, parseAnthropicRateLimitHeaders } from "../src/anthropic/rate-limits.ts";
 
 describe("Anthropic official rate-limit response headers", () => {
 	it("parses request, token, and priority-tier buckets into used/remaining-fraction metrics", () => {

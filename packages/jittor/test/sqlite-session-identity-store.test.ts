@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { SQLiteSessionIdentityStore } from "../src/adapters/sqlite-session-identity-store.ts";
 import { SESSION_IDENTITY_MAX_ROWS } from "../src/constants.ts";
-import { openJittorDb } from "../src/db.ts";
-import { SessionIdentity } from "../src/session-identity-service.ts";
+import { SessionIdentity } from "../src/sessions/identity.ts";
+import { openJittorDb } from "../src/sqlite/database.ts";
+import { SQLiteSessionIdentityStore } from "../src/sqlite/session-store.ts";
 
 describe("SQLiteSessionIdentityStore (via SessionIdentity)", () => {
 	it("round-trips a registration through real SQLite: verifies true for the right session id and secret, false for any other combination", () => {

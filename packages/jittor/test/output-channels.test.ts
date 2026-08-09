@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { formatContextAssessment, runCli } from "../src/cli.ts";
 import { SERVICE_MAX_RESPONSE_BYTES } from "../src/constants.ts";
-import type { ContextAssessment } from "../src/domain/context-telemetry.ts";
-import { type StoredMetricObservation, validateMetricObservation } from "../src/domain/metric.ts";
-import type { MetricStore } from "../src/ports/metric-store.ts";
-import { createApp, JittorService } from "../src/service.ts";
+import type { ContextAssessment } from "../src/observability/context-telemetry.ts";
+import { type StoredMetricObservation, validateMetricObservation } from "../src/observability/metric.ts";
+import type { MetricStore } from "../src/observability/store.ts";
+import { createApp, JittorService } from "../src/vehicle/service.ts";
 
 const assessment: ContextAssessment = {
 	window: { since: 1_000, until: 2_000 },

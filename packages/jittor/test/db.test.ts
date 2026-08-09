@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SQLiteMetricStore } from "../src/adapters/sqlite-metric-store.ts";
-import { openJittorDb } from "../src/db.ts";
+import { openJittorDb } from "../src/sqlite/database.ts";
+import { SQLiteMetricStore } from "../src/sqlite/metric-store.ts";
 
 const stores: SQLiteMetricStore[] = [];
 const tmpDirs: string[] = [];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { papyrusContextMetric, validatePapyrusContextInjection } from "../src/domain/context-telemetry.ts";
+import { papyrusContextMetric, validatePapyrusContextInjection } from "../src/observability/context-telemetry.ts";
 
 function payload() {
 	return {

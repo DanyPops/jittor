@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { CONTEXT_TREE_MAX_NODES } from "@danypops/jittor";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { buildMessageHistoryTree } from "../extension/src/context-breakdown.ts";
+import { buildMessageHistoryTree } from "../extension/src/observability/context-breakdown.ts";
 
 /**
  * Integration tests against the REAL @earendil-works/pi-coding-agent SessionManager, not

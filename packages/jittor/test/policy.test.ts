@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { type BudgetWindow, evaluateRoutingPolicy, type PolicyInput, type Route } from "../src/policy.ts";
+import { type BudgetWindow, evaluateRoutingPolicy, type PolicyInput, type Route } from "../src/optimization/routing/policy.ts";
 
 const now = 1_700_000_000_000;
 const current: Route = { provider: "openai-codex", model: "gpt-5.3-codex", thinking: "high" };

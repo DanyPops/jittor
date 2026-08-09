@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { formatCostByTask, formatMetricsQuery, formatRouterStatus, runCli } from "../src/cli.ts";
-import type { ContextAssessment } from "../src/domain/context-telemetry.ts";
-import type { StoredMetricObservation } from "../src/domain/metric.ts";
-import type { TaskCostSummary } from "../src/domain/task-cost.ts";
-import type { RouterStatus } from "../src/ports/router-controller.ts";
+import type { ContextAssessment } from "../src/observability/context-telemetry.ts";
+import type { StoredMetricObservation } from "../src/observability/metric.ts";
+import type { TaskCostSummary } from "../src/observability/task-cost.ts";
+import type { RouterStatus } from "../src/optimization/routing/controller.ts";
 
 const summary: ContextAssessment = {
 	window: { since: 1_000, until: 2_000 },

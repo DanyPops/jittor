@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createGoogleAdcTokenProvider, type GoogleAdcClient, type GoogleAdcClientFactory } from "../src/providers/google-adc-auth.ts";
+import { createGoogleAdcTokenProvider, type GoogleAdcClient, type GoogleAdcClientFactory } from "../src/google-vertex/auth.ts";
 
 function fakeFactory(client: GoogleAdcClient, calls: string[][]): GoogleAdcClientFactory {
 	return async (scopes) => {

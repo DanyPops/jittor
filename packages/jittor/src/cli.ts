@@ -9,8 +9,8 @@ import { formatRouterStatus, ROUTER_USAGE_LINES, runRouterCommand, runTelemetryC
 import { installService, renderSystemdUnit, runServiceCommand, SERVICE_USAGE_LINES, systemctl } from "./cli-commands/service-daemon.ts";
 import { runSessionCommand, SESSION_USAGE_LINES } from "./cli-commands/session.ts";
 import type { CliDependencies } from "./cli-commands/support.ts";
-import { connectJittorClient } from "./client.ts";
 import { serveMain } from "./daemon.ts";
+import { connectJittorClient } from "./vehicle/client.ts";
 
 // Re-exported for external callers (tests, daemon.ts's systemd-unit test) that import these
 // directly from cli.ts rather than reaching into src/cli-commands/*.

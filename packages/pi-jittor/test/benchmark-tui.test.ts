@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { BENCHMARK_TUI_MAX_CANDIDATES, type ModelRankingResult } from "@danypops/jittor";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderBenchmarkView, showBenchmarkPanel } from "../extension/src/benchmark-tui.ts";
+import { renderBenchmarkView, showBenchmarkPanel } from "../extension/src/optimization/model-selection-panel.ts";
 
 function ranking(count = 2): ModelRankingResult {
 	return {

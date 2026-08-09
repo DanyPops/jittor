@@ -1,19 +1,19 @@
 import { describe, expect, it } from "bun:test";
-import { ArtificialAnalysisDirectSource } from "../src/adapters/artificial-analysis-direct-source.ts";
-import { LmArenaHfSource } from "../src/adapters/lmarena-hf-source.ts";
-import { MetricBenchmarkStore } from "../src/adapters/metric-benchmark-store.ts";
-import { OpenRouterBenchmarkSource } from "../src/adapters/openrouter-benchmark-source.ts";
-import { OpenRouterDesignArenaSource } from "../src/adapters/openrouter-design-arena-source.ts";
+import { ArtificialAnalysisDirectSource } from "../src/artificial-analysis/benchmark-source.ts";
+import { LmArenaHfSource } from "../src/lmarena/benchmark-source.ts";
+import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/observability/metric.ts";
+import type { MetricStore } from "../src/observability/store.ts";
+import { OpenRouterBenchmarkSource } from "../src/openrouter/benchmark-source.ts";
+import { OpenRouterDesignArenaSource } from "../src/openrouter/design-arena-source.ts";
 import {
 	BenchmarkCatalog,
 	type BenchmarkObservation,
 	type BenchmarkSource,
 	normalizeModelIdentity,
 	validateBenchmarkObservation,
-} from "../src/domain/benchmark.ts";
-import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/domain/metric.ts";
-import type { MetricStore } from "../src/ports/metric-store.ts";
-import { JittorService } from "../src/service.ts";
+} from "../src/optimization/model-selection/benchmark.ts";
+import { MetricBenchmarkStore } from "../src/optimization/model-selection/observation-store.ts";
+import { JittorService } from "../src/vehicle/service.ts";
 
 class MemoryMetricStore implements MetricStore {
 	rows: StoredMetricObservation[] = [];

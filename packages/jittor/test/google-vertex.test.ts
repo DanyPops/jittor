@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { classifyGoogleVertexFailure, googleVertexFailureMetrics } from "../src/providers/google-vertex-contracts.ts";
+import { classifyGoogleVertexFailure, googleVertexFailureMetrics } from "../src/google-vertex/failures.ts";
 
 describe("Google Vertex failure classification", () => {
 	it("classifies canonical google.rpc.Status codes embedded in the bounded error message", () => {

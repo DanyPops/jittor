@@ -8,7 +8,7 @@ import {
 	messageHistorySegment,
 	type SessionEntryLike,
 	type SessionTreeNodeLike,
-} from "../extension/src/context-breakdown.ts";
+} from "../extension/src/observability/context-breakdown.ts";
 
 function node(id: string, entry: Partial<SessionEntryLike> & { type: string }, children: SessionTreeNodeLike[] = []): SessionTreeNodeLike {
 	return { entry: { id, type: entry.type, message: entry.message, summary: entry.summary }, children };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { assessContextTelemetry } from "../src/domain/context-telemetry.ts";
-import type { StoredMetricObservation } from "../src/domain/metric.ts";
+import { assessContextTelemetry } from "../src/observability/context-telemetry.ts";
+import type { StoredMetricObservation } from "../src/observability/metric.ts";
 
 function row(
 	id: number,

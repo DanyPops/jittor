@@ -6,7 +6,7 @@ import {
 	toolLedgerSegment,
 	validateContextContribution,
 	validateContextSegment,
-} from "../src/domain/context-hub.ts";
+} from "../src/observability/context-hub.ts";
 
 function contribution() {
 	return {

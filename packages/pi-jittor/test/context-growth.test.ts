@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ContextGrowthCapability } from "../extension/src/capabilities/context-growth.ts";
+import { ContextGrowthCapability } from "../extension/src/observability/context-growth.ts";
 
 describe("ContextGrowthCapability", () => {
 	it("starts a fresh observation series after compaction reset", () => {

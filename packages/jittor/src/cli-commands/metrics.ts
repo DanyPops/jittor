@@ -5,8 +5,14 @@ import {
 	METRIC_BATCH_MAX_OBSERVATIONS,
 	USAGE_MAX_DISTINCT_SCOPES,
 } from "../constants.ts";
-import { METRIC_UNITS, type MetricObservation, type MetricQuery, type MetricUnit, type StoredMetricObservation } from "../domain/metric.ts";
-import type { TaskCostSummary } from "../domain/task-cost.ts";
+import {
+	METRIC_UNITS,
+	type MetricObservation,
+	type MetricQuery,
+	type MetricUnit,
+	type StoredMetricObservation,
+} from "../observability/metric.ts";
+import type { TaskCostSummary } from "../observability/task-cost.ts";
 import { type CliDependencies, callAndPrint, humanField } from "./support.ts";
 
 export const METRICS_USAGE_LINES = [

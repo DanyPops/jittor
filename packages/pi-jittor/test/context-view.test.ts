@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import type { ContextSegment, ContextSegmentItem } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { ContextBreakdown } from "../extension/src/context-breakdown.ts";
-import { buildContextRowsIterative } from "../extension/src/context-report.ts";
-import { filterContextRows, showContextView } from "../extension/src/context-view.ts";
+import type { ContextBreakdown } from "../extension/src/observability/context-breakdown.ts";
+import { buildContextRowsIterative } from "../extension/src/observability/context-report.ts";
+import { filterContextRows, showContextView } from "../extension/src/observability/context-view.ts";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 

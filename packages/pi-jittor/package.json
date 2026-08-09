@@ -1,7 +1,7 @@
 {
   "name": "@danypops/pi-jittor",
   "version": "0.2.1",
-  "description": "Pi extension for Jittor: native routing enforcement, footer, settings, usage graphs, and benchmark panels backed by the @danypops/jittor daemon",
+  "description": "Pi extension for Jittor token and context observability with optimization controls backed by the @danypops/jittor daemon",
   "type": "module",
   "keywords": ["pi-package", "llm-router", "token-budget"],
   "scripts": {

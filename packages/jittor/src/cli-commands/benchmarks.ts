@@ -7,10 +7,10 @@ import {
 	MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
 	MODEL_RANKING_MAX_SOURCES,
 } from "../constants.ts";
-import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "../domain/benchmark.ts";
-import { type ModelTaskDomain, type ModelTaskType, TASK_DOMAINS, TASK_TYPES } from "../domain/model-observation.ts";
-import type { ModelCandidate, ModelRankingResult, ScopeAuthority, UtilityWeights } from "../domain/model-ranking.ts";
-import type { ModelRecommendationInput } from "../domain/model-ranking-service.ts";
+import { type ModelTaskDomain, type ModelTaskType, TASK_DOMAINS, TASK_TYPES } from "../observability/model-observation.ts";
+import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "../optimization/model-selection/benchmark.ts";
+import type { ModelRecommendationInput } from "../optimization/model-selection/ranker.ts";
+import type { ModelCandidate, ModelRankingResult, ScopeAuthority, UtilityWeights } from "../optimization/model-selection/ranking.ts";
 import { parseCandidate } from "./route-args.ts";
 import { type CliDependencies, humanField } from "./support.ts";
 

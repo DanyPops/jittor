@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { OpenRouterTelemetryAdapter, openRouterUsageMetrics, parseOpenRouterUsage } from "../src/providers/openrouter.ts";
+import { OpenRouterTelemetryAdapter, openRouterUsageMetrics, parseOpenRouterUsage } from "../src/openrouter/telemetry.ts";
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
 	return Response.json(data, { status, headers });

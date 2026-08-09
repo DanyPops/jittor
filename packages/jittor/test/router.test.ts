@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/domain/metric.ts";
-import type { PolicyConfig, Route } from "../src/policy.ts";
-import type { MetricStore } from "../src/ports/metric-store.ts";
-import type { TelemetryBatch, TelemetrySource } from "../src/ports/telemetry-source.ts";
-import { JittorRouter } from "../src/router.ts";
+import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/observability/metric.ts";
+import type { MetricStore } from "../src/observability/store.ts";
+import type { TelemetryBatch, TelemetrySource } from "../src/observability/telemetry-source.ts";
+import type { PolicyConfig, Route } from "../src/optimization/routing/policy.ts";
+import { JittorRouter } from "../src/optimization/routing/router.ts";
 
 class MemoryMetrics implements MetricStore {
 	rows: StoredMetricObservation[] = [];

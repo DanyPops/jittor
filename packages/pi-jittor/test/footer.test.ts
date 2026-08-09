@@ -3,8 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RouterStatus, StoredMetricObservation } from "@danypops/jittor";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { type ProviderBudget, renderFooterLines } from "../extension/src/footer.ts";
-import { buildFooterBudget } from "../extension/src/tui.ts";
+import { type ProviderBudget, renderFooterLines } from "../extension/src/observability/footer.ts";
+import { buildFooterBudget } from "../extension/src/observability/status.ts";
 
 const colorCalls: Array<{ color: string; text: string }> = [];
 const theme = {

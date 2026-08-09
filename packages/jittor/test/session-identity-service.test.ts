@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { SQLiteSessionIdentityStore } from "../src/adapters/sqlite-session-identity-store.ts";
-import { openJittorDb } from "../src/db.ts";
-import { InvalidSessionSecretError, SessionIdentity } from "../src/session-identity-service.ts";
+import { InvalidSessionSecretError, SessionIdentity } from "../src/sessions/identity.ts";
+import { openJittorDb } from "../src/sqlite/database.ts";
+import { SQLiteSessionIdentityStore } from "../src/sqlite/session-store.ts";
 
 function fixture() {
 	return new SessionIdentity(new SQLiteSessionIdentityStore(openJittorDb(":memory:")));

@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import type { PolicyDecision, RouterStatus } from "@danypops/jittor";
 import { createExtensionHarness } from "@danypops/pi-extension-harness";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ContextGrowthCapability } from "../extension/src/capabilities/context-growth.ts";
 import {
 	type CodexRecoveryRuntime,
 	formatFooterStatus,
@@ -10,8 +9,9 @@ import {
 	registerJittorExtension,
 	routesFromPi,
 } from "../extension/src/index.ts";
+import { ContextGrowthCapability } from "../extension/src/observability/context-growth.ts";
+import { buildFooterBudget } from "../extension/src/observability/status.ts";
 import type { EnforcementControl } from "../extension/src/settings.ts";
-import { buildFooterBudget } from "../extension/src/tui.ts";
 
 function decision(overrides: Partial<PolicyDecision> = {}): PolicyDecision {
 	return { action: "continue", pressure: 0.5, reason: "ok", decidedAt: 1000, trace: [], ...overrides };

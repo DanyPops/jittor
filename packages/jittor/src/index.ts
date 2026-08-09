@@ -1,19 +1,20 @@
 export {
-	connectJittorClient,
-	type FetchTransport,
-	JittorClient,
-} from "./client.ts";
+	type AnthropicMetricSource,
+	type AnthropicRateLimitSnapshot,
+	type AnthropicRateLimitWindow,
+	hasAnthropicRateLimitHeaders,
+	parseAnthropicRateLimitHeaders,
+} from "./anthropic/rate-limits.ts";
+export { parseCodexRateLimitHeaders } from "./codex/telemetry.ts";
 export * from "./constants.ts";
 export {
-	type CodexFailure,
-	type CodexFailureKind,
-	type CodexFailureMetadata,
-	type CodexRecoveryAttempt,
-	type CodexRecoveryOptions,
-	type CodexRecoveryPlan,
-	CodexRecoveryPolicy,
-	classifyCodexFailure,
-} from "./domain/codex-recovery.ts";
+	classifyGoogleVertexFailure,
+	type GoogleVertexFailure,
+	type GoogleVertexFailureKind,
+	type GoogleVertexFailureMetadata,
+	type GoogleVertexMetricSource,
+	googleVertexFailureMetrics,
+} from "./google-vertex/failures.ts";
 export {
 	type ContextConfidenceTier,
 	type ContextContribution,
@@ -27,7 +28,7 @@ export {
 	toolLedgerSegment,
 	validateContextContribution,
 	validateContextSegment,
-} from "./domain/context-hub.ts";
+} from "./observability/context-hub.ts";
 export {
 	assessContextTelemetry,
 	type CompactionDurationEstimate,
@@ -38,7 +39,7 @@ export {
 	type PapyrusContextInjection,
 	papyrusContextMetric,
 	validatePapyrusContextInjection,
-} from "./domain/context-telemetry.ts";
+} from "./observability/context-telemetry.ts";
 export {
 	METRIC_UNITS,
 	type MetricObservation,
@@ -46,7 +47,7 @@ export {
 	type MetricUnit,
 	type StoredMetricObservation,
 	validateMetricObservation,
-} from "./domain/metric.ts";
+} from "./observability/metric.ts";
 export {
 	aggregateModelMetrics,
 	classifyTaskFromTools,
@@ -61,25 +62,14 @@ export {
 	TASK_DOMAINS,
 	TASK_TYPES,
 	validateModelRunObservation,
-} from "./domain/model-observation.ts";
-export {
-	type ModelCandidate,
-	type ModelRankingInput,
-	type ModelRankingResult,
-	type RankedModel,
-	type RankingProvenance,
-	rankModelCandidates,
-	type ScopeAuthority,
-	type UtilityComponent,
-	type UtilityComponentName,
-	type UtilityWeights,
-} from "./domain/model-ranking.ts";
+} from "./observability/model-observation.ts";
+export type { DistinctScopesFilter, MetricStore, UsageAggregateFilter } from "./observability/store.ts";
 export {
 	applyTaskFocusEvent,
 	type TaskFocusEvent,
 	type TaskFocusStatus,
 	validateTaskFocusEvent,
-} from "./domain/task-focus.ts";
+} from "./observability/task-focus.ts";
 export {
 	buildCostGraph,
 	buildUsageGraph,
@@ -100,7 +90,36 @@ export {
 	usageBucketIndex,
 	usagePeriod,
 	usagePeriodStart,
-} from "./domain/usage.ts";
+} from "./observability/usage.ts";
+export {
+	type ModelCandidate,
+	type ModelRankingInput,
+	type ModelRankingResult,
+	type RankedModel,
+	type RankingProvenance,
+	rankModelCandidates,
+	type ScopeAuthority,
+	type UtilityComponent,
+	type UtilityComponentName,
+	type UtilityWeights,
+} from "./optimization/model-selection/ranking.ts";
+export {
+	type CodexFailure,
+	type CodexFailureKind,
+	type CodexFailureMetadata,
+	type CodexRecoveryAttempt,
+	type CodexRecoveryOptions,
+	type CodexRecoveryPlan,
+	CodexRecoveryPolicy,
+	classifyCodexFailure,
+} from "./optimization/recovery/codex.ts";
+export type {
+	RouteOverride,
+	RouterController,
+	RouterStatus,
+	TelemetryPollResult,
+	TelemetrySourceStatus,
+} from "./optimization/routing/controller.ts";
 export {
 	type BudgetWindow,
 	evaluateRoutingPolicy,
@@ -112,31 +131,12 @@ export {
 	type PreviousDecision,
 	type Route,
 	type TelemetryFreshness,
-} from "./policy.ts";
-export type { DistinctScopesFilter, MetricStore, UsageAggregateFilter } from "./ports/metric-store.ts";
-export type {
-	RouteOverride,
-	RouterController,
-	RouterStatus,
-	TelemetryPollResult,
-	TelemetrySourceStatus,
-} from "./ports/router-controller.ts";
+} from "./optimization/routing/policy.ts";
 export {
-	type AnthropicMetricSource,
-	type AnthropicRateLimitSnapshot,
-	type AnthropicRateLimitWindow,
-	hasAnthropicRateLimitHeaders,
-	parseAnthropicRateLimitHeaders,
-} from "./providers/anthropic-contracts.ts";
-export { parseCodexRateLimitHeaders } from "./providers/codex.ts";
-export {
-	classifyGoogleVertexFailure,
-	type GoogleVertexFailure,
-	type GoogleVertexFailureKind,
-	type GoogleVertexFailureMetadata,
-	type GoogleVertexMetricSource,
-	googleVertexFailureMetrics,
-} from "./providers/google-vertex-contracts.ts";
+	connectJittorClient,
+	type FetchTransport,
+	JittorClient,
+} from "./vehicle/client.ts";
 export {
 	createApp,
 	EXPECTED_OPERATION_NAMES,
@@ -147,5 +147,5 @@ export {
 	type OperationName,
 	type OperationOutputs,
 	UnknownOperationError,
-} from "./service.ts";
+} from "./vehicle/service.ts";
 export { VERSION as jittorVersion } from "./version.ts";

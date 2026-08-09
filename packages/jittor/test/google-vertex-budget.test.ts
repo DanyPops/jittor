@@ -1,12 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { GoogleVertexBudgetTelemetryAdapter } from "../src/providers/google-vertex-budget.ts";
 import {
 	type GoogleVertexBudgetNotification,
 	googleVertexBudgetMetrics,
 	googleVertexBudgetWindow,
 	parseGoogleVertexBudgetNotification,
-} from "../src/providers/google-vertex-budget-contracts.ts";
-import { GoogleVertexBudgetTelemetrySource } from "../src/providers/telemetry-sources.ts";
+} from "../src/google-vertex/budget-contracts.ts";
+import { GoogleVertexBudgetTelemetryAdapter } from "../src/google-vertex/budget-telemetry.ts";
+import { GoogleVertexBudgetTelemetrySource } from "../src/google-vertex/source.ts";
 
 /** Google's own worked test fixture from docs.cloud.google.com/billing/docs/how-to/listen-to-notifications. */
 const GOOGLE_FIXTURE_DATA = {

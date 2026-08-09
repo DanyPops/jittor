@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { CodexRecoveryPolicy, classifyCodexFailure } from "../src/domain/codex-recovery.ts";
+import { CodexRecoveryPolicy, classifyCodexFailure } from "../src/optimization/recovery/codex.ts";
 
 describe("Codex failure classification", () => {
 	it("recognizes the structured concurrency throttle without retaining the raw payload", () => {

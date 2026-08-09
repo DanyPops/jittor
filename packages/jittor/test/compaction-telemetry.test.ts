@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { COMPACTION_DURATION_ESTIMATE_MAX_SAMPLES } from "../src/constants.ts";
-import { CompactionTelemetry, estimateCompactionDuration } from "../src/domain/context-telemetry.ts";
-import type { StoredMetricObservation } from "../src/domain/metric.ts";
+import { CompactionTelemetry, estimateCompactionDuration } from "../src/observability/context-telemetry.ts";
+import type { StoredMetricObservation } from "../src/observability/metric.ts";
 
 function durationRow(value: number, observedAt: number, id: number, attributes: Record<string, unknown> = {}): StoredMetricObservation {
 	return {

@@ -11,7 +11,7 @@ import {
 } from "@danypops/jittor";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { registerJittorExtension } from "../extension/src/index.ts";
-import { renderCostGraph, renderUsageGraph, showUsagePanel } from "../extension/src/usage.ts";
+import { renderCostGraph, renderUsageGraph, showUsagePanel } from "../extension/src/observability/usage.ts";
 
 const hour = 60 * 60 * 1_000;
 const now = Date.UTC(2026, 6, 19, 12);
@@ -49,7 +49,7 @@ const events: RawEvent[] = [
  * (bounded, so a real scope-count explosion still truncates honestly), then SQL-side aggregate
  * events into (scope, metric, bucketIndex) sums for the caller-specified window -- never a raw,
  * per-scope-row-capped fetch. Reuses the same `aggregate` helper the assertions build fixtures
- * with, and the real `usageBucketIndex`/window math from src/domain/usage.ts, so this fake is
+ * with, and the real `usageBucketIndex`/window math from src/observability/usage.ts, so this fake is
  * provably faithful to the real aggregation contract rather than a hand-waved approximation.
  */
 function fakePiClient(source: RawEvent[]) {

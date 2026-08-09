@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { type ContextSegment, toolLedgerSegment } from "@danypops/jittor";
-import { ContextHubCapability } from "../extension/src/capabilities/context-hub.ts";
-import type { ContextBreakdown } from "../extension/src/context-breakdown.ts";
-import { buildContextReport } from "../extension/src/context-report.ts";
+import type { ContextBreakdown } from "../extension/src/observability/context-breakdown.ts";
+import { ContextHubCapability } from "../extension/src/observability/context-hub.ts";
+import { buildContextReport } from "../extension/src/observability/context-report.ts";
 
 function breakdown(overrides: Partial<ContextBreakdown> = {}): ContextBreakdown {
 	return { totalTokens: null, contextWindow: null, effectiveBudget: null, overshootTokens: 0, segments: [], ...overrides };

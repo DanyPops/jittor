@@ -1,6 +1,6 @@
-import type { JittorClient } from "../client.ts";
 import { HUMAN_TEXT_FIELD_MAX_CHARACTERS } from "../constants.ts";
-import type { OperationInputs, OperationName, OperationOutputs } from "../service.ts";
+import type { JittorClient } from "../vehicle/client.ts";
+import type { OperationInputs, OperationName, OperationOutputs } from "../vehicle/service.ts";
 
 export interface CliDependencies {
 	client: Pick<JittorClient, "call">;

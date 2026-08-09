@@ -1,5 +1,5 @@
-import type { ModelCandidate } from "../domain/model-ranking.ts";
-import type { Route } from "../policy.ts";
+import type { ModelCandidate } from "../optimization/model-selection/ranking.ts";
+import type { Route } from "../optimization/routing/policy.ts";
 
 /** Shared `provider/model@thinking` parsing for router and benchmark CLI arguments -- a Route and a ModelCandidate are structurally identical at this boundary. */
 export function parseCandidate(raw: string): ModelCandidate | null {

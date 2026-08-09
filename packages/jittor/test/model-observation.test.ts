@@ -1,12 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import type { StoredMetricObservation } from "../src/domain/metric.ts";
+import type { StoredMetricObservation } from "../src/observability/metric.ts";
 import {
 	aggregateModelMetrics,
 	classifyTaskFromTools,
 	type ModelRunObservation,
 	modelRunMetrics,
 	validateModelRunObservation,
-} from "../src/domain/model-observation.ts";
+} from "../src/observability/model-observation.ts";
 
 function run(overrides: Partial<ModelRunObservation> = {}): ModelRunObservation {
 	return {

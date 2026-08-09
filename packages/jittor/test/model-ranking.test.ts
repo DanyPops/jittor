@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import type { BenchmarkObservation } from "../src/domain/benchmark.ts";
-import type { ModelMetricAggregate } from "../src/domain/model-observation.ts";
-import { type ModelRankingInput, rankModelCandidates } from "../src/domain/model-ranking.ts";
-import { EvidenceModelRanker } from "../src/domain/model-ranking-service.ts";
-import type { MetricStore } from "../src/ports/metric-store.ts";
-import { JittorService } from "../src/service.ts";
+import type { ModelMetricAggregate } from "../src/observability/model-observation.ts";
+import type { MetricStore } from "../src/observability/store.ts";
+import type { BenchmarkObservation } from "../src/optimization/model-selection/benchmark.ts";
+import { EvidenceModelRanker } from "../src/optimization/model-selection/ranker.ts";
+import { type ModelRankingInput, rankModelCandidates } from "../src/optimization/model-selection/ranking.ts";
+import { JittorService } from "../src/vehicle/service.ts";
 
 const candidates = [
 	{ provider: "openai", model: "gpt-fast", thinking: "high" },

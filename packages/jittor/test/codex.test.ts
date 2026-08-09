@@ -7,7 +7,7 @@ import {
 	loadCodexFileCredentials,
 	parseCodexRateLimitHeaders,
 	parseCodexUsage,
-} from "../src/providers/codex.ts";
+} from "../src/codex/telemetry.ts";
 
 const tmpDirs: string[] = [];
 afterEach(() => {

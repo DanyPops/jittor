@@ -1,18 +1,24 @@
 # @danypops/jittor
 
-Supervised Bun daemon, router policy, provider telemetry adapters, and CLI for Jittor. See the [repo root README](../../README.md) for the two-package overview and [`@danypops/pi-jittor`](../pi-jittor) for the Pi extension that talks to this daemon.
+Token and context observability, optimization policies, provider integrations, supervised Bun daemon, and CLI for Jittor. See the [repo root README](../../README.md) for the two-package overview and [`@danypops/pi-jittor`](../pi-jittor) for the Pi extension that talks to this daemon.
 
 ## Architecture
 
-- `src/domain/metric.ts` — normalized timestamped metric observations
-- `src/ports/metric-store.ts` — storage boundary used by the application service
-- `src/adapters/sqlite-metric-store.ts` — SQLite time-series adapter
-- `src/service.ts` — authenticated operation registry
-- `src/client.ts` — operation-typed loopback client
-- `src/daemon.ts` — Bun composition root and maintenance loop
-- `src/index.ts` — the package's public surface: everything `@danypops/pi-jittor` (or any other consumer) imports
+`src/` is organized by Jittor's domain and concrete integrations:
 
-SQLite runs in WAL mode with versioned migrations, JSON validation, bounded queries, chronological indexes, pruning, and checkpoints. The database follows `XDG_DATA_HOME`; private authentication state follows `XDG_STATE_HOME`; the daemon handle follows `XDG_RUNTIME_DIR`.
+- `observability/` — token, cost, context, task-focus, model-run, and provider-budget observations; its store and source boundaries live beside that model
+- `optimization/routing/` — budget pressure, route decisions, overrides, and enforcement state
+- `optimization/model-selection/` — benchmark evidence, model ranking, and their source/store boundaries
+- `optimization/recovery/` — bounded recovery policies
+- `sessions/` — session identity and mutation authorization
+- `codex/`, `openrouter/`, `anthropic/`, `google-vertex/` — provider-specific translation and telemetry
+- `lmarena/`, `artificial-analysis/` — benchmark-source translation
+- `sqlite/` — observation and session persistence
+- `vehicle/` — authenticated operation transport
+- `daemon.ts` — composition root and maintenance loop
+- `index.ts` — stable public package surface
+
+Dependencies point toward `observability/` and `optimization/`; provider, SQLite, Vehicle, CLI, and Pi models are translated at their boundaries. SQLite runs in WAL mode with versioned migrations, bounded queries, pruning, and checkpoints.
 
 Operations currently include bounded metric recording/query/pruning, benchmark refresh/status/query, context assessment, routing control, telemetry polling, and service checkpointing. Every operation is exposed through the authenticated typed client; benchmark operations also have CLI parity.
 
@@ -49,7 +55,7 @@ jittor benchmarks list --source openrouter-models [--model provider/model] [--di
 
 Only complete snapshots are queryable. Query output reports both completeness and freshness. See [`docs/BENCHMARK_SOURCES.md`](docs/BENCHMARK_SOURCES.md) for source authority, provenance, conflict, and redistribution rules.
 
-The ranking operation (`domain/model-ranking.ts`) accepts an explicit bounded candidate set and never adds identities found only in evidence. It scores quality (a domain-specific dimension, e.g. `quality-coding`, and a type-specific dimension, e.g. `quality-type-planning`, each optional and additive over the universal `quality-general` fallback), cost, latency, context, and local reliability with bounded user weights, budget-pressure adjustment, component confidence, freshness, provenance, and deterministic tie-breaking. Missing evidence remains unknown and lowers confidence.
+The ranking operation (`optimization/model-selection/ranking.ts`) accepts an explicit bounded candidate set and never adds identities found only in evidence. It scores quality (a domain-specific dimension, e.g. `quality-coding`, and a type-specific dimension, e.g. `quality-type-planning`, each optional and additive over the universal `quality-general` fallback), cost, latency, context, and local reliability with bounded user weights, budget-pressure adjustment, component confidence, freshness, provenance, and deterministic tie-breaking. Missing evidence remains unknown and lowers confidence.
 
 Jittor separately records content-free local model observations from Pi's public lifecycle: TTFT, wall latency, output throughput, token/cache/cost efficiency, provider retries, tool-loop counts, failures, and two independent classifications derived only from bounded tool names: domain (subject matter, e.g. `coding`) and type (activity, e.g. `research`, `planning`). Prompts, responses, tool arguments/results, credentials, and project paths are never retained. Robust aggregates report sample size, median, p90, median absolute deviation, recency, and confidence without merging local observations into external benchmark facts.
 

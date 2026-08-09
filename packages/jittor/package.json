@@ -1,7 +1,7 @@
 {
   "name": "@danypops/jittor",
   "version": "0.16.3",
-  "description": "Just-in-Time Token Optimizing Router for Pi -- supervised daemon, router policy, and CLI",
+  "description": "Just-in-Time Token Optimization Router for Pi -- token and context observability with optimization policies",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

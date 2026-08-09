@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { runCli } from "../src/cli.ts";
-import { EXPECTED_OPERATION_NAMES, type OperationName } from "../src/service.ts";
+import { EXPECTED_OPERATION_NAMES, type OperationName } from "../src/vehicle/service.ts";
 
 interface Case {
 	args: string[];

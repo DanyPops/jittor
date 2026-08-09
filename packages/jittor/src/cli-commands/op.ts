@@ -1,4 +1,4 @@
-import { EXPECTED_OPERATION_NAMES, type OperationName } from "../service.ts";
+import { EXPECTED_OPERATION_NAMES, type OperationName } from "../vehicle/service.ts";
 import type { CliDependencies } from "./support.ts";
 
 export const OP_USAGE_LINES = ["  op <operation> [--input <json>]"];

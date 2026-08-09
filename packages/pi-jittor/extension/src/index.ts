@@ -28,12 +28,6 @@ import {
 	validateTaskFocusEvent,
 } from "@danypops/jittor";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { showBenchmarkPanel } from "./benchmark-tui.ts";
-import { CodexRecoveryCapability, type CodexRecoveryRuntime, SYSTEM_RECOVERY_RUNTIME } from "./capabilities/codex-recovery.ts";
-import { ContextGrowthCapability } from "./capabilities/context-growth.ts";
-import { ContextHubCapability } from "./capabilities/context-hub.ts";
-import { LocalRunTelemetry } from "./capabilities/local-run-telemetry.ts";
-import { ProviderResponseTelemetry } from "./capabilities/provider-response-telemetry.ts";
 import {
 	basePromptSegment,
 	buildBasePromptItems,
@@ -42,18 +36,24 @@ import {
 	messageHistorySegment,
 	type SessionEntryLike,
 	type SessionTreeNodeLike,
-} from "./context-breakdown.ts";
-import { showContextView } from "./context-view.ts";
-import { type CompactionProgress, type IntegratedFooterState, installIntegratedFooter } from "./footer.ts";
+} from "./observability/context-breakdown.ts";
+import { ContextGrowthCapability } from "./observability/context-growth.ts";
+import { ContextHubCapability } from "./observability/context-hub.ts";
+import { showContextView } from "./observability/context-view.ts";
+import { type CompactionProgress, type IntegratedFooterState, installIntegratedFooter } from "./observability/footer.ts";
+import { LocalRunTelemetry } from "./observability/model-run.ts";
+import { ProviderResponseTelemetry } from "./observability/provider-response.ts";
+import { buildFooterBudget, providerBudgetMetricQuery, showJittorPanel } from "./observability/status.ts";
+import { showUsagePanel } from "./observability/usage.ts";
+import { showBenchmarkPanel } from "./optimization/model-selection-panel.ts";
+import { CodexRecoveryCapability, type CodexRecoveryRuntime, SYSTEM_RECOVERY_RUNTIME } from "./optimization/recovery/codex.ts";
 import { callJittor } from "./service-client.ts";
 import { cacheSessionSecret, forgetSessionSecret, sessionSecretField } from "./session-identity.ts";
 import { type CodexRecoveryControl, type EnforcementControl, persistentEnforcementControl, type UsageBudgetControl } from "./settings.ts";
 import { showSettingsPanel } from "./settings-tui.ts";
-import { buildFooterBudget, providerBudgetMetricQuery, showJittorPanel } from "./tui.ts";
-import { showUsagePanel } from "./usage.ts";
 
-export type { CodexRecoveryRuntime } from "./capabilities/codex-recovery.ts";
-export { formatFooterStatus } from "./tui.ts";
+export { formatFooterStatus } from "./observability/status.ts";
+export type { CodexRecoveryRuntime } from "./optimization/recovery/codex.ts";
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const RECOVERY_GUIDANCE = "Run /jittor off to disable blocking, or restart the daemon with: systemctl --user restart jittor.service";

@@ -1,13 +1,13 @@
 # Jittor
 
-**Just-in-Time Token Optimizing Router** for Pi.
+**Just-in-Time Token Optimization Router** for Pi.
 
-Jittor observes provider budgets and per-turn usage, computes whether the current burn rate is sustainable, and applies a deterministic policy before each model request: continue, throttle, lower thinking, switch model, switch provider, or halt.
+Jittor measures token use, cost, provider budgets, model behavior, and context pressure. Those observations support optimization mechanisms such as routing, thinking reduction, throttling, recovery, and compaction analysis.
 
 ## Packages
 
-- **[`packages/jittor`](packages/jittor)** — the supervised Bun daemon, router policy, provider telemetry adapters, and CLI. `@danypops/jittor` on npm.
-- **[`packages/pi-jittor`](packages/pi-jittor)** — the Pi extension: routing enforcement, the integrated footer, settings TUI, usage/cost graphs, and benchmark panels, all through an authenticated loopback client to the daemon. `@danypops/pi-jittor` on npm.
+- **[`packages/jittor`](packages/jittor)** — observation model, optimization policies, provider integrations, supervised Bun daemon, and CLI. `@danypops/jittor` on npm.
+- **[`packages/pi-jittor`](packages/pi-jittor)** — Pi observation collection, usage/context views, and optimization controls over an authenticated loopback client. `@danypops/pi-jittor` on npm.
 
 ## Architecture
 
@@ -16,11 +16,13 @@ Pi extension (packages/pi-jittor)
       ↓
 authenticated loopback client
       ↓
-Jittor daemon (packages/jittor): auth, dispatch, SQLite metric store
+Jittor daemon (packages/jittor): auth, dispatch, SQLite observation store
       ↓
-domain: routing policy, provider telemetry, benchmark ranking
+observability: tokens, cost, context, budgets, model runs
       ↓
-adapters: Codex, OpenRouter, Anthropic, Google Vertex AI
+optimization: routing, model selection, recovery
+      ↓
+integrations: Codex, OpenRouter, Anthropic, Google Vertex AI
 ```
 
 A supervised Bun daemon built on `@danypops/daemon-kit`: one process owns SQLite and provider polling; the extension is a thin authenticated client that applies model/thinking decisions.

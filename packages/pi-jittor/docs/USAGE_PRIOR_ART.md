@@ -55,7 +55,7 @@ OpenRouter's authenticated web dashboard is not distributed as reusable terminal
 
 Jittor combines the best applicable patterns:
 
-1. Pure domain projection in `src/domain/usage.ts`.
+1. Pure observation projection in `src/observability/usage.ts`.
 2. Explicit `24h`, `7d`, `30d`, and `90d` windows.
 3. Provider/model-preserving series and input/output/cache totals.
 4. Vertically scaled, colored, stacked Unicode bars with fractional top blocks.

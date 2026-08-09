@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { RouterStatus } from "@danypops/jittor";
 import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import { buildStatusView, type JittorPanelClient, showJittorPanel } from "../extension/src/tui.ts";
+import { buildStatusView, type JittorPanelClient, showJittorPanel } from "../extension/src/observability/status.ts";
 
 const status: RouterStatus = {
 	ready: true,

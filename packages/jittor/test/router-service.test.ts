@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/domain/metric.ts";
-import type { PolicyDecision, Route } from "../src/policy.ts";
-import type { MetricStore } from "../src/ports/metric-store.ts";
-import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "../src/ports/router-controller.ts";
-import type { SessionIdentityRecord, SessionIdentityStore } from "../src/ports/session-identity-store.ts";
-import { createApp, InvalidSessionSecretError, JittorService } from "../src/service.ts";
-import { SessionIdentity } from "../src/session-identity-service.ts";
+import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/observability/metric.ts";
+import type { MetricStore } from "../src/observability/store.ts";
+import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult } from "../src/optimization/routing/controller.ts";
+import type { PolicyDecision, Route } from "../src/optimization/routing/policy.ts";
+import { SessionIdentity } from "../src/sessions/identity.ts";
+import type { SessionIdentityRecord, SessionIdentityStore } from "../src/sessions/store.ts";
+import { createApp, InvalidSessionSecretError, JittorService } from "../src/vehicle/service.ts";
 
 class EmptyMetricStore implements MetricStore {
 	record(observation: MetricObservation): StoredMetricObservation {

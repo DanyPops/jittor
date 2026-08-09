@@ -8,8 +8,8 @@ import {
 	USAGE_RENDER_MAX_SERIES,
 	type UsageGraph,
 } from "@danypops/jittor";
-import { buildStatusView } from "../extension/src/tui.ts";
-import { renderUsageGraph } from "../extension/src/usage.ts";
+import { buildStatusView } from "../extension/src/observability/status.ts";
+import { renderUsageGraph } from "../extension/src/observability/usage.ts";
 
 function status(sourceCount: number): RouterStatus {
 	return {
@@ -33,7 +33,7 @@ function status(sourceCount: number): RouterStatus {
 describe("Jittor extension output-channel conformance", () => {
 	it("classifies native model-tool output as explicitly non-applicable", () => {
 		const extension = readFileSync(join(import.meta.dir, "../extension/src/index.ts"), "utf8");
-		const panel = readFileSync(join(import.meta.dir, "../extension/src/tui.ts"), "utf8");
+		const panel = readFileSync(join(import.meta.dir, "../extension/src/observability/status.ts"), "utf8");
 		const documentation = readFileSync(join(import.meta.dir, "../../jittor/docs/OUTPUT_CHANNELS.md"), "utf8");
 		expect(extension).not.toContain("registerTool(");
 		expect(extension).toContain("registerCommand(");

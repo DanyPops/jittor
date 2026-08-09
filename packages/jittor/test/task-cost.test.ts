@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { StoredMetricObservation } from "../src/domain/metric.ts";
-import { buildTaskCostSummary } from "../src/domain/task-cost.ts";
+import type { StoredMetricObservation } from "../src/observability/metric.ts";
+import { buildTaskCostSummary } from "../src/observability/task-cost.ts";
 
 let nextId = 1;
 

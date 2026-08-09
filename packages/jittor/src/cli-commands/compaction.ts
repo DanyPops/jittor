@@ -1,4 +1,4 @@
-import type { CompactionDurationEstimate } from "../domain/context-telemetry.ts";
+import type { CompactionDurationEstimate } from "../observability/context-telemetry.ts";
 import { parseJsonOnlyArgs } from "./router.ts";
 import { type CliDependencies, callAndPrint } from "./support.ts";
 

@@ -1,6 +1,6 @@
 import { CLI_AVAILABLE_ROUTES_MAX } from "../constants.ts";
-import type { PolicyDecision, Route } from "../policy.ts";
-import type { RouteOverride, RouterStatus, TelemetryPollResult } from "../ports/router-controller.ts";
+import type { RouteOverride, RouterStatus, TelemetryPollResult } from "../optimization/routing/controller.ts";
+import type { PolicyDecision, Route } from "../optimization/routing/policy.ts";
 import { parseRoute } from "./route-args.ts";
 import { type CliDependencies, callAndPrint, humanField } from "./support.ts";
 

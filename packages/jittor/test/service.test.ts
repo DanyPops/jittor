@@ -1,12 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { SQLiteSessionIdentityStore } from "../src/adapters/sqlite-session-identity-store.ts";
-import { JittorClient } from "../src/client.ts";
-import { openJittorDb } from "../src/db.ts";
-import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/domain/metric.ts";
-import { type UsageAggregateRow, type UsageBucketWindow, usageBucketIndex } from "../src/domain/usage.ts";
-import type { MetricStore, UsageAggregateFilter } from "../src/ports/metric-store.ts";
-import { createApp, EXPECTED_OPERATION_NAMES, JittorService } from "../src/service.ts";
-import { SessionIdentity } from "../src/session-identity-service.ts";
+import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../src/observability/metric.ts";
+import type { MetricStore, UsageAggregateFilter } from "../src/observability/store.ts";
+import { type UsageAggregateRow, type UsageBucketWindow, usageBucketIndex } from "../src/observability/usage.ts";
+import { SessionIdentity } from "../src/sessions/identity.ts";
+import { openJittorDb } from "../src/sqlite/database.ts";
+import { SQLiteSessionIdentityStore } from "../src/sqlite/session-store.ts";
+import { JittorClient } from "../src/vehicle/client.ts";
+import { createApp, EXPECTED_OPERATION_NAMES, JittorService } from "../src/vehicle/service.ts";
 
 class FakeMetricStore implements MetricStore {
 	private sequence = 0;

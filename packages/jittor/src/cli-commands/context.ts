@@ -1,4 +1,4 @@
-import type { ContextAssessment } from "../domain/context-telemetry.ts";
+import type { ContextAssessment } from "../observability/context-telemetry.ts";
 import type { CliDependencies } from "./support.ts";
 
 export const CONTEXT_USAGE_LINES = ["  context [--since <ms>] [--until <ms>] [--json]"];

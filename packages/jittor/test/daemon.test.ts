@@ -3,9 +3,9 @@ import { mkdtempSync as mkdtempSyncRaw, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderSystemdUnit } from "../src/cli.ts";
-import { connectJittorClient } from "../src/client.ts";
 import { benchmarkSourcesFromEnvironment, reportMaintenanceFailure, startDaemon, telemetrySourcesFromEnvironment } from "../src/daemon.ts";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, writeDaemonHandle } from "../src/state.ts";
+import { connectJittorClient } from "../src/vehicle/client.ts";
 import { VERSION } from "../src/version.ts";
 
 const tmpDirs: string[] = [];
