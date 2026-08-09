@@ -130,6 +130,21 @@ export {
 } from "./observability/usage.ts";
 export { loadOpenAiTextTokenCounter, OpenAiTextTokenCounter } from "./openai/token-counter.ts";
 export {
+	ModelCatalog,
+	type ModelCatalogAuthority,
+	type ModelCatalogController,
+	type ModelCatalogEntry,
+	type ModelCatalogFieldAuthority,
+	type ModelCatalogPricing,
+	type ModelCatalogProvenance,
+	type ModelCatalogQuery,
+	type ModelCatalogQueryResult,
+	type ModelCatalogSource,
+	type ModelCatalogStatus,
+	ModelsDevCatalogSource,
+	translateModelsDevCatalog,
+} from "./optimization/model-selection/catalog.ts";
+export {
 	type ModelCandidate,
 	type ModelRankingInput,
 	type ModelRankingResult,

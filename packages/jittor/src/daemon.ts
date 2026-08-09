@@ -13,6 +13,8 @@ import { OpenRouterBenchmarkSource } from "./openrouter/benchmark-source.ts";
 import { OpenRouterDesignArenaSource } from "./openrouter/design-arena-source.ts";
 import { OpenRouterTelemetrySource } from "./openrouter/source.ts";
 import { BenchmarkCatalog } from "./optimization/model-selection/benchmark.ts";
+import { ModelCatalog, type ModelCatalogSource, ModelsDevCatalogSource } from "./optimization/model-selection/catalog.ts";
+import { MetricModelCatalogStore } from "./optimization/model-selection/catalog-store.ts";
 import { MetricBenchmarkStore } from "./optimization/model-selection/observation-store.ts";
 import { EvidenceModelRanker } from "./optimization/model-selection/ranker.ts";
 import type { BenchmarkSource } from "./optimization/model-selection/source.ts";
@@ -47,6 +49,11 @@ function googleVertexMetricSource(value: string | undefined): GoogleVertexMetric
 	if (value === undefined || value === "google-vertex") return "google-vertex";
 	if (value === "anthropic-vertex") return "anthropic-vertex";
 	throw new Error("JITTOR_GOOGLE_VERTEX_BUDGET_SOURCE must be google-vertex or anthropic-vertex");
+}
+
+export function modelCatalogSourceFromEnvironment(env: Record<string, string | undefined> = process.env): ModelCatalogSource | undefined {
+	if (env.JITTOR_MODELS_DEV_CATALOG !== "1") return undefined;
+	return new ModelsDevCatalogSource({ sourceUrl: env.JITTOR_MODELS_DEV_CATALOG_URL });
 }
 
 export function telemetrySourcesFromEnvironment(env: Record<string, string | undefined> = process.env): TelemetrySource[] {
@@ -88,6 +95,8 @@ export async function startDaemon(
 	const benchmarkSources = benchmarkSourcesFromEnvironment(env);
 	const benchmarkStore = new MetricBenchmarkStore(metrics);
 	const benchmarks = new BenchmarkCatalog(benchmarkStore, benchmarkSources);
+	const catalogSource = modelCatalogSourceFromEnvironment(env);
+	const catalog = new ModelCatalog(new MetricModelCatalogStore(metrics), catalogSource);
 	const modelRanker = new EvidenceModelRanker(benchmarkStore, metrics);
 	const router = new JittorRouter({
 		metrics,
@@ -96,7 +105,7 @@ export async function startDaemon(
 		routes: [],
 		currentRoute: UNCONFIGURED_ROUTE,
 	});
-	const service = new JittorService(metrics, router, benchmarks, modelRanker, sessionIdentity);
+	const service = new JittorService(metrics, router, benchmarks, modelRanker, sessionIdentity, undefined, catalog);
 
 	const daemon = await startDaemonKit({
 		daemonLabel: "Jittor",
@@ -119,6 +128,13 @@ export async function startDaemon(
 				},
 			},
 			{
+				name: "catalog-refresh",
+				intervalMs: MAINTENANCE_INTERVAL_MS,
+				run: async () => {
+					await catalog.refresh().catch((error) => reportMaintenanceFailure("catalog_refresh_failed", error));
+				},
+			},
+			{
 				name: "telemetry-poll",
 				intervalMs: TELEMETRY_POLL_INTERVAL_MS,
 				run: async () => {
@@ -133,6 +149,7 @@ export async function startDaemon(
 
 	if (sources.length > 0) router.poll().catch((error) => reportMaintenanceFailure("telemetry_poll_failed", error));
 	if (benchmarkSources.length > 0) benchmarks.refresh().catch((error) => reportMaintenanceFailure("benchmark_refresh_failed", error));
+	if (catalogSource) catalog.refresh().catch((error) => reportMaintenanceFailure("catalog_refresh_failed", error));
 
 	return daemon;
 }

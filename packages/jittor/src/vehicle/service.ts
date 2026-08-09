@@ -10,6 +10,12 @@ import type { MetricStore } from "../observability/store.ts";
 import type { TaskCostSummary } from "../observability/task-cost.ts";
 import type { UsageAggregateRow } from "../observability/usage.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "../optimization/model-selection/benchmark.ts";
+import type {
+	ModelCatalogController,
+	ModelCatalogQuery,
+	ModelCatalogQueryResult,
+	ModelCatalogStatus,
+} from "../optimization/model-selection/catalog.ts";
 import type { BenchmarkController } from "../optimization/model-selection/controller.ts";
 import type { ModelRanker, ModelRecommendationInput } from "../optimization/model-selection/ranker.ts";
 import type { ModelRankingResult } from "../optimization/model-selection/ranking.ts";
@@ -19,6 +25,7 @@ import { InvalidSessionSecretError, type RegisterSessionIdentityResult, type Ses
 import { routerMutationAuthorizer } from "../sessions/router-authorization.ts";
 import { VERSION } from "../version.ts";
 import { benchmarkOperations } from "./benchmark-operations.ts";
+import { catalogOperations } from "./catalog-operations.ts";
 import { contextOperations } from "./context-operations.ts";
 import { metricsOperations } from "./metric-operations.ts";
 import { modelRankingOperations } from "./model-ranking-operations.ts";
@@ -38,6 +45,9 @@ export const EXPECTED_OPERATION_NAMES = [
 	"benchmark.refresh",
 	"benchmark.status",
 	"benchmark.query",
+	"catalog.refresh",
+	"catalog.status",
+	"catalog.query",
 	"session.register",
 	"session.release",
 	"models.rank",
@@ -75,6 +85,9 @@ export interface OperationInputs {
 	"benchmark.refresh": { force?: boolean };
 	"benchmark.status": Record<string, never>;
 	"benchmark.query": BenchmarkQuery;
+	"catalog.refresh": { force?: boolean };
+	"catalog.status": Record<string, never>;
+	"catalog.query": ModelCatalogQuery;
 	"models.rank": ModelRecommendationInput & RouterScopeInput;
 	"context.assess": { since?: number; until?: number };
 	"context.delta": { session_id: string };
@@ -104,6 +117,9 @@ export interface OperationOutputs {
 	"benchmark.refresh": BenchmarkRefreshResult;
 	"benchmark.status": BenchmarkRefreshResult;
 	"benchmark.query": BenchmarkQueryResult;
+	"catalog.refresh": ModelCatalogStatus;
+	"catalog.status": ModelCatalogStatus;
+	"catalog.query": ModelCatalogQueryResult;
 	"models.rank": ModelRankingResult;
 	"context.assess": ContextAssessment;
 	"context.delta": ContextDelta | null;
@@ -123,6 +139,26 @@ export interface OperationOutputs {
 
 export class UnknownOperationError extends Error {}
 export { InvalidSessionSecretError };
+
+class UnavailableModelCatalog implements ModelCatalogController {
+	async refresh(): Promise<ModelCatalogStatus> {
+		return this.status();
+	}
+	status(): ModelCatalogStatus {
+		return {
+			configured: false,
+			ok: null,
+			hasSnapshot: false,
+			lastAttemptAt: null,
+			lastSuccessAt: null,
+			entries: 0,
+			revision: null,
+		};
+	}
+	query(): ModelCatalogQueryResult {
+		throw new Error("model catalog is not configured");
+	}
+}
 
 class UnavailableModelRanker implements ModelRanker {
 	rank(): ModelRankingResult {
@@ -200,6 +236,7 @@ export class JittorService {
 		modelRanker: ModelRanker = new UnavailableModelRanker(),
 		sessionIdentity?: SessionIdentity,
 		contextSnapshots: ContextSnapshotHistory = new MetricContextSnapshotHistory(metrics),
+		catalog: ModelCatalogController = new UnavailableModelCatalog(),
 	) {
 		this.router = router;
 		const authorize = routerMutationAuthorizer(sessionIdentity);
@@ -209,6 +246,7 @@ export class JittorService {
 		this.operations = {
 			...metricsOperations(metrics),
 			...benchmarkOperations(benchmarks),
+			...catalogOperations(catalog),
 			...contextOperations(metrics, contextSnapshots),
 			...routerOperations(router, authorize),
 			...modelRankingOperations(modelRanker, router, authorize),

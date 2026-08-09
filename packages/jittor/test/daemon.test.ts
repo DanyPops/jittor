@@ -3,7 +3,13 @@ import { mkdtempSync as mkdtempSyncRaw, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderSystemdUnit } from "../src/cli.ts";
-import { benchmarkSourcesFromEnvironment, reportMaintenanceFailure, startDaemon, telemetrySourcesFromEnvironment } from "../src/daemon.ts";
+import {
+	benchmarkSourcesFromEnvironment,
+	modelCatalogSourceFromEnvironment,
+	reportMaintenanceFailure,
+	startDaemon,
+	telemetrySourcesFromEnvironment,
+} from "../src/daemon.ts";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, writeDaemonHandle } from "../src/state.ts";
 import { connectJittorClient } from "../src/vehicle/client.ts";
 import { VERSION } from "../src/version.ts";
@@ -92,6 +98,8 @@ describe("Jittor daemon state", () => {
 		]);
 		expect(telemetrySourcesFromEnvironment({ OPENROUTER_API_KEY: "secret" }).map((source) => source.id)).toEqual(["openrouter"]);
 		expect(benchmarkSourcesFromEnvironment({})).toEqual([]);
+		expect(modelCatalogSourceFromEnvironment({})).toBeUndefined();
+		expect(modelCatalogSourceFromEnvironment({ JITTOR_MODELS_DEV_CATALOG: "1" })?.id).toBe("models.dev");
 		expect(benchmarkSourcesFromEnvironment({ JITTOR_OPENROUTER_BENCHMARKS: "1" }).map((source) => source.id)).toEqual([
 			"openrouter-models",
 			"lmarena-hf",

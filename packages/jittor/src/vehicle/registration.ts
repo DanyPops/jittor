@@ -1,5 +1,5 @@
 /**
- * jittor's 25-operation surface projected onto the real Vehicle protocol.
+ * jittor's operation surface projected onto the real Vehicle protocol.
  * Every operation delegates to the exact same handler function service.ts's
  * hand-rolled dispatch already calls (one implementation, two projections --
  * the same shape every other Vehicle-migrated daemon in this ecosystem
@@ -85,6 +85,9 @@ const OPERATION_META: Record<OperationName, OperationMeta> = {
 	"benchmark.refresh": { description: "Refreshes model benchmark evidence from external sources.", effect: "external-write" },
 	"benchmark.status": { description: "Reports the last benchmark refresh's own status.", effect: "read" },
 	"benchmark.query": { description: "Queries cached benchmark evidence.", effect: "read" },
+	"catalog.refresh": { description: "Refreshes the opt-in models.dev metadata snapshot.", effect: "external-write" },
+	"catalog.status": { description: "Reports model-catalog configuration and last-good snapshot status.", effect: "read" },
+	"catalog.query": { description: "Queries bounded provenance-bearing model metadata.", effect: "read" },
 	"session.register": { description: "Registers a Pi session identity, issuing a session secret.", effect: "local-write" },
 	"session.release": { description: "Releases a registered Pi session identity.", effect: "local-write" },
 	"models.rank": {

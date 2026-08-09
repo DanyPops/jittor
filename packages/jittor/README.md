@@ -20,7 +20,7 @@ Token and context observability, optimization policies, provider integrations, s
 
 Dependencies point toward `observability/` and `optimization/`; provider, SQLite, Vehicle, CLI, and Pi models are translated at their boundaries. SQLite runs in WAL mode with versioned migrations, bounded queries, pruning, and checkpoints.
 
-Operations currently include bounded metric recording/query/pruning, benchmark refresh/status/query, context assessment and content-free snapshot deltas, routing control, telemetry polling, and service checkpointing. Every operation is exposed through the authenticated typed client; benchmark operations also have CLI parity.
+Operations currently include bounded metric recording/query/pruning, benchmark and provenance-bearing model-catalog refresh/status/query, context assessment and content-free snapshot deltas, routing control, telemetry polling, and service checkpointing. Every operation is exposed through the authenticated typed client; benchmark operations also have CLI parity.
 
 Token counts carry explicit scope and provenance (`provider-reported`, `provider-count-api`, `tokenizer-exact-text`, or `structural-estimate`). Provider aggregates remain authoritative, exact local tokenization is labeled exact for text only, and envelope/media/provider residuals remain explicit instead of being assigned to individual context items. See [`docs/TOKEN_MEASUREMENT.md`](docs/TOKEN_MEASUREMENT.md) for the contract, OpenAI-family adapter, privacy boundary, module benchmark, and E2E test layers.
 
@@ -38,6 +38,10 @@ If Codex usage becomes `telemetry unavailable`, check `jittor telemetry poll --j
 The third-party `anthropic-vertex` provider (Anthropic Claude models served through Google Vertex, e.g. via `@twogiants/pi-anthropic-vertex`) is tracked separately from both of the above: it reuses Pi's own Anthropic Messages stream implementation with Anthropic's official `@anthropic-ai/vertex-sdk` client, so its wire shape is Anthropic's, but its quota accounting is Google's. Jittor applies Google Vertex's failure classification to it (real-world reports confirm its 429s still carry GCP's own quota-exceeded shape even through Anthropic's own SDK) and, best-effort, also checks for genuine Anthropic rate-limit response headers on it, since it is unverified whether this specific passthrough ever forwards them. Either way, every metric is tagged `anthropic-vertex`, never blended into direct Anthropic's `anthropic` source or Pi's unrelated native `google-vertex` provider, since each represents a different account/quota pool.
 
 Blocking always has a daemon-independent escape hatch: `/jittor off` (in the extension) immediately enters persisted monitor-only mode and never blocks provider requests, regardless of daemon state.
+
+## Provenance-bearing model catalog
+
+Set `JITTOR_MODELS_DEV_CATALOG=1` to opt into bounded models.dev ingestion. `jittor catalog status|refresh|list [--json]` exposes last-good snapshot state and provider-serving limits, capabilities, modalities, lifecycle, and pricing with per-field authority. Live provider usage/cost remains authoritative; explicit local query overrides win over catalog metadata. See [`docs/MODEL_CATALOG.md`](docs/MODEL_CATALOG.md).
 
 ## Benchmark evidence
 
@@ -81,6 +85,7 @@ jittor metrics cost-by-task --since <ms> --until <ms> [--json]
 jittor service checkpoint [--json]
 jittor telemetry poll [--json]
 jittor compaction estimate [--json]
+jittor catalog status|refresh|list [--provider <id>] [--model <id>] [--limit <n>] [--json]
 jittor session register --session-id <id> [--json]
 jittor session release --session-id <id> [--session-secret <secret>] [--json]
 jittor router status|decide|pause|resume|clear-override [--session-id <id>] [--session-secret <secret>] [--json]

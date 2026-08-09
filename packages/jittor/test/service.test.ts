@@ -353,7 +353,7 @@ describe("Jittor operation service — the same operations, through the real Veh
 		};
 	}
 
-	it("GET /vehicle/manifest lists all 25 operations, authenticated the same as /api/v1/ops", async () => {
+	it("GET /vehicle/manifest lists every operation, authenticated the same as /api/v1/ops", async () => {
 		const service = new JittorService(new FakeMetricStore());
 		const app = createApp({ service, token: "test-token" });
 		const unauthorized = await app.fetch(new Request("http://jittor.test/vehicle/manifest"));

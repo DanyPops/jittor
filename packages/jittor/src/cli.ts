@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { fileURLToPath } from "node:url";
 import { BENCHMARKS_USAGE_LINES, runBenchmarksCommand } from "./cli-commands/benchmarks.ts";
+import { CATALOG_USAGE_LINES, formatCatalogQuery, formatCatalogStatus, runCatalogCommand } from "./cli-commands/catalog.ts";
 import { runCompactionCommand } from "./cli-commands/compaction.ts";
 import { CONTEXT_USAGE_LINES, formatContextAssessment, formatContextDelta, runContextCommand } from "./cli-commands/context.ts";
 import { formatCostByTask, formatMetricsQuery, METRICS_USAGE_LINES, runMetricsCommand } from "./cli-commands/metrics.ts";
@@ -15,7 +16,16 @@ import { connectJittorClient } from "./vehicle/client.ts";
 // Re-exported for external callers (tests, daemon.ts's systemd-unit test) that import these
 // directly from cli.ts rather than reaching into src/cli-commands/*.
 export type { CliDependencies };
-export { formatContextAssessment, formatContextDelta, formatCostByTask, formatMetricsQuery, formatRouterStatus, renderSystemdUnit };
+export {
+	formatCatalogQuery,
+	formatCatalogStatus,
+	formatContextAssessment,
+	formatContextDelta,
+	formatCostByTask,
+	formatMetricsQuery,
+	formatRouterStatus,
+	renderSystemdUnit,
+};
 
 const DEFAULT_DEPENDENCIES: CliDependencies = {
 	get client() {
@@ -36,6 +46,7 @@ function usage(stderr: (line: string) => void): number {
 			...SERVICE_USAGE_LINES,
 			...CONTEXT_USAGE_LINES,
 			...BENCHMARKS_USAGE_LINES,
+			...CATALOG_USAGE_LINES,
 			...METRICS_USAGE_LINES,
 			...ROUTER_USAGE_LINES,
 			...SESSION_USAGE_LINES,
@@ -67,6 +78,7 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 	if (command === "router") return runRouterCommand(action, rest, deps, fail);
 	if (command === "op") return runOpCommand(action, rest, deps, fail);
 	if (command === "benchmarks") return runBenchmarksCommand(action, rest, deps, fail);
+	if (command === "catalog") return runCatalogCommand(action, rest, deps, fail);
 	if (command === "context") return runContextCommand(action, rest, deps, fail);
 	if (command === "service") return runServiceCommand(action, rest, deps, fail);
 	return fail();
