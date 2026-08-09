@@ -65,6 +65,10 @@ The ranking operation (`optimization/model-selection/ranking.ts`) accepts an exp
 
 Jittor separately records content-free local model observations from Pi's public lifecycle: TTFT, wall latency, output throughput, token/cache/cost efficiency, provider retries, tool-loop counts, failures, and two independent classifications derived only from bounded tool names: domain (subject matter, e.g. `coding`) and type (activity, e.g. `research`, `planning`). Prompts, responses, tool arguments/results, credentials, and project paths are never retained. Robust aggregates report sample size, median, p90, median absolute deviation, recency, and confidence without merging local observations into external benchmark facts.
 
+## Content-free OTLP export
+
+Configure `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` (or the standard generic endpoint) to opt into bounded asynchronous OTLP/HTTP JSON export. `jittor export status|flush [--json]` reports credential-safe health. The mapper pins evolving GenAI conventions and has no content-capture mode. See [`docs/OTLP_EXPORT.md`](docs/OTLP_EXPORT.md).
+
 ## Historical Pi usage backfill
 
 `jittor backfill status|dry-run|run|cancel [--json]` imports only persisted content-free Pi usage facts into the same charts as live observations. Opaque identities and atomic SQLite claims make reimport, concurrency, moved sessions, and restart safe; scans and progress are bounded and cancelable. See [`docs/USAGE_BACKFILL.md`](docs/USAGE_BACKFILL.md).
@@ -91,6 +95,7 @@ jittor telemetry poll [--json]
 jittor compaction estimate [--json]
 jittor catalog status|refresh|list [--provider <id>] [--model <id>] [--limit <n>] [--json]
 jittor backfill status|dry-run|run|cancel [--json]
+jittor export status|flush [--json]
 jittor session register --session-id <id> [--json]
 jittor session release --session-id <id> [--session-secret <secret>] [--json]
 jittor router status|decide|pause|resume|clear-override [--session-id <id>] [--session-secret <secret>] [--json]

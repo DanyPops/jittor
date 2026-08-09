@@ -195,7 +195,23 @@ export {
 	type Route,
 	type TelemetryFreshness,
 } from "./optimization/routing/policy.ts";
+export {
+	buildOtlpMetricsRequest,
+	mapObservationToOtlp,
+	OTLP_GENAI_SEMANTIC_CONVENTIONS,
+	type OtlpMetricPoint,
+	OtlpObservationExporter,
+	type OtlpObservationExporterOptions,
+	type OtlpTransport,
+	otlpExporterFromEnvironment,
+} from "./otlp/exporter.ts";
 export { PiSessionUsageSource, type PiSessionUsageSourceOptions } from "./pi/session-usage-source.ts";
+export {
+	DisabledObservationExporter,
+	ExportingMetricStore,
+	type ObservationExporter,
+	type ObservationExportStatus,
+} from "./telemetry-export/exporter.ts";
 export {
 	connectJittorClient,
 	type FetchTransport,

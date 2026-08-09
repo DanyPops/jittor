@@ -22,6 +22,7 @@ import { EvidenceModelRanker } from "./optimization/model-selection/ranker.ts";
 import type { BenchmarkSource } from "./optimization/model-selection/source.ts";
 import { DEFAULT_POLICY, UNCONFIGURED_ROUTE } from "./optimization/routing/config.ts";
 import { JittorRouter } from "./optimization/routing/router.ts";
+import { otlpExporterFromEnvironment } from "./otlp/exporter.ts";
 import { PiSessionUsageSource } from "./pi/session-usage-source.ts";
 import { SessionIdentity } from "./sessions/identity.ts";
 import { openJittorDb } from "./sqlite/database.ts";
@@ -29,6 +30,7 @@ import { SQLiteMetricStore } from "./sqlite/metric-store.ts";
 import { SQLiteSessionIdentityStore } from "./sqlite/session-store.ts";
 import { SQLiteUsageImportStore } from "./sqlite/usage-import-store.ts";
 import { ensureAuthToken, type JittorPaths, resolveJittorPaths } from "./state.ts";
+import { DisabledObservationExporter, ExportingMetricStore } from "./telemetry-export/exporter.ts";
 import { createApp, JittorService } from "./vehicle/service.ts";
 
 export type { RunningDaemon } from "@danypops/vehicle-server/daemon";
@@ -93,14 +95,16 @@ export async function startDaemon(
 ): Promise<RunningDaemon> {
 	const token = ensureAuthToken(paths);
 	const db = openJittorDb(paths.database);
-	const metrics = new SQLiteMetricStore(db);
+	const localMetrics = new SQLiteMetricStore(db);
+	const exporter = otlpExporterFromEnvironment(env) ?? new DisabledObservationExporter();
+	const metrics = new ExportingMetricStore(localMetrics, exporter);
 	const sessionIdentity = new SessionIdentity(new SQLiteSessionIdentityStore(db));
 	const sources = telemetrySourcesFromEnvironment(env);
 	const benchmarkSources = benchmarkSourcesFromEnvironment(env);
 	const benchmarkStore = new MetricBenchmarkStore(metrics);
 	const benchmarks = new BenchmarkCatalog(benchmarkStore, benchmarkSources);
 	const catalogSource = modelCatalogSourceFromEnvironment(env);
-	const catalog = new ModelCatalog(new MetricModelCatalogStore(metrics), catalogSource);
+	const catalog = new ModelCatalog(new MetricModelCatalogStore(localMetrics), catalogSource);
 	const modelRanker = new EvidenceModelRanker(benchmarkStore, metrics);
 	const sessionsRoot = env.JITTOR_PI_SESSIONS_DIR ?? join(env.HOME ?? process.env.HOME ?? "", ".pi", "agent", "sessions");
 	const usageImporter = new HistoricalUsageImporter(new PiSessionUsageSource(sessionsRoot), new SQLiteUsageImportStore(db));
@@ -111,7 +115,7 @@ export async function startDaemon(
 		routes: [],
 		currentRoute: UNCONFIGURED_ROUTE,
 	});
-	const service = new JittorService(metrics, router, benchmarks, modelRanker, sessionIdentity, undefined, catalog, usageImporter);
+	const service = new JittorService(metrics, router, benchmarks, modelRanker, sessionIdentity, undefined, catalog, usageImporter, exporter);
 
 	const daemon = await startDaemonKit({
 		daemonLabel: "Jittor",
@@ -148,7 +152,8 @@ export async function startDaemon(
 				},
 			},
 		],
-		onShutdown: () => {
+		onShutdown: async () => {
+			await exporter.shutdown();
 			service.close();
 		},
 	});

@@ -5,6 +5,7 @@ import { BENCHMARKS_USAGE_LINES, runBenchmarksCommand } from "./cli-commands/ben
 import { CATALOG_USAGE_LINES, formatCatalogQuery, formatCatalogStatus, runCatalogCommand } from "./cli-commands/catalog.ts";
 import { runCompactionCommand } from "./cli-commands/compaction.ts";
 import { CONTEXT_USAGE_LINES, formatContextAssessment, formatContextDelta, runContextCommand } from "./cli-commands/context.ts";
+import { EXPORT_USAGE_LINES, formatExportStatus, runExportCommand } from "./cli-commands/export.ts";
 import { formatCostByTask, formatMetricsQuery, METRICS_USAGE_LINES, runMetricsCommand } from "./cli-commands/metrics.ts";
 import { OP_USAGE_LINES, runOpCommand } from "./cli-commands/op.ts";
 import { formatRouterStatus, ROUTER_USAGE_LINES, runRouterCommand, runTelemetryCommand } from "./cli-commands/router.ts";
@@ -23,6 +24,7 @@ export {
 	formatContextAssessment,
 	formatContextDelta,
 	formatCostByTask,
+	formatExportStatus,
 	formatMetricsQuery,
 	formatRouterStatus,
 	formatUsageImportResult,
@@ -48,6 +50,7 @@ function usage(stderr: (line: string) => void): number {
 			"  serve",
 			...SERVICE_USAGE_LINES,
 			...BACKFILL_USAGE_LINES,
+			...EXPORT_USAGE_LINES,
 			...CONTEXT_USAGE_LINES,
 			...BENCHMARKS_USAGE_LINES,
 			...CATALOG_USAGE_LINES,
@@ -77,6 +80,7 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 	}
 	if (command === "session") return runSessionCommand(action, rest, deps, fail);
 	if (command === "backfill") return runBackfillCommand(action, rest, deps, fail);
+	if (command === "export") return runExportCommand(action, rest, deps, fail);
 	if (command === "metrics") return runMetricsCommand(action, rest, deps, fail);
 	if (command === "telemetry") return runTelemetryCommand(action, rest, deps, fail);
 	if (command === "compaction") return runCompactionCommand(action, rest, deps, fail);

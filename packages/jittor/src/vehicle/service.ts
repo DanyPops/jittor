@@ -24,10 +24,12 @@ import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult
 import type { PolicyDecision, Route } from "../optimization/routing/policy.ts";
 import { InvalidSessionSecretError, type RegisterSessionIdentityResult, type SessionIdentity } from "../sessions/identity.ts";
 import { routerMutationAuthorizer } from "../sessions/router-authorization.ts";
+import { DisabledObservationExporter, type ObservationExporter, type ObservationExportStatus } from "../telemetry-export/exporter.ts";
 import { VERSION } from "../version.ts";
 import { benchmarkOperations } from "./benchmark-operations.ts";
 import { catalogOperations } from "./catalog-operations.ts";
 import { contextOperations } from "./context-operations.ts";
+import { exportOperations } from "./export-operations.ts";
 import { metricsOperations } from "./metric-operations.ts";
 import { modelRankingOperations } from "./model-ranking-operations.ts";
 import type { OperationHandlerMap } from "./operation-types.ts";
@@ -53,6 +55,8 @@ export const EXPECTED_OPERATION_NAMES = [
 	"usage.import",
 	"usage.import_status",
 	"usage.import_cancel",
+	"export.status",
+	"export.flush",
 	"session.register",
 	"session.release",
 	"models.rank",
@@ -96,6 +100,8 @@ export interface OperationInputs {
 	"usage.import": { dryRun?: boolean };
 	"usage.import_status": Record<string, never>;
 	"usage.import_cancel": Record<string, never>;
+	"export.status": Record<string, never>;
+	"export.flush": Record<string, never>;
 	"models.rank": ModelRecommendationInput & RouterScopeInput;
 	"context.assess": { since?: number; until?: number };
 	"context.delta": { session_id: string };
@@ -131,6 +137,8 @@ export interface OperationOutputs {
 	"usage.import": UsageImportResult;
 	"usage.import_status": UsageImportStatus;
 	"usage.import_cancel": UsageImportStatus;
+	"export.status": ObservationExportStatus;
+	"export.flush": ObservationExportStatus;
 	"models.rank": ModelRankingResult;
 	"context.assess": ContextAssessment;
 	"context.delta": ContextDelta | null;
@@ -261,6 +269,7 @@ export class JittorService {
 		contextSnapshots: ContextSnapshotHistory = new MetricContextSnapshotHistory(metrics),
 		catalog: ModelCatalogController = new UnavailableModelCatalog(),
 		usageImporter: UsageImportController = new UnavailableUsageImporter(),
+		exporter: ObservationExporter = new DisabledObservationExporter(),
 	) {
 		this.router = router;
 		const authorize = routerMutationAuthorizer(sessionIdentity);
@@ -272,6 +281,7 @@ export class JittorService {
 			...benchmarkOperations(benchmarks),
 			...catalogOperations(catalog),
 			...usageImportOperations(usageImporter),
+			...exportOperations(exporter),
 			...contextOperations(metrics, contextSnapshots),
 			...routerOperations(router, authorize),
 			...modelRankingOperations(modelRanker, router, authorize),

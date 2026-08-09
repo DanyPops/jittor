@@ -31,6 +31,8 @@ const OPERATION_RETRY_MODE = {
 	"usage.import": "once",
 	"usage.import_status": "retry",
 	"usage.import_cancel": "once",
+	"export.status": "retry",
+	"export.flush": "once",
 	"session.register": "once",
 	"session.release": "once",
 	"models.rank": "once",

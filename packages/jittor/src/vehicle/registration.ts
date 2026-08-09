@@ -91,6 +91,8 @@ const OPERATION_META: Record<OperationName, OperationMeta> = {
 	"usage.import": { description: "Imports bounded content-free usage from persisted Pi sessions.", effect: "local-write" },
 	"usage.import_status": { description: "Reports durable historical usage import progress.", effect: "read" },
 	"usage.import_cancel": { description: "Requests cancellation of active historical usage imports.", effect: "local-write" },
+	"export.status": { description: "Reports credential-safe OTLP exporter health and queue status.", effect: "read" },
+	"export.flush": { description: "Flushes the bounded OTLP export queue.", effect: "external-write" },
 	"session.register": { description: "Registers a Pi session identity, issuing a session secret.", effect: "local-write" },
 	"session.release": { description: "Releases a registered Pi session identity.", effect: "local-write" },
 	"models.rank": {
