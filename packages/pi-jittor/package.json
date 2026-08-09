@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-jittor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Pi extension for Jittor token and context observability with optimization controls backed by the @danypops/jittor daemon",
   "type": "module",
   "keywords": ["pi-package", "llm-router", "token-budget"],
@@ -15,7 +15,7 @@
     "@danypops/vehicle-client": "^0.5.1",
     "@danypops/vehicle-core": "^0.12.1",
     "@danypops/vehicle-server": "^0.17.0",
-    "@danypops/jittor": "workspace:^",
+    "@danypops/jittor": "^0.17.0",
     "malevich-tui-components": "^0.16.1"
   },
   "peerDependencies": {
