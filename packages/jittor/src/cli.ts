@@ -65,32 +65,44 @@ function usage(stderr: (line: string) => void): number {
 
 /**
  * Composes one command dispatcher per capability module (metrics, router+telemetry+compaction,
- * session identity, benchmarks, context, service lifecycle, the raw op escape hatch) instead of
- * a single switch that used to combine every command's own argument parsing, validation, and
- * presentation in one place. Each module owns its own usage lines and command handler; this
- * function only routes the top-level command word and forwards `usage` for the shared "not
- * recognized" fallback.
+ * session identity, benchmarks, context, service lifecycle, the raw op escape hatch). Each module
+ * owns its own argument parsing, validation, presentation, and usage lines; this function's switch
+ * only routes the top-level command word and forwards `usage` for the shared fallback.
  */
 export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEPENDENCIES): Promise<number> {
 	const [command, action, ...rest] = args;
 	const fail = () => usage(deps.stderr);
-	if (command === "serve") {
-		await deps.serve();
-		return 0;
+	switch (command) {
+		case "serve":
+			await deps.serve();
+			return 0;
+		case "session":
+			return runSessionCommand(action, rest, deps, fail);
+		case "backfill":
+			return runBackfillCommand(action, rest, deps, fail);
+		case "export":
+			return runExportCommand(action, rest, deps, fail);
+		case "metrics":
+			return runMetricsCommand(action, rest, deps, fail);
+		case "telemetry":
+			return runTelemetryCommand(action, rest, deps, fail);
+		case "compaction":
+			return runCompactionCommand(action, rest, deps, fail);
+		case "router":
+			return runRouterCommand(action, rest, deps, fail);
+		case "op":
+			return runOpCommand(action, rest, deps, fail);
+		case "benchmarks":
+			return runBenchmarksCommand(action, rest, deps, fail);
+		case "catalog":
+			return runCatalogCommand(action, rest, deps, fail);
+		case "context":
+			return runContextCommand(action, rest, deps, fail);
+		case "service":
+			return runServiceCommand(action, rest, deps, fail);
+		default:
+			return fail();
 	}
-	if (command === "session") return runSessionCommand(action, rest, deps, fail);
-	if (command === "backfill") return runBackfillCommand(action, rest, deps, fail);
-	if (command === "export") return runExportCommand(action, rest, deps, fail);
-	if (command === "metrics") return runMetricsCommand(action, rest, deps, fail);
-	if (command === "telemetry") return runTelemetryCommand(action, rest, deps, fail);
-	if (command === "compaction") return runCompactionCommand(action, rest, deps, fail);
-	if (command === "router") return runRouterCommand(action, rest, deps, fail);
-	if (command === "op") return runOpCommand(action, rest, deps, fail);
-	if (command === "benchmarks") return runBenchmarksCommand(action, rest, deps, fail);
-	if (command === "catalog") return runCatalogCommand(action, rest, deps, fail);
-	if (command === "context") return runContextCommand(action, rest, deps, fail);
-	if (command === "service") return runServiceCommand(action, rest, deps, fail);
-	return fail();
 }
 
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
