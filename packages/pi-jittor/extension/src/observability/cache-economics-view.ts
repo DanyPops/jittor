@@ -13,7 +13,7 @@ export interface CacheEconomicsPanelTheme {
 	bold(text: string): string;
 }
 
-type CacheEconomicsPanelAction = "refresh" | "close";
+export type CacheEconomicsPanelAction = "refresh" | "close";
 
 const hostTextMeasure: TextMeasure = { visibleWidth, truncateToWidth };
 
@@ -88,25 +88,47 @@ export function renderCacheEconomicsView(summary: CacheEconomicsSummary): string
 	return lines;
 }
 
+/** Shared by both notify/panel entry points below and the unified /jittor shell, so all three fetch identically. */
+export async function fetchCacheEconomicsSummary(
+	client: CacheEconomicsPanelClient,
+	windowMs: number,
+	now: () => number = Date.now,
+): Promise<CacheEconomicsSummary> {
+	const until = now();
+	const since = Math.max(0, until - windowMs);
+	return (await client.call("cache.economics", { since, until })) as CacheEconomicsSummary;
+}
+
 export async function showCacheEconomicsView(
 	ctx: ExtensionCommandContext,
 	client: CacheEconomicsPanelClient,
 	windowMs: number,
 	now: () => number = Date.now,
 ): Promise<void> {
-	const until = now();
-	const since = Math.max(0, until - windowMs);
-	const summary = (await client.call("cache.economics", { since, until })) as CacheEconomicsSummary;
+	const summary = await fetchCacheEconomicsSummary(client, windowMs, now);
 	ctx.ui.notify(renderCacheEconomicsView(summary).join("\n"), "info");
 }
 
-/** The same content as renderCacheEconomicsView, wrapped in a titled, bordered, scrollable frame -- mirrors optimization/model-selection-panel.ts's renderBenchmarkView/BorderedSelectPanel pattern. */
-export function renderCacheEconomicsPanel(summary: CacheEconomicsSummary, width: number, theme: CacheEconomicsPanelTheme): string[] {
-	const safeWidth = Math.max(1, width);
+/**
+ * The Cache panel's real chrome plus its own r/Esc key handling, wired to `onAction` rather than a
+ * `done` callback directly -- reusable by renderCacheEconomicsPanel/showCacheEconomicsPanel below
+ * and the unified /jittor shell. Defaults to a full-chrome standalone panel (`framed: true`); pass
+ * `framed: false` when nesting this as one tab's content inside another framed container.
+ */
+export function createCacheEconomicsPanel(
+	summary: CacheEconomicsSummary,
+	theme: CacheEconomicsPanelTheme,
+	onAction: (action: CacheEconomicsPanelAction) => void,
+	framed = true,
+): BorderedSelectPanel {
 	const lines = renderCacheEconomicsView(summary);
 	const content = {
 		invalidate: () => {},
 		render: (availableWidth: number): string[] => lines.map((line) => truncateToWidth(line, availableWidth, "…")),
+		handleInput(data: string): void {
+			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) onAction("close");
+			else if (data === "r") onAction("refresh");
+		},
 	};
 	return new BorderedSelectPanel({
 		title: "Jittor Cache Economics",
@@ -118,7 +140,13 @@ export function renderCacheEconomicsPanel(summary: CacheEconomicsSummary, width:
 			help: (text) => theme.fg("dim", text),
 		},
 		measure: hostTextMeasure,
-	}).render(safeWidth);
+		framed,
+	});
+}
+
+/** The same content as renderCacheEconomicsView, wrapped in a titled, bordered, scrollable frame -- mirrors optimization/model-selection-panel.ts's renderBenchmarkView/BorderedSelectPanel pattern. */
+export function renderCacheEconomicsPanel(summary: CacheEconomicsSummary, width: number, theme: CacheEconomicsPanelTheme): string[] {
+	return createCacheEconomicsPanel(summary, theme, () => undefined).render(Math.max(1, width));
 }
 
 /**
@@ -133,23 +161,19 @@ export async function showCacheEconomicsPanel(
 	now: () => number = Date.now,
 ): Promise<void> {
 	for (;;) {
-		const until = now();
-		const since = Math.max(0, until - windowMs);
-		const summary = (await client.call("cache.economics", { since, until })) as CacheEconomicsSummary;
+		const summary = await fetchCacheEconomicsSummary(client, windowMs, now);
 		if (ctx.mode !== "tui") {
 			ctx.ui.notify(renderCacheEconomicsView(summary).join("\n"), "info");
 			return;
 		}
-		const action = await ctx.ui.custom<CacheEconomicsPanelAction>((_tui, theme, _keybindings, done) => ({
-			invalidate() {},
-			render(width: number): string[] {
-				return renderCacheEconomicsPanel(summary, width, theme);
-			},
-			handleInput(data: string): void {
-				if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) done("close");
-				else if (data === "r") done("refresh");
-			},
-		}));
+		const action = await ctx.ui.custom<CacheEconomicsPanelAction>((_tui, theme, _keybindings, done) => {
+			const panel = createCacheEconomicsPanel(summary, theme, done);
+			return {
+				invalidate: () => panel.invalidate(),
+				render: (width: number) => panel.render(width),
+				handleInput: (data: string) => panel.handleInput(data),
+			};
+		});
 		if (!action || action === "close") return;
 	}
 }

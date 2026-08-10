@@ -35,7 +35,7 @@ import {
 } from "@danypops/jittor";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { jittorArgumentCompletions, jittorUsageError } from "./jittor-command.ts";
-import { showCacheEconomicsPanel } from "./observability/cache-economics-view.ts";
+import { showJittorShell } from "./jittor-shell.ts";
 import {
 	basePromptSegment,
 	buildBasePromptItems,
@@ -52,14 +52,12 @@ import { type CompactionProgress, type IntegratedFooterState, installIntegratedF
 import { LocalRunTelemetry } from "./observability/model-run.ts";
 import { captureProviderContextSnapshot } from "./observability/provider-context-snapshot.ts";
 import { ProviderResponseTelemetry } from "./observability/provider-response.ts";
-import { buildFooterBudget, providerBudgetMetricQuery, showJittorPanel } from "./observability/status.ts";
+import { buildFooterBudget, providerBudgetMetricQuery } from "./observability/status.ts";
 import { showUsagePanel } from "./observability/usage.ts";
-import { showBenchmarkPanel } from "./optimization/model-selection-panel.ts";
 import { CodexRecoveryCapability, type CodexRecoveryRuntime, SYSTEM_RECOVERY_RUNTIME } from "./optimization/recovery/codex.ts";
 import { callJittor } from "./service-client.ts";
 import { cacheSessionSecret, forgetSessionSecret, sessionSecretField } from "./session-identity.ts";
 import { type CodexRecoveryControl, type EnforcementControl, persistentEnforcementControl, type UsageBudgetControl } from "./settings.ts";
-import { showSettingsPanel } from "./settings-tui.ts";
 
 export { formatFooterStatus } from "./observability/status.ts";
 export type { CodexRecoveryRuntime } from "./optimization/recovery/codex.ts";
@@ -583,19 +581,45 @@ export function registerJittorExtension(
 				ctx.ui.notify(usageError, "warning");
 				return;
 			}
+			// One shared JittorShellDeps builder for every /jittor entry point below -- all four tabs
+			// (Settings/Status/Benchmarks/Cache) are reachable from a single opened shell regardless of
+			// which subcommand opened it, so every entry point needs the full dependency set, not just
+			// its own tab's. `benchmarksTask` overrides the domain/type only for an explicit
+			// "/jittor benchmarks ..." invocation; every other entry point defaults to general/general
+			// (only meaningfully exercised if the user tab-cycles into Benchmarks from elsewhere).
+			const buildShellDeps = (benchmarksTask?: {
+				domain: ModelTaskDomain;
+				type: ModelTaskType;
+			}): Parameters<typeof showJittorShell>[1] => ({
+				settings: {
+					enforcement,
+					recovery: codexRecovery,
+					budgets: usageBudgets,
+					effects: {
+						setEnforcement: async (enabled) => (enabled ? enable(ctx) : disable(ctx)),
+						setFooter: async (enabled) => {
+							await enforcement.setFooterEnabled(enabled);
+							showFooter(ctx);
+							if (enabled) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
+						},
+						setRecovery: async (enabled) => {
+							if (!enabled) cancelRecovery(true);
+							await codexRecovery.setCodexRecoveryEnabled(enabled);
+						},
+					},
+				},
+				status: { client },
+				benchmarks: {
+					client,
+					candidates: benchmarkCandidatesFromPi(scopedOrAvailableModels(ctx), pi.getThinkingLevel()),
+					currentIdentity: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "",
+					domain: benchmarksTask?.domain ?? "general",
+					type: benchmarksTask?.type ?? "general",
+				},
+				cache: { client, windowMs: 7 * MILLISECONDS_PER_DAY },
+			});
 			if (action === "" || action === "settings") {
-				await showSettingsPanel(ctx, enforcement, codexRecovery, usageBudgets, {
-					setEnforcement: async (enabled) => (enabled ? enable(ctx) : disable(ctx)),
-					setFooter: async (enabled) => {
-						await enforcement.setFooterEnabled(enabled);
-						showFooter(ctx);
-						if (enabled) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
-					},
-					setRecovery: async (enabled) => {
-						if (!enabled) cancelRecovery(true);
-						await codexRecovery.setCodexRecoveryEnabled(enabled);
-					},
-				});
+				await showJittorShell(ctx, buildShellDeps(), "settings");
 				return;
 			}
 			if (action === "benchmarks" || action.startsWith("benchmarks ")) {
@@ -620,19 +644,15 @@ export function registerJittorExtension(
 					ctx.ui.notify("Usage: /jittor benchmarks [coding|general] [research|planning|general]", "warning");
 					return;
 				}
-				const candidates = benchmarkCandidatesFromPi(scopedOrAvailableModels(ctx), pi.getThinkingLevel());
-				await showBenchmarkPanel(
+				await showJittorShell(
 					ctx,
-					client,
-					candidates,
-					`${ctx.model.provider}/${ctx.model.id}`,
-					requestedDomain ?? "general",
-					requestedType ?? "general",
+					buildShellDeps({ domain: requestedDomain ?? "general", type: requestedType ?? "general" }),
+					"benchmarks",
 				);
 				return;
 			}
 			if (action === "cache") {
-				await showCacheEconomicsPanel(ctx, client, 7 * MILLISECONDS_PER_DAY);
+				await showJittorShell(ctx, buildShellDeps(), "cache");
 				return;
 			}
 			if (action === "outcome accepted" || action === "outcome rejected") {
@@ -714,7 +734,7 @@ export function registerJittorExtension(
 				ctx.ui.notify("Jittor is monitor-only. Run /jittor on to re-enable blocking.", "info");
 				return;
 			}
-			await showJittorPanel(ctx, client);
+			await showJittorShell(ctx, buildShellDeps(), "status");
 		},
 	});
 

@@ -27,7 +27,7 @@ interface BenchmarkTheme {
 	bold(text: string): string;
 }
 
-type BenchmarkPanelAction = "refresh" | "close";
+export type BenchmarkPanelAction = "refresh" | "close";
 
 const COMPONENT_LABELS: Record<UtilityComponentName, string> = { quality: "Q", cost: "$", latency: "L", context: "C", reliability: "R" };
 
@@ -58,8 +58,19 @@ function benchmarkRows(shown: RankedModel[], currentIdentity: string): Record<st
 	});
 }
 
-export function renderBenchmarkView(result: ModelRankingResult, currentIdentity: string, width: number, theme: BenchmarkTheme): string[] {
-	const safeWidth = Math.max(1, width);
+/**
+ * The Benchmarks panel's real chrome plus its own r/Esc key handling, wired to `onAction` rather
+ * than a `done` callback directly -- reusable by renderBenchmarkView/showBenchmarkPanel below and
+ * the unified /jittor shell. Defaults to a full-chrome standalone panel (`framed: true`); pass
+ * `framed: false` when nesting this as one tab's content inside another framed container.
+ */
+export function createBenchmarkPanel(
+	result: ModelRankingResult,
+	currentIdentity: string,
+	theme: BenchmarkTheme,
+	onAction: (action: BenchmarkPanelAction) => void,
+	framed = true,
+): BorderedSelectPanel {
 	const shown = result.ranked.slice(0, BENCHMARK_TUI_MAX_CANDIDATES);
 	const currentIndex = result.ranked.findIndex((item) => item.identity.startsWith(`${currentIdentity}:`));
 	const recommended = result.ranked[0];
@@ -96,6 +107,10 @@ export function renderBenchmarkView(result: ModelRankingResult, currentIdentity:
 				: []),
 			...(result.scopeWarning ? [truncateToWidth(result.scopeWarning, availableWidth, "…")] : []),
 		],
+		handleInput(data: string): void {
+			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) onAction("close");
+			else if (data === "r") onAction("refresh");
+		},
 	};
 	return new BorderedSelectPanel({
 		title: "Jittor Benchmark Recommendations",
@@ -107,7 +122,40 @@ export function renderBenchmarkView(result: ModelRankingResult, currentIdentity:
 			help: (text) => theme.fg("dim", text),
 		},
 		measure: hostTextMeasure,
-	}).render(safeWidth);
+		framed,
+	});
+}
+
+export function renderBenchmarkView(result: ModelRankingResult, currentIdentity: string, width: number, theme: BenchmarkTheme): string[] {
+	return createBenchmarkPanel(result, currentIdentity, theme, () => undefined).render(Math.max(1, width));
+}
+
+/** Shared by the standalone benchmark panel below and the unified /jittor shell, so both fetch identically. */
+export async function fetchBenchmarkRanking(
+	ctx: ExtensionCommandContext,
+	client: BenchmarkPanelClient,
+	candidates: ModelCandidate[],
+	domain: ModelTaskDomain,
+	type: ModelTaskType,
+): Promise<ModelRankingResult> {
+	const session_id = ctx.sessionManager.getSessionId();
+	return (await client.call("models.rank", {
+		candidates,
+		session_id,
+		...sessionSecretField(session_id),
+		scopeAuthority: "available-models",
+		domain,
+		type,
+		budgetPressure: 0,
+		weights: {
+			quality: MODEL_RANKING_DEFAULT_QUALITY_WEIGHT,
+			cost: MODEL_RANKING_DEFAULT_COST_WEIGHT,
+			latency: MODEL_RANKING_DEFAULT_LATENCY_WEIGHT,
+			context: MODEL_RANKING_DEFAULT_CONTEXT_WEIGHT,
+			reliability: MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
+		},
+		sourceIds: ["openrouter-models", "lmarena-hf", "artificial-analysis-direct", "openrouter-design-arena"],
+	})) as ModelRankingResult;
 }
 
 export async function showBenchmarkPanel(
@@ -119,24 +167,7 @@ export async function showBenchmarkPanel(
 	type: ModelTaskType,
 ): Promise<void> {
 	for (;;) {
-		const session_id = ctx.sessionManager.getSessionId();
-		const result = (await client.call("models.rank", {
-			candidates,
-			session_id,
-			...sessionSecretField(session_id),
-			scopeAuthority: "available-models",
-			domain,
-			type,
-			budgetPressure: 0,
-			weights: {
-				quality: MODEL_RANKING_DEFAULT_QUALITY_WEIGHT,
-				cost: MODEL_RANKING_DEFAULT_COST_WEIGHT,
-				latency: MODEL_RANKING_DEFAULT_LATENCY_WEIGHT,
-				context: MODEL_RANKING_DEFAULT_CONTEXT_WEIGHT,
-				reliability: MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
-			},
-			sourceIds: ["openrouter-models", "lmarena-hf", "artificial-analysis-direct", "openrouter-design-arena"],
-		})) as ModelRankingResult;
+		const result = await fetchBenchmarkRanking(ctx, client, candidates, domain, type);
 		if (ctx.mode !== "tui") {
 			ctx.ui.notify(
 				renderBenchmarkView(result, currentIdentity, 100, { fg: (_color, text) => text, bold: (text) => text }).join("\n"),
@@ -144,16 +175,14 @@ export async function showBenchmarkPanel(
 			);
 			return;
 		}
-		const action = await ctx.ui.custom<BenchmarkPanelAction>((_tui, theme, _keybindings, done) => ({
-			invalidate() {},
-			render(width: number): string[] {
-				return renderBenchmarkView(result, currentIdentity, width, theme);
-			},
-			handleInput(data: string): void {
-				if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) done("close");
-				else if (data === "r") done("refresh");
-			},
-		}));
+		const action = await ctx.ui.custom<BenchmarkPanelAction>((_tui, theme, _keybindings, done) => {
+			const panel = createBenchmarkPanel(result, currentIdentity, theme, done);
+			return {
+				invalidate: () => panel.invalidate(),
+				render: (width: number) => panel.render(width),
+				handleInput: (data: string) => panel.handleInput(data),
+			};
+		});
 		if (!action || action === "close") return;
 		await client.call("benchmark.refresh", { force: true });
 	}

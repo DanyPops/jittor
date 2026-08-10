@@ -16,8 +16,8 @@ interface SettingsTheme {
 	bold(text: string): string;
 }
 
-type SettingsKey = "enforcement" | "footer" | "recovery" | `budget-${UsagePeriod}`;
-type SettingsAction = { kind: "activate"; key: SettingsKey } | { kind: "close" };
+export type SettingsKey = "enforcement" | "footer" | "recovery" | `budget-${UsagePeriod}`;
+export type SettingsAction = { kind: "activate"; key: SettingsKey } | { kind: "close" };
 
 export interface SettingsEffects {
 	setEnforcement(enabled: boolean): void | Promise<void>;
@@ -69,11 +69,13 @@ function menuTheme(theme: SettingsTheme): MenuTheme {
 	};
 }
 
-function createSettingsPanel(
+/** Defaults to a full-chrome standalone panel (`framed: true`); pass `framed: false` when nesting this as one tab's content inside another framed container (e.g. the unified /jittor shell's own outer border). */
+export function createSettingsPanel(
 	snapshot: SettingsSnapshot,
 	theme: SettingsTheme,
 	onAction: (action: SettingsAction) => void,
 	selected = 0,
+	framed = true,
 ): BorderedSelectPanel {
 	const menu = new Menu({
 		items: SETTINGS_KEYS.map((key) => ({ label: rowText(key, snapshot, theme), action: () => onAction({ kind: "activate", key }) })),
@@ -99,6 +101,7 @@ function createSettingsPanel(
 			help: (text) => theme.fg("dim", text),
 		},
 		measure: hostTextMeasure,
+		framed,
 	});
 }
 
@@ -128,6 +131,51 @@ async function editBudget(ctx: ExtensionCommandContext, budgets: UsageBudgetCont
 	}
 	await budgets.setUsageTokenBudget(period, tokens);
 	ctx.ui.notify(`${label} token budget set to ${tokens.toLocaleString()} tokens.`, "info");
+}
+
+/**
+ * Performs the real side effect for one resolved settings action -- confirmations, effects calls,
+ * budget prompts. A no-op for "close". Shared by the standalone settings panel below and the
+ * unified /jittor shell, so the two interactive surfaces can never drift apart.
+ */
+export async function runSettingsAction(
+	ctx: ExtensionCommandContext,
+	action: SettingsAction,
+	enforcement: EnforcementControl,
+	recovery: CodexRecoveryControl,
+	budgets: UsageBudgetControl,
+	effects: SettingsEffects,
+): Promise<void> {
+	if (action.kind === "close") return;
+	if (action.key === "enforcement") {
+		if (enforcement.isEnabled()) {
+			if (
+				await ctx.ui.confirm(
+					"Disable routing enforcement?",
+					"Jittor will remain monitor-only and will no longer block unsafe provider requests.",
+				)
+			)
+				await effects.setEnforcement(false);
+		} else await effects.setEnforcement(true);
+		return;
+	}
+	if (action.key === "footer") {
+		await effects.setFooter(!enforcement.isFooterEnabled());
+		return;
+	}
+	if (action.key === "recovery") {
+		if (!recovery.isCodexRecoveryEnabled()) {
+			if (
+				await ctx.ui.confirm(
+					"Enable Codex recovery?",
+					"Jittor may start bounded hidden retries only after transient Codex failures fully settle.",
+				)
+			)
+				await effects.setRecovery(true);
+		} else await effects.setRecovery(false);
+		return;
+	}
+	await editBudget(ctx, budgets, action.key.slice("budget-".length) as UsagePeriod);
 }
 
 export async function showSettingsPanel(
@@ -160,34 +208,6 @@ export async function showSettingsPanel(
 			};
 		});
 		if (!action || action.kind === "close") return;
-		if (action.key === "enforcement") {
-			if (enforcement.isEnabled()) {
-				if (
-					await ctx.ui.confirm(
-						"Disable routing enforcement?",
-						"Jittor will remain monitor-only and will no longer block unsafe provider requests.",
-					)
-				)
-					await effects.setEnforcement(false);
-			} else await effects.setEnforcement(true);
-			continue;
-		}
-		if (action.key === "footer") {
-			await effects.setFooter(!enforcement.isFooterEnabled());
-			continue;
-		}
-		if (action.key === "recovery") {
-			if (!recovery.isCodexRecoveryEnabled()) {
-				if (
-					await ctx.ui.confirm(
-						"Enable Codex recovery?",
-						"Jittor may start bounded hidden retries only after transient Codex failures fully settle.",
-					)
-				)
-					await effects.setRecovery(true);
-			} else await effects.setRecovery(false);
-			continue;
-		}
-		await editBudget(ctx, budgets, action.key.slice("budget-".length) as UsagePeriod);
+		await runSettingsAction(ctx, action, enforcement, recovery, budgets, effects);
 	}
 }

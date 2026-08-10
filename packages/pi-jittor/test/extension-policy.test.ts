@@ -577,7 +577,7 @@ describe("Jittor Pi actuator", () => {
 		let opened = false;
 		(app.ctx.ui as any).custom = async () => {
 			opened = true;
-			return "close";
+			return { kind: "close" };
 		};
 		await app.commands.get("jittor").handler("status", app.ctx);
 		expect(opened).toBe(true);
@@ -589,7 +589,7 @@ describe("Jittor Pi actuator", () => {
 		let opened = false;
 		(app.ctx.ui as any).custom = async () => {
 			opened = true;
-			return "close";
+			return { kind: "close" };
 		};
 		await app.commands.get("jittor").handler("typo", app.ctx);
 		expect(opened).toBe(false);
@@ -612,7 +612,7 @@ describe("Jittor Pi actuator", () => {
 		(app.ctx.ui as any).custom = async (factory: Function) => {
 			const component = factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
 			rendered = component.render(80).join("\n");
-			return "close";
+			return { kind: "close" };
 		};
 		await app.commands.get("jittor").handler("benchmarks coding", app.ctx);
 		const call = client.calls.find((candidate) => candidate.operation === "models.rank")!;
@@ -631,7 +631,7 @@ describe("Jittor Pi actuator", () => {
 		(app.ctx.ui as any).custom = async (factory: Function) => {
 			const component = factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
 			rendered = component.render(200).join("\n");
-			return "close";
+			return { kind: "close" };
 		};
 		client.cacheEconomics = {
 			since: 0,
@@ -685,7 +685,7 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client);
 		(app.ctx.ui as any).custom = async (factory: Function) => {
 			factory({}, { fg: (_color: string, text: string) => text, bold: (text: string) => text }, {}, () => undefined);
-			return "close";
+			return { kind: "close" };
 		};
 
 		await app.commands.get("jittor").handler("benchmarks research", app.ctx);

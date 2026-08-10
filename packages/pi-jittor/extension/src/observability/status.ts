@@ -9,7 +9,8 @@ import {
 	TELEMETRY_STALE_AFTER_MS,
 } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { BorderedSelectPanel, type TextMeasure } from "malevich-tui-components";
 import { sessionSecretField } from "../session-identity.ts";
 import type { ProviderBudget } from "./footer.ts";
 
@@ -32,7 +33,14 @@ export function providerBudgetMetricQuery(status: RouterStatus): MetricQuery | n
 	}
 }
 
-type PanelAction = "pause" | "resume" | "refresh" | "override" | "clear-override" | "close";
+export type PanelAction = "pause" | "resume" | "refresh" | "override" | "clear-override" | "close";
+
+export interface StatusPanelTheme {
+	fg(color: string, text: string): string;
+	bold(text: string): string;
+}
+
+const hostTextMeasure: TextMeasure = { visibleWidth, truncateToWidth };
 
 function latest(
 	rows: StoredMetricObservation[],
@@ -326,10 +334,13 @@ export function buildStatusView(status: RouterStatus, metrics: StoredMetricObser
 	return lines;
 }
 
-async function snapshot(
-	client: JittorPanelClient,
-	sessionId: string,
-): Promise<{ status: RouterStatus; metrics: StoredMetricObservation[] }> {
+export interface StatusPanelSnapshot {
+	status: RouterStatus;
+	metrics: StoredMetricObservation[];
+}
+
+/** Shared by the standalone status panel below and the unified /jittor shell, so both fetch identically. */
+export async function fetchStatusSnapshot(client: JittorPanelClient, sessionId: string): Promise<StatusPanelSnapshot> {
 	const status = (await client.call("router.status", { session_id: sessionId })) as RouterStatus;
 	const query = providerBudgetMetricQuery(status);
 	const metrics = query ? ((await client.call("metrics.query", query)) as StoredMetricObservation[]) : [];
@@ -347,68 +358,109 @@ async function chooseOverride(ctx: ExtensionCommandContext, routes: Route[]): Pr
 	return index >= 0 ? routes[index] : undefined;
 }
 
+/**
+ * The Status panel's real chrome (a BorderedSelectPanel, replacing the hand-rolled border lines
+ * this used to draw directly) plus its own r/p/o/c/Esc key handling, wired to `onAction` rather
+ * than a `done` callback directly -- reusable by the standalone panel below and the unified
+ * /jittor shell. Defaults to a full-chrome standalone panel (`framed: true`); pass `framed: false`
+ * when nesting this as one tab's content inside another framed container.
+ */
+export function createStatusPanel(
+	current: StatusPanelSnapshot,
+	theme: StatusPanelTheme,
+	onAction: (action: PanelAction) => void,
+	framed = true,
+): BorderedSelectPanel {
+	const controls = current.status.paused
+		? "r refresh · p release emergency halt · o override · c clear override · Esc close"
+		: "r refresh · p emergency halt · o override · c clear override · Esc close";
+	const content = {
+		invalidate: () => {},
+		render: (width: number): string[] =>
+			buildStatusView(current.status, current.metrics).map((line) => truncateToWidth(` ${line}`, width, "…")),
+		handleInput(data: string): void {
+			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) onAction("close");
+			else if (data === "r") onAction("refresh");
+			else if (data === "p") onAction(current.status.paused ? "resume" : "pause");
+			else if (data === "o") onAction("override");
+			else if (data === "c") onAction("clear-override");
+		},
+	};
+	return new BorderedSelectPanel({
+		title: "Jittor",
+		list: content,
+		helpText: controls,
+		theme: {
+			border: (text) => theme.fg("borderMuted", text),
+			title: theme.bold,
+			help: (text) => theme.fg("dim", text),
+		},
+		measure: hostTextMeasure,
+		framed,
+	});
+}
+
+/**
+ * Performs the real side effect for one resolved status action -- confirmations and daemon calls.
+ * A no-op for "close" and "refresh" is handled by the caller (refresh is a plain re-poll with no
+ * confirmation). Shared by the standalone status panel below and the unified /jittor shell.
+ */
+export async function runStatusAction(
+	ctx: ExtensionCommandContext,
+	client: JittorPanelClient,
+	action: PanelAction,
+	current: StatusPanelSnapshot,
+	sessionId: string,
+): Promise<void> {
+	if (action === "close") return;
+	if (action === "refresh") {
+		await client.call("telemetry.poll", {});
+		return;
+	}
+	if (action === "pause" || action === "resume") {
+		if (
+			await ctx.ui.confirm(
+				action === "pause" ? "Emergency-halt provider requests?" : "Release emergency halt?",
+				"This changes provider-request enforcement. Use /jittor off to disable blocking entirely.",
+			)
+		) {
+			await client.call(action === "pause" ? "router.pause" : "router.resume", { session_id: sessionId, ...sessionSecretField(sessionId) });
+		}
+		return;
+	}
+	if (action === "clear-override") {
+		if (await ctx.ui.confirm("Clear route override?", "Policy-controlled routing will resume."))
+			await client.call("router.clear_override", { session_id: sessionId, ...sessionSecretField(sessionId) });
+		return;
+	}
+	const route = await chooseOverride(ctx, current.status.availableRoutes);
+	if (route && (await ctx.ui.confirm("Apply route override?", `${routeText(route)} for one hour`))) {
+		await client.call("router.override", {
+			route,
+			expiresAt: Date.now() + 60 * 60 * 1_000,
+			session_id: sessionId,
+			...sessionSecretField(sessionId),
+		});
+	}
+}
+
 export async function showJittorPanel(ctx: ExtensionCommandContext, client: JittorPanelClient): Promise<void> {
 	const session_id = ctx.sessionManager.getSessionId();
 	for (;;) {
-		const current = await snapshot(client, session_id);
+		const current = await fetchStatusSnapshot(client, session_id);
 		if (ctx.mode !== "tui") {
 			ctx.ui.notify(buildStatusView(current.status, current.metrics).join("\n"), "info");
 			return;
 		}
-		const action = await ctx.ui.custom<PanelAction>((_tui, theme, _keybindings, done) => ({
-			invalidate() {},
-			render(width: number): string[] {
-				const border = theme.fg("borderMuted", "─".repeat(Math.max(1, width)));
-				const controls = current.status.paused
-					? "r refresh · p release emergency halt · o override · c clear override · Esc close"
-					: "r refresh · p emergency halt · o override · c clear override · Esc close";
-				return [
-					border,
-					truncateToWidth(theme.bold("Jittor"), width, ""),
-					border,
-					...buildStatusView(current.status, current.metrics).map((line) => truncateToWidth(` ${line}`, width, "…")),
-					border,
-					truncateToWidth(theme.fg("dim", controls), width, "…"),
-					border,
-				];
-			},
-			handleInput(data: string): void {
-				if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) done("close");
-				else if (data === "r") done("refresh");
-				else if (data === "p") done(current.status.paused ? "resume" : "pause");
-				else if (data === "o") done("override");
-				else if (data === "c") done("clear-override");
-			},
-		}));
+		const action = await ctx.ui.custom<PanelAction>((_tui, theme, _keybindings, done) => {
+			const panel = createStatusPanel(current, theme, done);
+			return {
+				invalidate: () => panel.invalidate(),
+				render: (width: number) => panel.render(width),
+				handleInput: (data: string) => panel.handleInput(data),
+			};
+		});
 		if (!action || action === "close") return;
-		if (action === "refresh") {
-			await client.call("telemetry.poll", {});
-			continue;
-		}
-		if (action === "pause" || action === "resume") {
-			if (
-				await ctx.ui.confirm(
-					action === "pause" ? "Emergency-halt provider requests?" : "Release emergency halt?",
-					"This changes provider-request enforcement. Use /jittor off to disable blocking entirely.",
-				)
-			) {
-				await client.call(action === "pause" ? "router.pause" : "router.resume", { session_id, ...sessionSecretField(session_id) });
-			}
-			continue;
-		}
-		if (action === "clear-override") {
-			if (await ctx.ui.confirm("Clear route override?", "Policy-controlled routing will resume."))
-				await client.call("router.clear_override", { session_id, ...sessionSecretField(session_id) });
-			continue;
-		}
-		const route = await chooseOverride(ctx, current.status.availableRoutes);
-		if (route && (await ctx.ui.confirm("Apply route override?", `${routeText(route)} for one hour`))) {
-			await client.call("router.override", {
-				route,
-				expiresAt: Date.now() + 60 * 60 * 1_000,
-				session_id,
-				...sessionSecretField(session_id),
-			});
-		}
+		await runStatusAction(ctx, client, action, current, session_id);
 	}
 }
