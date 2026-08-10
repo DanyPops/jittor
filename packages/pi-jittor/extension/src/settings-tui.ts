@@ -25,7 +25,21 @@ export interface SettingsEffects {
 	setRecovery(enabled: boolean): void | Promise<void>;
 }
 
-const SETTINGS_KEYS: SettingsKey[] = ["enforcement", "footer", "recovery", ...USAGE_PERIODS.map(({ id }) => `budget-${id}` as const)];
+// Enforcement -> Budget -> Providers -> UI: safety posture (the global kill-switch everything
+// else is downstream of) leads, followed by spend limits, then provider-specific quirks (today,
+// only Codex recovery -- grouped under its own header instead of sitting flat next to global
+// switches, which read as "too Codex-oriented" with nothing to signal its narrower scope), then
+// display preferences last.
+const SETTINGS_KEYS: SettingsKey[] = ["enforcement", ...USAGE_PERIODS.map(({ id }) => `budget-${id}` as const), "recovery", "footer"];
+
+type SettingsCategory = "Enforcement" | "Budget" | "Providers" | "UI";
+
+function categoryOf(key: SettingsKey): SettingsCategory {
+	if (key === "enforcement") return "Enforcement";
+	if (key === "recovery") return "Providers";
+	if (key === "footer") return "UI";
+	return "Budget";
+}
 
 function state(enabled: boolean, theme: SettingsTheme): string {
 	return enabled ? theme.fg("success", "ON") : theme.fg("muted", "OFF");
@@ -69,6 +83,47 @@ function menuTheme(theme: SettingsTheme): MenuTheme {
 	};
 }
 
+/**
+ * Wraps `menu` (already built over `SETTINGS_KEYS` in order, with no `title` of its own) so its
+ * rendered output gets a non-selectable category header line inserted before each contiguous run
+ * of same-category rows. `Menu` has no native header/divider item type, and keeps its selected
+ * index private with no getter, so headers are inserted into the *rendered lines*, never built as
+ * extra selectable items -- `menu`'s own input handling, selection state, and every existing
+ * keybinding stay completely untouched; this only changes what gets displayed.
+ *
+ * With no `title` set, `Menu.render` always returns exactly `[rule, ...itemLines, rule]` (see
+ * malevich-tui-components' Menu/renderFramedPanel). If that ever stops holding -- a future
+ * malevich release changing Menu's own frame shape -- this falls back to Menu's unmodified
+ * output rather than slicing the wrong lines into a garbled view.
+ */
+function groupedSettingsMenu(
+	menu: Menu,
+	theme: SettingsTheme,
+): { invalidate(): void; handleInput(data: string): void; render(width: number): string[] } {
+	return {
+		invalidate: () => menu.invalidate(),
+		handleInput: (data: string) => menu.handleInput(data),
+		render(width: number): string[] {
+			const rendered = menu.render(width);
+			if (rendered.length !== SETTINGS_KEYS.length + 2) return rendered;
+			const itemLines = rendered.slice(1, 1 + SETTINGS_KEYS.length);
+			const out: string[] = [rendered[0]!];
+			let lastCategory: SettingsCategory | undefined;
+			for (const [index, key] of SETTINGS_KEYS.entries()) {
+				const category = categoryOf(key);
+				if (category !== lastCategory) {
+					if (lastCategory !== undefined) out.push("");
+					out.push(theme.bold(theme.fg("dim", category)));
+					lastCategory = category;
+				}
+				out.push(itemLines[index]!);
+			}
+			out.push(rendered.at(-1)!);
+			return out;
+		},
+	};
+}
+
 /** Defaults to a full-chrome standalone panel (`framed: true`); pass `framed: false` when nesting this as one tab's content inside another framed container (e.g. the unified /jittor shell's own outer border). */
 export function createSettingsPanel(
 	snapshot: SettingsSnapshot,
@@ -93,7 +148,7 @@ export function createSettingsPanel(
 	for (let index = 0; index < selected; index += 1) menu.handleInput("\x1b[B");
 	return new BorderedSelectPanel({
 		title: "Jittor Settings",
-		list: menu,
+		list: groupedSettingsMenu(menu, theme),
 		helpText: "Token budgets are user values; provider quotas remain separate. · ↑/↓ select · Enter edit · Esc close",
 		theme: {
 			border: (text) => theme.fg("borderMuted", text),
