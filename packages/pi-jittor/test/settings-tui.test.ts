@@ -100,28 +100,48 @@ describe("Jittor settings TUI", () => {
 		expect(panels).toBe(2);
 	});
 
-	it("requires confirmation for weaker enforcement and recovery changes", async () => {
+	it("requires confirmation for weaker enforcement and recovery changes, rendered as jittor's own Dialog rather than a host-native confirm prompt", async () => {
 		const settings = control();
-		const actions = [{ kind: "activate", key: "enforcement" }, { kind: "activate", key: "recovery" }, { kind: "close" }];
-		const confirmations: string[] = [];
+		let step = 0;
 		const ctx = {
 			mode: "tui",
 			ui: {
 				async custom(factory: Function) {
-					const component = factory({ requestRender() {} }, theme, {}, () => undefined);
-					expect(component.render(60).join("\n")).toContain("Jittor Settings");
-					return actions.shift();
-				},
-				async confirm(title: string) {
-					confirmations.push(title);
-					return title.includes("recovery");
+					step += 1;
+					let resolved: unknown;
+					const component = factory({ requestRender() {} }, theme, {}, (value: unknown) => {
+						resolved = value;
+					});
+					const rendered = component.render(60).join("\n");
+					if (step === 1) {
+						expect(rendered).toContain("Jittor Settings");
+						return { kind: "activate", key: "enforcement" };
+					}
+					if (step === 2) {
+						// The confirm dialog is jittor's own Dialog, rendered with the outer panel's theme --
+						// not a separate host-native ctx.ui.confirm prompt.
+						expect(rendered).toContain("Disable routing enforcement?");
+						component.handleInput("n"); // decline -- enforcement stays on
+						return resolved;
+					}
+					if (step === 3) {
+						expect(rendered).toContain("Jittor Settings");
+						return { kind: "activate", key: "recovery" };
+					}
+					if (step === 4) {
+						expect(rendered).toContain("Enable Codex recovery?");
+						component.handleInput("y"); // confirm
+						return resolved;
+					}
+					expect(rendered).toContain("Jittor Settings");
+					return { kind: "close" };
 				},
 			},
 		} as unknown as ExtensionCommandContext;
 		await showSettingsPanel(ctx, settings, settings, settings);
 		expect(settings.values.enforcementEnabled).toBe(true);
 		expect(settings.values.codexRecoveryEnabled).toBe(true);
-		expect(confirmations).toEqual(["Disable routing enforcement?", "Enable Codex recovery?"]);
+		expect(step).toBe(5);
 	});
 
 	it("edits and clears user token budgets without touching provider quotas", async () => {

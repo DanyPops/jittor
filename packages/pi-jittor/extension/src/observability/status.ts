@@ -12,6 +12,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { BorderedSelectPanel, type TextMeasure } from "malevich-tui-components";
 import { sessionSecretField } from "../session-identity.ts";
+import { showConfirmDialog, showRouteOverrideMenu } from "../tui-prompts.ts";
 import type { ProviderBudget } from "./footer.ts";
 
 export interface JittorPanelClient {
@@ -352,10 +353,7 @@ async function chooseOverride(ctx: ExtensionCommandContext, routes: Route[]): Pr
 		ctx.ui.notify("Pi reports no authenticated routes for the current provider.", "warning");
 		return undefined;
 	}
-	const labels = routes.map(routeText);
-	const selected = await ctx.ui.select("Override route", labels);
-	const index = selected ? labels.indexOf(selected) : -1;
-	return index >= 0 ? routes[index] : undefined;
+	return showRouteOverrideMenu(ctx, routes, routeText);
 }
 
 /**
@@ -419,7 +417,8 @@ export async function runStatusAction(
 	}
 	if (action === "pause" || action === "resume") {
 		if (
-			await ctx.ui.confirm(
+			await showConfirmDialog(
+				ctx,
 				action === "pause" ? "Emergency-halt provider requests?" : "Release emergency halt?",
 				"This changes provider-request enforcement. Use /jittor off to disable blocking entirely.",
 			)
@@ -429,12 +428,12 @@ export async function runStatusAction(
 		return;
 	}
 	if (action === "clear-override") {
-		if (await ctx.ui.confirm("Clear route override?", "Policy-controlled routing will resume."))
+		if (await showConfirmDialog(ctx, "Clear route override?", "Policy-controlled routing will resume."))
 			await client.call("router.clear_override", { session_id: sessionId, ...sessionSecretField(sessionId) });
 		return;
 	}
 	const route = await chooseOverride(ctx, current.status.availableRoutes);
-	if (route && (await ctx.ui.confirm("Apply route override?", `${routeText(route)} for one hour`))) {
+	if (route && (await showConfirmDialog(ctx, "Apply route override?", `${routeText(route)} for one hour`))) {
 		await client.call("router.override", {
 			route,
 			expiresAt: Date.now() + 60 * 60 * 1_000,

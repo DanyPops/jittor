@@ -3,6 +3,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { BorderedSelectPanel, Menu, type MenuTheme, type TextMeasure } from "malevich-tui-components";
 import type { CodexRecoveryControl, EnforcementControl, UsageBudgetControl } from "./settings.ts";
+import { showConfirmDialog } from "./tui-prompts.ts";
 
 export interface SettingsSnapshot {
 	enforcementEnabled: boolean;
@@ -205,7 +206,8 @@ export async function runSettingsAction(
 	if (action.key === "enforcement") {
 		if (enforcement.isEnabled()) {
 			if (
-				await ctx.ui.confirm(
+				await showConfirmDialog(
+					ctx,
 					"Disable routing enforcement?",
 					"Jittor will remain monitor-only and will no longer block unsafe provider requests.",
 				)
@@ -221,7 +223,8 @@ export async function runSettingsAction(
 	if (action.key === "recovery") {
 		if (!recovery.isCodexRecoveryEnabled()) {
 			if (
-				await ctx.ui.confirm(
+				await showConfirmDialog(
+					ctx,
 					"Enable Codex recovery?",
 					"Jittor may start bounded hidden retries only after transient Codex failures fully settle.",
 				)

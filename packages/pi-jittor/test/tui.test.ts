@@ -53,9 +53,9 @@ describe("Jittor status TUI", () => {
 		expect(text).toContain("Anthropic tokens: 70.0% left");
 	});
 
-	it("requires confirmation before pausing routing", async () => {
+	it("requires confirmation before pausing routing, rendered as jittor's own Dialog rather than a host-native confirm prompt", async () => {
 		const calls: string[] = [];
-		let panels = 0;
+		let panelCount = 0;
 		const client: JittorPanelClient = {
 			async call(operation: string) {
 				calls.push(operation);
@@ -71,13 +71,25 @@ describe("Jittor status TUI", () => {
 			sessionManager: { getSessionId: () => "test-session" },
 			ui: {
 				async custom(factory: any) {
-					panels += 1;
-					const component = factory({ terminal: { rows: 30 }, requestRender() {} }, theme, {}, (value: string) => value);
-					component.render(100);
-					return panels === 1 ? "pause" : "close";
-				},
-				async confirm() {
-					return true;
+					panelCount += 1;
+					let resolved: unknown;
+					const component = factory({ terminal: { rows: 30 }, requestRender() {} }, theme, {}, (value: unknown) => {
+						resolved = value;
+					});
+					const rendered = component.render(100).join("\n");
+					if (panelCount === 1) {
+						// The status panel itself: press "p" to request the emergency halt.
+						component.handleInput("p");
+						return resolved;
+					}
+					if (panelCount === 2) {
+						// jittor's own confirm Dialog, not a separate host-native ctx.ui.confirm prompt.
+						expect(rendered).toContain("Emergency-halt provider requests?");
+						component.handleInput("y");
+						return resolved;
+					}
+					component.handleInput("\x1b");
+					return resolved;
 				},
 				notify() {},
 			},
@@ -85,7 +97,7 @@ describe("Jittor status TUI", () => {
 
 		await showJittorPanel(ctx, client);
 		expect(calls).toContain("router.pause");
-		expect(panels).toBe(2);
+		expect(panelCount).toBe(3);
 	});
 });
 
