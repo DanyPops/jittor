@@ -583,6 +583,28 @@ describe("Jittor Pi actuator", () => {
 		expect(opened).toBe(true);
 	});
 
+	it("rejects an unrecognized /jittor subcommand with a usage error instead of silently opening the status panel", async () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		let opened = false;
+		(app.ctx.ui as any).custom = async () => {
+			opened = true;
+			return "close";
+		};
+		await app.commands.get("jittor").handler("typo", app.ctx);
+		expect(opened).toBe(false);
+		expect(app.notifications.at(-1)).toContain('Unknown /jittor command "typo"');
+	});
+
+	it("offers real /jittor subcommand completions via getArgumentCompletions", () => {
+		const client = new FakeClient();
+		const app = harness(client);
+		const command = app.commands.get("jittor") as { getArgumentCompletions?: (prefix: string) => Array<{ value: string }> | null };
+		expect(command.getArgumentCompletions).toBeDefined();
+		const values = command.getArgumentCompletions!("rec");
+		expect(values?.map((item) => item.value)).toContain("recovery");
+	});
+
 	it("sends only public Pi candidates to the advisory benchmark ranking panel", async () => {
 		const client = new FakeClient();
 		const app = harness(client);

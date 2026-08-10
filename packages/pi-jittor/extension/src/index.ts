@@ -34,6 +34,7 @@ import {
 	validateTaskFocusEvent,
 } from "@danypops/jittor";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { jittorArgumentCompletions, jittorUsageError } from "./jittor-command.ts";
 import { showCacheEconomicsPanel } from "./observability/cache-economics-view.ts";
 import {
 	basePromptSegment,
@@ -574,8 +575,14 @@ export function registerJittorExtension(
 
 	pi.registerCommand("jittor", {
 		description: "Jittor settings, routing status, benchmarks, cache economics, and Codex recovery controls",
+		getArgumentCompletions: jittorArgumentCompletions,
 		handler: async (args, ctx) => {
 			const action = args.trim().toLowerCase();
+			const usageError = jittorUsageError(action);
+			if (usageError) {
+				ctx.ui.notify(usageError, "warning");
+				return;
+			}
 			if (action === "" || action === "settings") {
 				await showSettingsPanel(ctx, enforcement, codexRecovery, usageBudgets, {
 					setEnforcement: async (enabled) => (enabled ? enable(ctx) : disable(ctx)),
@@ -701,8 +708,8 @@ export function registerJittorExtension(
 				);
 				return;
 			}
-			// Reached only for the explicit "status" keyword or any other unrecognized text; bare "" is
-			// handled above by the settings branch, so this always has a non-empty, non-settings action.
+			// Reached only for the explicit "status" keyword -- jittorUsageError above already rejected
+			// anything else this handler doesn't recognize, so this is never an unrecognized fallback.
 			if (!enforcement.isEnabled()) {
 				ctx.ui.notify("Jittor is monitor-only. Run /jittor on to re-enable blocking.", "info");
 				return;
