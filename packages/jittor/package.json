@@ -1,6 +1,6 @@
 {
   "name": "@danypops/jittor",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "description": "Just-in-Time Token Optimization Router for Pi -- token and context observability with optimization policies",
   "type": "module",
   "main": "./src/index.ts",
