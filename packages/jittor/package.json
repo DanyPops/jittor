@@ -15,6 +15,17 @@
     "serve": "bun src/cli.ts serve",
     "service:install": "bun src/cli.ts service install"
   },
+  "packed": {
+    "daemonService": {
+      "name": "jittor",
+      "displayName": "Jittor",
+      "binPath": "src/cli.ts",
+      "args": ["serve"],
+      "handleFilename": "daemon.json",
+      "restartOnFailure": true,
+      "restartSec": 2
+    }
+  },
   "dependencies": {
     "@danypops/vehicle-core": "^0.12.1",
     "@danypops/vehicle-server": "^0.17.0",
