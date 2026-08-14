@@ -274,6 +274,7 @@ export async function showJittorShell(
 				tabs,
 				theme: tabBarTheme(theme),
 				initialKey: activeKey,
+				measure: hostTextMeasure,
 				onChange: (key) => {
 					activeKey = key as JittorTabKey;
 					done({ kind: "tab-changed" });
