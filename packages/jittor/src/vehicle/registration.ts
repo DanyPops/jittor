@@ -26,8 +26,7 @@ import type { VehicleEffect, VehicleIdempotency } from "@danypops/vehicle-core";
 import { bindVehicleOperation, defineErrorMapping, defineVehicleOperation, passthroughVehicleSchema } from "@danypops/vehicle-core";
 import type { VehicleRegistry } from "@danypops/vehicle-server";
 import { InvalidSessionSecretError } from "../sessions/identity.ts";
-import type { OperationHandlerMap } from "./operation-types.ts";
-import type { OperationName } from "./service.ts";
+import type { OperationHandlerMap, OperationName } from "./operation-types.ts";
 
 /** Preserves the legacy route's 403 for invalid session credentials; every other rejection remains validation. */
 const withJittorErrorParity = defineErrorMapping([

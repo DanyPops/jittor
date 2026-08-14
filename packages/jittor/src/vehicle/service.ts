@@ -34,52 +34,14 @@ import { contextOperations } from "./context-operations.ts";
 import { exportOperations } from "./export-operations.ts";
 import { metricsOperations } from "./metric-operations.ts";
 import { modelRankingOperations } from "./model-ranking-operations.ts";
-import type { OperationHandlerMap } from "./operation-types.ts";
+import { EXPECTED_OPERATION_NAMES, type OperationHandlerMap, type OperationName } from "./operation-types.ts";
 import { registerJittorVehicleOperations } from "./registration.ts";
 import { routerOperations } from "./routing-operations.ts";
 import { sessionIdentityOperations } from "./session-operations.ts";
 import { usageImportOperations } from "./usage-import-operations.ts";
 
-export const EXPECTED_OPERATION_NAMES = [
-	"metrics.record",
-	"metrics.record_batch",
-	"metrics.query",
-	"metrics.distinct_scopes",
-	"metrics.usage_series",
-	"metrics.cost_by_task",
-	"metrics.prune",
-	"benchmark.refresh",
-	"benchmark.status",
-	"benchmark.query",
-	"catalog.refresh",
-	"catalog.status",
-	"catalog.query",
-	"usage.import",
-	"usage.import_status",
-	"usage.import_cancel",
-	"export.status",
-	"export.flush",
-	"session.register",
-	"session.release",
-	"models.rank",
-	"context.assess",
-	"context.delta",
-	"context.snapshot",
-	"compaction.estimate",
-	"service.checkpoint",
-	"telemetry.poll",
-	"router.status",
-	"router.decide",
-	"router.pause",
-	"router.resume",
-	"router.override",
-	"router.clear_override",
-	"router.current_route",
-	"router.available_routes",
-	"cache.economics",
-] as const;
+export { EXPECTED_OPERATION_NAMES, type OperationName };
 
-export type OperationName = (typeof EXPECTED_OPERATION_NAMES)[number];
 interface RouterScopeInput {
 	session_id?: string;
 	session_secret?: string;
