@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-jittor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Pi extension for Jittor token and context observability with optimization controls backed by the @danypops/jittor daemon",
   "type": "module",
   "keywords": ["pi-package", "llm-router", "token-budget"],
