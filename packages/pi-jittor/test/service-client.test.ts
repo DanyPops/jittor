@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { JittorClient } from "@danypops/jittor";
+import { MutationOutcomeUnknownError } from "@danypops/vehicle-client/daemon-client";
 import {
 	callJittor,
 	operationRetryMode,
@@ -51,7 +52,10 @@ describe("Jittor vehicle-client retrying client wiring", () => {
 		expect(operationRetryMode("context.snapshot")).toBe("once");
 		expect(operationRetryMode("context.delta")).toBe("retry");
 		expect(operationRetryMode("router.pause")).toBe("once");
-		await expect(call("metrics.record", {})).rejects.toThrow(TypeError);
+		// vehicle-client's own callOnce() wraps a mutating call's underlying failure in
+		// MutationOutcomeUnknownError -- never silently retryable, since whether the mutation
+		// actually landed is genuinely unknown, not a plain connection-refused TypeError anymore.
+		await expect(call("metrics.record", {})).rejects.toThrow(MutationOutcomeUnknownError);
 		expect(connectorCalls).toBe(1);
 
 		expect(await call("router.status", {})).toEqual({ ready: true });

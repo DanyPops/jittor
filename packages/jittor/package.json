@@ -1,6 +1,6 @@
 {
   "name": "@danypops/jittor",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "description": "Just-in-Time Token Optimization Router for Pi -- token and context observability with optimization policies",
   "type": "module",
   "main": "./src/index.ts",
@@ -32,9 +32,9 @@
     }
   },
   "dependencies": {
-    "@danypops/vehicle-core": "^0.12.1",
-    "@danypops/vehicle-server": "^0.17.0",
-    "@danypops/vehicle-client": "^0.5.1",
+    "@danypops/vehicle-core": "^0.17.1",
+    "@danypops/vehicle-server": "^0.24.5",
+    "@danypops/vehicle-client": "^0.10.1",
     "google-auth-library": "^10.9.0",
     "gpt-tokenizer": "^3.4.0"
   },

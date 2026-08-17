@@ -222,7 +222,7 @@ describe("Jittor systemd unit", () => {
 		expect(unit).toContain("PrivateTmp=true");
 		expect(unit).toContain("After=default.target network-online.target");
 		expect(unit).toContain("Wants=network-online.target");
-		expect(unit).toContain('Environment="DAEMON_KIT_LAUNCH_PROVENANCE=service"');
+		expect(unit).toContain('Environment="VEHICLE_LAUNCH_PROVENANCE=service"');
 		expect(
 			renderSystemdUnit({
 				bunBin: "/usr/bin/bun",
