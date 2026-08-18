@@ -174,6 +174,60 @@ describe("Jittor daemon state", () => {
 		}
 	});
 
+	it("vehicle_usage.query/vehicle_usage.recordClientEvent are live on the real manifest, under jittor's own operationPrefix override, and a real op call is recorded (mirrors process/daemon.ts's own wiring)", async () => {
+		// Deliberately NOT connectJittorClient/`/api/v1/ops` here -- that's jittor's own separate,
+		// hand-written native RPC surface; only `/vehicle/*` reaches service.vehicleRegistry.invoke(),
+		// where the metrics middleware is wired. Also deliberately NOT the default "metrics" prefix:
+		// jittor's own domain already owns that namespace (metrics.query/metrics.record/... are real,
+		// pre-existing jittor operations, a completely different concept), so this daemon registers
+		// under "vehicle_usage" instead -- see daemon.ts's own comment on that choice.
+		const { RemoteVehicleClient } = await import("@danypops/vehicle-client/http");
+		const root = mkdtempSync(join(tmpdir(), "jittor-daemon-vehicle-usage-"));
+		const paths = resolveJittorPaths({
+			home: root,
+			uid: 1000,
+			env: {
+				XDG_DATA_HOME: join(root, "data"),
+				XDG_STATE_HOME: join(root, "state"),
+				XDG_RUNTIME_DIR: join(root, "run"),
+				XDG_CONFIG_HOME: join(root, "config"),
+			},
+		});
+		const daemon = await startDaemon(paths);
+		try {
+			const token = ensureAuthToken(paths);
+			const vehicleClient = new RemoteVehicleClient({ baseUrl: `http://${daemon.host}:${daemon.port}`, token });
+
+			const manifest = await vehicleClient.manifest();
+			const names = manifest.operations.map((op) => op.name);
+			expect(names).toContain("vehicle_usage.query");
+			expect(names).toContain("vehicle_usage.recordClientEvent");
+			// jittor's own real metrics.* namespace is unaffected -- the whole point of the override.
+			expect(names).toContain("metrics.query");
+
+			await vehicleClient.invoke(
+				"metrics.distinct_scopes",
+				1,
+				{ source: "jittor", since: 0, until: Date.now() },
+				{ permissions: ["jittor:read"] },
+			);
+
+			const rows = (await vehicleClient.invoke(
+				"vehicle_usage.query",
+				1,
+				{ toolName: "metrics.distinct_scopes" },
+				{ permissions: ["jittor:read"] },
+			)) as {
+				count: number;
+			}[];
+			expect(rows[0]).toMatchObject({ count: 1 });
+
+			await vehicleClient.close();
+		} finally {
+			await daemon.stop();
+		}
+	});
+
 	it("composes SQLite, authenticated HTTP, and the typed client", async () => {
 		const root = mkdtempSync(join(tmpdir(), "jittor-daemon-"));
 		const paths = resolveJittorPaths({

@@ -1,5 +1,8 @@
 import { join } from "node:path";
 import { type RunningDaemon, startDaemon as startDaemonKit } from "@danypops/vehicle-server/daemon";
+import { openVehicleMetricsStore } from "@danypops/vehicle-server/metrics";
+import { createVehicleMetricsMiddleware } from "@danypops/vehicle-server/metrics-middleware";
+import { registerVehicleMetricsOperations } from "@danypops/vehicle-server/metrics-operations";
 import { ArtificialAnalysisDirectSource } from "./artificial-analysis/benchmark-source.ts";
 import { CodexTelemetrySource } from "./codex/source.ts";
 import { MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
@@ -117,6 +120,18 @@ export async function startDaemon(
 	});
 	const service = new JittorService(metrics, router, benchmarks, modelRanker, sessionIdentity, undefined, catalog, usageImporter, exporter);
 
+	// Records how often each real operation is invoked (server-side, every caller) plus, via
+	// vehicle_usage.recordClientEvent, client-observed Vehicle Shell meta-tool calls -- see
+	// @danypops/vehicle-server's own metrics README section. Wired directly onto the same registry
+	// every real jittor operation is already registered on, so it's discoverable through the exact
+	// same tools_list/tools_man path as any other operation. operationPrefix: "vehicle_usage", NOT
+	// the default "metrics" -- jittor's own domain already owns a real, extensive metrics.*
+	// namespace (metrics.query/metrics.record/metrics.usage_series/...), a completely different
+	// concept (LLM usage/cost observations) from this module's tool/operation usage metrics.
+	const vehicleMetrics = openVehicleMetricsStore(paths.metrics);
+	service.vehicleRegistry.useExecutionMiddleware(createVehicleMetricsMiddleware(vehicleMetrics, "jittor"));
+	registerVehicleMetricsOperations(service.vehicleRegistry, vehicleMetrics, "jittor", { operationPrefix: "vehicle_usage" });
+
 	const daemon = await startDaemonKit({
 		daemonLabel: "Jittor",
 		handlePath: paths.handle,
@@ -155,6 +170,7 @@ export async function startDaemon(
 		onShutdown: async () => {
 			await exporter.shutdown();
 			service.close();
+			vehicleMetrics.close();
 		},
 	});
 
