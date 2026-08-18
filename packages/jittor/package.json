@@ -35,7 +35,7 @@
     "@danypops/vehicle-core": "^0.17.1",
     "@danypops/vehicle-server": "^0.25.1",
     "@danypops/vehicle-client": "^0.10.1",
-    "google-auth-library": "^10.9.0",
+    "google-auth-library": "^11.0.2",
     "gpt-tokenizer": "^3.4.0"
   },
   "devDependencies": {
