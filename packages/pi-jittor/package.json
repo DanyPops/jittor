@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-jittor",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Pi extension for Jittor token and context observability with optimization controls backed by the @danypops/jittor daemon",
   "license": "MIT",
   "type": "module",
