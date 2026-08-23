@@ -1,75 +1,44 @@
 # @danypops/pi-jittor
 
-The Pi extension for Jittor: token, cost, context, provider-budget, and model-run observation plus routing, recovery, and model-selection controls, all through an authenticated loopback client to the [`@danypops/jittor`](../jittor) daemon. See the [repo root README](../../README.md) for the two-package overview.
+The Pi extension for Jittor: token, cost, context, provider-budget, and model-run observation plus routing, recovery, and model-selection controls, over an authenticated loopback client to the [`@danypops/jittor`](../jittor) daemon. See the [repo root README](../../README.md) for the two-package overview.
 
-## Architecture
+## What it does
 
-- `extension/src/observability/` collects and presents token, cost, context, provider-budget, and model-run observations.
-- `extension/src/optimization/` contains routing-adjacent recovery and model-selection controls.
-- `extension/src/index.ts` composes Pi lifecycle handlers; daemon transport, settings, and session identity remain thin boundary modules.
+Records context composition, response headers, finalized usage, cost, and model-run behavior through the daemon; preflights provider turns and applies model/thinking decisions; blocks requests when required telemetry is unsafe. It follows Pi's current authenticated model/provider and re-syncs Pi's available models before every decision, so an unavailable catalog route is never selected. Route state is scoped per Pi session, so concurrent sessions can't clobber each other's active provider or footer budget.
 
-## Behavior
+The extension registers no model-callable tools — daemon JSON, CLI `--json`, human CLI output, notifications, panels, and the footer are separate bounded channels (see `@danypops/jittor`'s `docs/OUTPUT_CHANNELS.md`).
 
-The extension records context composition, response headers, finalized usage, cost, and model-run behavior through the daemon. It also preflights provider turns, applies model/thinking decisions, and blocks requests when required telemetry is unsafe. It follows Pi's current authenticated model/provider and synchronizes Pi's available models before every decision, so unavailable catalog routes are never selected. Mutable route state is scoped by Pi session, so concurrent sessions cannot replace each other's active provider or footer budget selection. Each session registers an opaque secret with the daemon at `session_start` (best-effort; a registration failure leaves that session unarmored rather than blocked) and presents it on every router-mutating call for the rest of its lifetime; an unregistered `session_id` continues to mutate exactly as before, so this is additive armor, not a breaking change for other callers of the same API. A configured required budget source still fails closed; a provider with no enforceable budget window continues explicitly monitor-only.
+Blocking always has an escape hatch: `/jittor off` enters persisted monitor-only mode and never blocks; `/jittor footer on|off` controls the informational footer independently of enforcement; `/jittor on` only re-enables enforcement after telemetry/route-sync succeed.
 
-Its responsive integrated footer groups repository and model identity with cumulative usage, a color-coded context-window bar, and current-provider budget telemetry. Codex shows the active model's bounded quota as a draining remaining-budget bar with reset and freshness information. OpenRouter uses the same drain semantics when its official key telemetry exposes a configured limit and remaining balance; keys without a limit remain honest text-only spend and never receive a fabricated denominator. Anthropic shows the same drain semantics from its most-restrictive-in-effect token bucket, falling back to the request bucket when no token telemetry has been observed yet. During Pi compaction, the context bar drains from its captured fill against a learned median duration estimated from the last few completed compactions (bounded to the most recent 20 samples, requiring at least 3 before trusting it). It never renders a timer. Until enough evidence exists, the bar does not drain; it blinks in place at its captured fill. Run `jittor compaction estimate [--json]` (via the core CLI) to inspect the current estimate and its confidence directly. Unknown and stale telemetry are marked explicitly. Run `/jittor` for the consolidated Settings TUI (its default action), or `/jittor status` for detailed burn pressure, freshness, route state, and confirmed emergency-halt/override controls.
+## Footer
 
-The extension currently registers no model-callable native tools, so Pi's native model `content` versus renderer `details` contract is explicitly not applicable. Daemon JSON, CLI `--json`, human CLI output, command notifications, panels, and the footer remain separate bounded channels. See the core package's [`docs/OUTPUT_CHANNELS.md`](../jittor/docs/OUTPUT_CHANNELS.md) for the conformance matrix and the requirements that apply if a native tool is introduced later.
+An integrated footer shows repository/model identity, cumulative usage, a color-coded context-window bar, and current-provider budget telemetry. Codex/OpenRouter/Anthropic each render a draining remaining-budget bar when the provider's own telemetry exposes a real limit; without one, spend stays honest text-only rather than a fabricated denominator. During Pi compaction the bar drains against a learned duration estimate (median of the last ≤20 completed compactions, needs ≥3 before trusting it) — never a fake timer, and it blinks in place until there's enough evidence. `jittor compaction estimate [--json]` inspects the estimate directly.
 
-Blocking always has a daemon-independent escape hatch. `/jittor off` immediately enters persisted monitor-only mode and never blocks provider requests. The informational footer is independently controlled with `/jittor footer on` and `/jittor footer off`, so showing status never enables enforcement. `/jittor on` only enables enforcement after telemetry polling and available-route synchronization succeed. Every fail-closed error includes these recovery commands plus the daemon restart command.
+## `/jittor` — settings and status
+
+`/jittor` (or `/jittor settings`) opens a keyboard-navigable TUI covering routing enforcement, the footer, Codex recovery, and the four token-budget thresholds. `/jittor status` shows the routing/pressure panel. `benchmarks`, `outcome`, `recovery`, `on`/`off`, `footer on`/`off`, and `context` remain available as direct subcommands for automation.
 
 ### Opt-in Codex settled-turn recovery
 
-Transient Codex recovery is securely off by default and controlled through the existing Jittor command surface:
+Off by default. `/jittor recovery on|off|status|cancel` — a transient Codex failure (rate-limit, overload, transport) schedules one hidden retry after Pi's own `agent_settled` boundary, Retry-After-aware, capped at 3 attempts per 10-minute window, canceled by human input or session shutdown. Quota/auth/invalid-request/unknown/aborted failures stay terminal; raw provider payloads are never retained. The on/off choice persists in `$XDG_CONFIG_HOME/jittor/extension.json`.
 
-```text
-/jittor recovery status
-/jittor recovery on
-/jittor recovery off
-/jittor recovery cancel
-```
+## `/usage` — token and cost graphs
 
-The on/off choice persists privately in `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`). Status reports only enabled state, cooldown, bounded attempt/window counters, and the normalized failure class. `cancel` clears the current cooldown and attempt window without changing the persisted on/off choice.
+A colored Unicode cumulative graph (Hourly/Daily/Weekly/Monthly/Quarterly) per provider/model; `/usage cost` shows aggregated USD spend on the same axes. `Tab`/arrows switch period, `v` toggles token/cost, `r` refreshes. Each active provider/model gets a stable color (a second bold-variant channel once identities exceed available hues) so a model's color stays fixed across periods, refreshes, and restarts. `/usage budget <period> <tokens|off>` sets an optional threshold, rendered as a horizontal line on the graph with remaining/**OVER BUDGET** state (token view only; Jittor never infers a budget from a provider's own subscription tier). See [`docs/USAGE_PRIOR_ART.md`](docs/USAGE_PRIOR_ART.md) for the chart design research.
 
-The extension observes finalized Codex assistant errors through Pi's public message lifecycle, classifies only bounded error metadata, and waits for `agent_settled` before acting. That boundary guarantees Pi's built-in retry, compaction retry, and queued follow-up work has finished. A transient concurrency, rate-limit, overload, or transport failure then schedules one hidden follow-up with Retry-After-aware capped jitter. Recovery is limited to three attempts per ten-minute window, never overlaps pending Pi messages, resets after success, and is canceled by human input or session shutdown. Quota, authentication, invalid-request, unknown, and aborted failures remain terminal. Raw provider payloads are never retained or injected.
+## Cost per Papyrus task
 
-### Settings
+Every token/cost metric already recorded on a finalized assistant message is tagged with the currently-focused Papyrus task (via the `papyrus.task-focus.v1` event bus, no new instrumentation) plus the provider/model/thinking level active at that moment. `jittor metrics cost-by-task --since <ms> --until <ms> [--json]` gives a bounded per-task cost/token breakdown. Spend with nothing focused reports as unattributed rather than folding into an invented task.
 
-`/jittor` is the settings and control command. Bare `/jittor` (or `/jittor settings`) opens one keyboard-navigable TUI covering routing enforcement, the informational footer, Codex recovery, and all four token-budget thresholds, with explicit ON/OFF and configured/not-configured labels, bounded rendering on narrow terminals, and confirmation for weaker enforcement/recovery changes. `/jittor status` shows the routing/pressure panel that used to be the bare command's default. Existing non-TUI subcommands (`benchmarks`, `outcome`, `recovery`, `on`/`off`, `footer on`/`off`, `context`) remain available for automation and are unchanged.
+## Benchmark evidence panel
 
-### Usage and cost graphs
+`/jittor benchmarks [coding|general] [research|planning|general]` shows a responsive model-recommendation panel over the daemon's benchmark ranking (see `@danypops/jittor`'s own README for ingestion sources). Labeled **ADVISORY** — Pi's extension API doesn't expose the real `/scoped-models` set, so this offers no direct selection action. `/jittor outcome accepted|rejected` attaches real outcome evidence to the latest completed run.
 
-`/usage` is its own top-level command, separate from `/jittor`. Bare `/usage` opens a colored Unicode cumulative graph with X/Y axes, per-provider/model series, and explicit **Hourly**, **Daily**, **Weekly**, **Monthly**, and **Quarterly** periods; `/usage cost` opens the same graph showing aggregated USD spend instead of tokens, reusing the `cost` metric already recorded content-free on every finalized Pi assistant message (no new instrumentation). Left/Right or Tab/Shift+Tab changes the time frame, `v` toggles between the token and cost views, and `r` refreshes.
+## `/context` — context window inspection
 
-The graph fetches metrics per distinct provider/model scope (`jittor metrics distinct-scopes`, bounded to 40 scopes, 250 rows each) rather than one flat "most recent rows" query. A flat query lets one heavy, long-running session monopolize the entire row budget with its own most recent activity, silently hiding every other provider from the chart no matter which time frame is selected, since the query would never reach back far enough in time to see anything else. Fetching per scope guarantees every active provider/model gets its own fair share of the query budget instead.
+A tree-aware breakdown of the current context window: `/` search, `f` scope (all/active/historical), `m` size threshold, `g`/`G`/arrows navigate. Conservatively-mapped OpenAI-family models get exact `gpt-tokenizer` counts (marked `tokenizer-exact-text`); everything else stays `≈ char/4`. Assistant turns also show the provider's own authoritative aggregate request context (input + cache read + cache write) alongside individual item costs, with an explicit unattributed residual rather than proportional allocation. See [`../jittor/docs/TOKEN_MEASUREMENT.md`](../jittor/docs/TOKEN_MEASUREMENT.md) and [`../jittor/docs/CONTEXT_SNAPSHOTS.md`](../jittor/docs/CONTEXT_SNAPSHOTS.md).
 
-Series are colored with a categorical palette chosen to avoid this UI's own status colors ("success"/"warning"/"error" already mean something specific elsewhere in this panel, so reusing them for arbitrary model identity would make a model's bar segment look like a warning or a failure) and instead reuses the theme's syntax-highlighting roles. A stable provider/model identity hash keeps each model's color fixed across token and cost graphics, period switches, refreshes, ranking changes, and extension restarts. The hash also selects an optional bold variant as a second visual channel, reducing collisions when more model identities exist than terminal hues. Multiple models active within the same cumulative time frame are rendered as one bar stacked by color, not separate bars.
-
-Token-budget thresholds are optional and must be configured by the user; Jittor never infers a token allowance from Codex or another provider's subscription percentage. Configure or clear one period with `/usage budget <hourly|daily|weekly|monthly|quarterly> <positive-tokens|off>`, and inspect all of them with `/usage budget`. A configured budget appears as a horizontal threshold on the cumulative graph with explicit remaining or **OVER BUDGET** state; the cost view does not yet support a budget threshold. These private settings persist in `$XDG_CONFIG_HOME/jittor/extension.json` (or `~/.config/jittor/extension.json`).
-
-See [`docs/USAGE_PRIOR_ART.md`](docs/USAGE_PRIOR_ART.md) for the chart design research.
-
-### Cost per Papyrus task
-
-The extension observes Papyrus's task-focus lifecycle in real time over a shared Pi extension event bus (`papyrus.task-focus.v1`) -- Papyrus never depends on Jittor, it only broadcasts which task is currently focused. Every token/cost metric already recorded on a finalized Pi assistant message is tagged with the currently focused task's id, and the provider/model/thinking level active at that moment, the instant it is recorded (no time-window estimation, no new instrumentation). A paused or cleared focus stops tagging; spend recorded with nothing focused is reported separately as unattributed, never dropped or folded into an invented task. Run `jittor metrics cost-by-task --since <ms> --until <ms> [--json]` (via the core CLI) for a bounded per-task breakdown of cost and input/output/cache tokens, broken down further by which provider/model/thinking combination each task actually spent on.
-
-### Benchmark evidence panel
-
-Run `/jittor benchmarks [coding|general] [research|planning|general]` (either order, either or both omitted) for the responsive recommendation panel over the core daemon's benchmark ranking operation (see `@danypops/jittor`'s README for ingestion sources). Because the released Pi extension API does not expose the exact `/scoped-models` set, the current adapter labels candidates `available-models`; the panel says **ADVISORY** and offers no selection action. Automatic route ordering is allowed only for `exact-session` authority and then narrows/reorders routes already present in the supplied candidate set. `/jittor outcome accepted` or `/jittor outcome rejected` attaches explicit outcome evidence to the latest completed local run; runtime completion alone is not treated as quality success.
-
-### Context Hub inspection
-
-Run `/context` for a tree-aware breakdown of the current context window. The TUI supports `/` live search, `f` scope cycling (**all**, **active**, **historical/compacted**), `m` minimum-size thresholds, `g`/`G` top/bottom navigation, and arrow-key scrolling. Search and filters preserve ancestor rows so a matching message block never loses its segment, turn, or branch context.
-
-Conversation entries drill into text, thinking, tool-call arguments, shell commands, and outputs. For conservatively mapped OpenAI-family models, `/context` lazily loads the corresponding `gpt-tokenizer` BPE and marks those individual values `tokenizer-exact-text`, naming the encoding. Unsupported/unknown models and character-only structural inputs remain visibly marked `≈ char/4`; failure to load a tokenizer falls back rather than blocking a request or guessing exactness. Base-prompt aggregates still drill into tool snippets, skills, project context files, guidelines, and custom/appended prompt inputs with structural provenance.
-
-Assistant turns also expose the authoritative **provider-reported aggregate request context** (`input + cacheRead + cacheWrite`). The aggregate stays separate from individual item costs, with an explicit unattributed residual rather than proportional allocation. Images, message envelopes, chat templates, tool schemas, cache-control serialization, and provider rewrites remain provider/model-specific, so exact local text counts are never described as exact requests or billing. Measurements retain only bounded provenance/identity metadata; tokenizer input and prompt/response content are never persisted. See [`../jittor/docs/TOKEN_MEASUREMENT.md`](../jittor/docs/TOKEN_MEASUREMENT.md).
-
-At Pi's `before_provider_request` boundary, Jittor also records a bounded content-free snapshot of final request structure plus compaction-aware/inactive session history. `/context` shows the latest stable-prefix size, first changed segment, lifecycle counts, per-source growth, and truncation state. These keyed-HMAC correlations are structural evidence, never proof of provider cache behavior. See [`../jittor/docs/CONTEXT_SNAPSHOTS.md`](../jittor/docs/CONTEXT_SNAPSHOTS.md).
-
-### Context pressure
-
-Run `/jittor context` for the in-session summary of Papyrus prompt-injection and Pi compaction telemetry; see `@danypops/jittor`'s README for what is recorded and the equivalent CLI command.
+`/jittor context` shows the in-session Papyrus prompt-injection / Pi compaction telemetry summary — see `@danypops/jittor`'s README for what's recorded.
 
 ## Development
 
