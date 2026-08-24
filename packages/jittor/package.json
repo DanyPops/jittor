@@ -12,6 +12,11 @@
   },
   "sideEffects": false,
   "keywords": ["llm-router", "token-budget"],
+  "zodiac": {
+    "integrations": [
+      { "kind": "vehicle-surface", "vehicleName": "jittor", "title": "Jittor" }
+    ]
+  },
   "bin": {
     "jittor": "src/cli.ts"
   },
