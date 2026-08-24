@@ -21,7 +21,7 @@
     },
     "packages/jittor": {
       "name": "@danypops/jittor",
-      "version": "0.19.1",
+      "version": "0.20.0",
       "bin": {
         "jittor": "src/cli.ts",
       },
@@ -38,9 +38,9 @@
     },
     "packages/pi-jittor": {
       "name": "@danypops/pi-jittor",
-      "version": "0.5.2",
+      "version": "0.6.0",
       "dependencies": {
-        "@danypops/jittor": "^0.18.0",
+        "@danypops/jittor": "^0.20.0",
         "@danypops/vehicle-client": "^0.10.1",
         "@danypops/vehicle-core": "^0.17.1",
         "@danypops/vehicle-server": "^0.25.1",
@@ -363,7 +363,7 @@
 
     "buffer-equal-constant-time": ["buffer-equal-constant-time@1.0.1", "", {}, "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="],
 
-    "bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
+    "bun-types": ["bun-types@1.4.0", "", { "dependencies": { "@types/node": "*" } }, "sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q=="],
 
     "chalk": ["chalk@5.6.2", "", {}, "sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA=="],
 
@@ -621,8 +621,6 @@
 
     "@aws-sdk/nested-clients/@smithy/node-http-handler": ["@smithy/node-http-handler@4.11.2", "", { "dependencies": { "@smithy/core": "^3.33.2", "@smithy/types": "^4.17.2", "tslib": "^2.6.2" } }, "sha512-avwAh9HM3h2lcfjvP3zYIZGf+XVgLQ91wOJ2qoFbNpW1UZeZb33aGlhTZvtkANHfcGhJroRY64525OjfgOg30g=="],
 
-    "@danypops/pi-jittor/@danypops/jittor": ["@danypops/jittor@0.18.1", "", { "dependencies": { "@danypops/vehicle-client": "^0.5.1", "@danypops/vehicle-core": "^0.12.1", "@danypops/vehicle-server": "^0.17.0", "google-auth-library": "^10.9.0", "gpt-tokenizer": "^3.4.0" }, "bin": { "jittor": "src/cli.ts" } }, "sha512-xOwJiHSEUsGA8PVE7nWtdERu9x1V+Ssp53MvjLtEdCojPa2u9wlAXG3tw9xBtaGenS+Kjt00NN06rsFRTUB0Ww=="],
-
     "@earendil-works/pi-agent-core/ignore": ["ignore@7.0.5", "", {}, "sha512-Hs59xBNfUIunMFgWAbGX5cq6893IbWg4KnrjbYwX3tx0ztorVgTDA6B2sxf8ejHJ4wz8BqGUMYlnzNBer5NvGg=="],
 
     "@earendil-works/pi-coding-agent/ignore": ["ignore@7.0.5", "", {}, "sha512-Hs59xBNfUIunMFgWAbGX5cq6893IbWg4KnrjbYwX3tx0ztorVgTDA6B2sxf8ejHJ4wz8BqGUMYlnzNBer5NvGg=="],
@@ -638,13 +636,5 @@
     "p-retry/retry": ["retry@0.13.1", "", {}, "sha512-XQBQ3I8W1Cge0Seh+6gjj03LbmRFWuoszgK9ooCpwYIrhhoO80pfq4cUkU5DkknwfOfFteRwlZ56PYOGYyFWdg=="],
 
     "thread-stream/real-require": ["real-require@1.0.0", "", {}, "sha512-P4nbQYQfePJxRSmY+v/KINxVucm4NF3p3s7pJveMTtom52FR4YGltUQLB8idDXwDDWW+eYrWDFbuzUnjoWHF7g=="],
-
-    "@danypops/pi-jittor/@danypops/jittor/@danypops/vehicle-client": ["@danypops/vehicle-client@0.5.3", "", { "dependencies": { "@danypops/vehicle-core": "^0.12.3", "@danypops/vehicle-server": "^0.17.2" } }, "sha512-7p32EWBYwediaLAtKGDLtKiQEO5KcAhrJAzaWsA1k281711Qv2atApYMpqfF9YaLTKgGM3NTCR0Cm7tvxNfGxw=="],
-
-    "@danypops/pi-jittor/@danypops/jittor/@danypops/vehicle-core": ["@danypops/vehicle-core@0.12.5", "", {}, "sha512-pdSFT0eMYate9O8QXv7x5v/YvHe94RETBwzk0uKIXDM/mExK0ZBA/DaPgjMcCULrzpHw2xmfWKsOb0xz8Pnsvw=="],
-
-    "@danypops/pi-jittor/@danypops/jittor/@danypops/vehicle-server": ["@danypops/vehicle-server@0.17.2", "", { "dependencies": { "@danypops/armada": "^0.3.1", "@danypops/vehicle-core": "^0.12.3", "pino": "^10.3.1" } }, "sha512-nemWSTkNv9yh1t3V6lL3YO92q9U7tDZInemrHk9dkJpmI6dmCymU7h/ZbXqjId0fnbRbsowt8HmtC9WxMWiuMQ=="],
-
-    "@danypops/pi-jittor/@danypops/jittor/@danypops/vehicle-server/@danypops/armada": ["@danypops/armada@0.3.1", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-AxfFTJnsSbZXibgeHgPs97mt670AYqogKthI6sGNsNiFCNFqy7iXFdKt3ZusboN/SUKHtFCd+0j/B8jryi8EnQ=="],
   }
 }

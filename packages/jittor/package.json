@@ -1,6 +1,6 @@
 {
   "name": "@danypops/jittor",
-  "version": "0.19.3",
+  "version": "0.20.0",
   "description": "Just-in-Time Token Optimization Router for Pi -- token and context observability with optimization policies",
   "license": "MIT",
   "type": "module",
