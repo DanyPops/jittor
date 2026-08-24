@@ -10,6 +10,7 @@ const snapshot: SettingsSnapshot = {
 	codexRecoveryEnabled: false,
 	usageTokenBudgets: { hourly: 25_000, daily: undefined, weekly: 750_000, monthly: 2_000_000 },
 	autoMode: "suggest",
+	autoModeVerbose: false,
 };
 
 function control(): PersistentExtensionControl & { values: SettingsSnapshot } {
@@ -37,6 +38,10 @@ function control(): PersistentExtensionControl & { values: SettingsSnapshot } {
 		getAutoMode: () => values.autoMode,
 		setAutoMode(mode) {
 			values.autoMode = mode;
+		},
+		isAutoModeVerbose: () => values.autoModeVerbose,
+		setAutoModeVerbose(verbose) {
+			values.autoModeVerbose = verbose;
 		},
 	};
 }
@@ -98,8 +103,9 @@ describe("Jittor settings TUI", () => {
 					});
 					if (panels++ === 0) {
 						// Footer is now the last row (Enforcement -> Routing -> Budget -> Providers -> UI
-						// order) -- eight real rows precede it (enforcement, auto-mode, 5x budget, recovery).
-						for (let i = 0; i < 8; i += 1) component.handleInput("\x1b[B");
+						// order) -- nine real rows precede it (enforcement, auto-mode, auto-mode-verbose, 5x
+						// budget, recovery).
+						for (let i = 0; i < 9; i += 1) component.handleInput("\x1b[B");
 						component.handleInput("\r");
 					} else component.handleInput("\x1b");
 					return result;
@@ -174,5 +180,77 @@ describe("Jittor settings TUI", () => {
 		await showSettingsPanel(ctx, settings, settings, settings, settings);
 		expect(settings.values.usageTokenBudgets.daily).toBe(300_000);
 		expect(settings.values.usageTokenBudgets.hourly).toBeUndefined();
+	});
+
+	it("cycles Auto mode off -> suggest -> auto-switch, requiring confirmation only when entering auto-switch", async () => {
+		const settings = control();
+		settings.values.autoMode = "off";
+		let step = 0;
+		const ctx = {
+			mode: "tui",
+			ui: {
+				async custom(factory: Function) {
+					step += 1;
+					let resolved: unknown;
+					const component = factory({ requestRender() {} }, theme, {}, (value: unknown) => {
+						resolved = value;
+					});
+					if (step === 1) return { kind: "activate", key: "auto-mode" }; // off -> suggest, no confirm
+					if (step === 2) return { kind: "activate", key: "auto-mode" }; // suggest -> auto-switch, needs confirm
+					if (step === 3) {
+						expect(component.render(60).join("\n")).toContain("Enable Auto-switch?");
+						component.handleInput("y");
+						return resolved;
+					}
+					return { kind: "close" };
+				},
+			},
+		} as unknown as ExtensionCommandContext;
+		await showSettingsPanel(ctx, settings, settings, settings, settings);
+		expect(settings.getAutoMode()).toBe("auto-switch");
+		expect(step).toBe(4);
+	});
+
+	it("declining the Auto-switch confirmation leaves Auto mode unchanged", async () => {
+		const settings = control();
+		settings.values.autoMode = "suggest";
+		let step = 0;
+		const ctx = {
+			mode: "tui",
+			ui: {
+				async custom(factory: Function) {
+					step += 1;
+					let resolved: unknown;
+					const component = factory({ requestRender() {} }, theme, {}, (value: unknown) => {
+						resolved = value;
+					});
+					if (step === 1) return { kind: "activate", key: "auto-mode" };
+					if (step === 2) {
+						component.handleInput("n");
+						return resolved;
+					}
+					return { kind: "close" };
+				},
+			},
+		} as unknown as ExtensionCommandContext;
+		await showSettingsPanel(ctx, settings, settings, settings, settings);
+		expect(settings.getAutoMode()).toBe("suggest");
+	});
+
+	it("toggles Suggest-mode dialog verbosity without touching the auto mode itself", async () => {
+		const settings = control();
+		expect(settings.isAutoModeVerbose()).toBe(false);
+		const actions = [{ kind: "activate", key: "auto-mode-verbose" }, { kind: "close" }];
+		const ctx = {
+			mode: "tui",
+			ui: {
+				async custom() {
+					return actions.shift();
+				},
+			},
+		} as unknown as ExtensionCommandContext;
+		await showSettingsPanel(ctx, settings, settings, settings, settings);
+		expect(settings.isAutoModeVerbose()).toBe(true);
+		expect(settings.getAutoMode()).toBe("suggest");
 	});
 });

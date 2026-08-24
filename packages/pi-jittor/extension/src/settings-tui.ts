@@ -12,6 +12,7 @@ export interface SettingsSnapshot {
 	codexRecoveryEnabled: boolean;
 	usageTokenBudgets: Partial<Record<UsagePeriod, number>>;
 	autoMode: AutoModeSetting;
+	autoModeVerbose: boolean;
 }
 
 interface SettingsTheme {
@@ -19,7 +20,7 @@ interface SettingsTheme {
 	bold(text: string): string;
 }
 
-export type SettingsKey = "enforcement" | "auto-mode" | "footer" | "recovery" | `budget-${UsagePeriod}`;
+export type SettingsKey = "enforcement" | "auto-mode" | "auto-mode-verbose" | "footer" | "recovery" | `budget-${UsagePeriod}`;
 export type SettingsAction = { kind: "activate"; key: SettingsKey } | { kind: "close" };
 
 export interface SettingsEffects {
@@ -27,6 +28,7 @@ export interface SettingsEffects {
 	setFooter(enabled: boolean): void | Promise<void>;
 	setRecovery(enabled: boolean): void | Promise<void>;
 	setAutoMode(mode: AutoModeSetting): void | Promise<void>;
+	setAutoModeVerbose(verbose: boolean): void | Promise<void>;
 }
 
 // Enforcement -> Routing -> Budget -> Providers -> UI: safety posture (the global kill-switch
@@ -38,6 +40,7 @@ export interface SettingsEffects {
 const SETTINGS_KEYS: SettingsKey[] = [
 	"enforcement",
 	"auto-mode",
+	"auto-mode-verbose",
 	...USAGE_PERIODS.map(({ id }) => `budget-${id}` as const),
 	"recovery",
 	"footer",
@@ -47,7 +50,7 @@ type SettingsCategory = "Enforcement" | "Routing" | "Budget" | "Providers" | "UI
 
 function categoryOf(key: SettingsKey): SettingsCategory {
 	if (key === "enforcement") return "Enforcement";
-	if (key === "auto-mode") return "Routing";
+	if (key === "auto-mode" || key === "auto-mode-verbose") return "Routing";
 	if (key === "recovery") return "Providers";
 	if (key === "footer") return "UI";
 	return "Budget";
@@ -71,6 +74,7 @@ function autoModeLabel(mode: AutoModeSetting, theme: SettingsTheme): string {
 function rowText(key: SettingsKey, snapshot: SettingsSnapshot, theme: SettingsTheme): string {
 	if (key === "enforcement") return `Routing enforcement  ${state(snapshot.enforcementEnabled, theme)}`;
 	if (key === "auto-mode") return `Auto mode  ${autoModeLabel(snapshot.autoMode, theme)}`;
+	if (key === "auto-mode-verbose") return `Suggestion details  ${state(snapshot.autoModeVerbose, theme)}`;
 	if (key === "footer") return `Informational footer  ${state(snapshot.footerEnabled, theme)}`;
 	if (key === "recovery") return `Codex recovery  ${state(snapshot.codexRecoveryEnabled, theme)}`;
 	const period = key.slice("budget-".length) as UsagePeriod;
@@ -89,6 +93,7 @@ export function settingsSnapshot(
 		codexRecoveryEnabled: recovery.isCodexRecoveryEnabled(),
 		usageTokenBudgets: Object.fromEntries(USAGE_PERIODS.map(({ id }) => [id, budgets.getUsageTokenBudget(id)])),
 		autoMode: autoMode.getAutoMode(),
+		autoModeVerbose: autoMode.isAutoModeVerbose(),
 	};
 }
 
@@ -242,6 +247,10 @@ export async function runSettingsAction(
 		} else await effects.setAutoMode(next);
 		return;
 	}
+	if (action.key === "auto-mode-verbose") {
+		await effects.setAutoModeVerbose(!autoMode.isAutoModeVerbose());
+		return;
+	}
 	if (action.key === "enforcement") {
 		if (enforcement.isEnabled()) {
 			if (
@@ -286,6 +295,7 @@ export async function showSettingsPanel(
 		setFooter: (enabled) => enforcement.setFooterEnabled(enabled),
 		setRecovery: (enabled) => recovery.setCodexRecoveryEnabled(enabled),
 		setAutoMode: (mode) => autoMode.setAutoMode(mode),
+		setAutoModeVerbose: (verbose) => autoMode.setAutoModeVerbose(verbose),
 	},
 ): Promise<void> {
 	if (ctx.mode !== "tui") {

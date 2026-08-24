@@ -20,6 +20,7 @@ function settingsControl() {
 	let footerEnabled = true;
 	let codexRecoveryEnabled = false;
 	let autoMode: AutoModeSetting = "suggest";
+	let autoModeVerbose = false;
 	const budgets: Record<string, number | undefined> = {};
 	return {
 		isEnabled: () => enforcementEnabled,
@@ -41,6 +42,10 @@ function settingsControl() {
 		getAutoMode: () => autoMode,
 		setAutoMode: (mode: AutoModeSetting) => {
 			autoMode = mode;
+		},
+		isAutoModeVerbose: () => autoModeVerbose,
+		setAutoModeVerbose: (verbose: boolean) => {
+			autoModeVerbose = verbose;
 		},
 	};
 }
@@ -101,6 +106,7 @@ function deps(calls: Array<{ operation: string; input: unknown }>): JittorShellD
 				setFooter: async () => {},
 				setRecovery: async () => {},
 				setAutoMode: async () => {},
+				setAutoModeVerbose: async () => {},
 			},
 		},
 		status: {

@@ -1512,12 +1512,17 @@ describe("Jittor footer status", () => {
 	});
 });
 
-function fakeAutoModeControl(initial: AutoModeSetting): AutoModeControl {
+function fakeAutoModeControl(initial: AutoModeSetting, verbose = false): AutoModeControl {
 	let mode = initial;
+	let autoModeVerbose = verbose;
 	return {
 		getAutoMode: () => mode,
 		setAutoMode(value) {
 			mode = value;
+		},
+		isAutoModeVerbose: () => autoModeVerbose,
+		setAutoModeVerbose(value) {
+			autoModeVerbose = value;
 		},
 	};
 }
@@ -1560,7 +1565,24 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 		expect(app.notifications.filter((message) => message.includes("auto-switched"))).toHaveLength(1);
 	});
 
-	it("Suggest mode notifies without switching the model", async () => {
+	function suggestDialogCustom(key: string, calls: { count: number } = { count: 0 }) {
+		return async (factory: any) => {
+			calls.count += 1;
+			let resolved: unknown;
+			const component = factory(
+				{ requestRender() {} },
+				{ fg: (_color: string, text: string) => text, bold: (text: string) => text },
+				{},
+				(value: unknown) => {
+					resolved = value;
+				},
+			);
+			component.handleInput(key);
+			return resolved;
+		};
+	}
+
+	it("Suggest mode shows a real interactive dialog and switches only once the user confirms", async () => {
 		const client = new FakeClient();
 		client.rankingResult = {
 			...client.rankingResult,
@@ -1572,29 +1594,66 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 			},
 		};
 		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
+		(app.ctx.ui as unknown as { custom: unknown }).custom = suggestDialogCustom("s");
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		expect(app.modelChanges).toEqual([{ provider: "openai-codex", id: "gpt-5.6-sol" }]);
+	});
+
+	it("Suggest mode's dialog decline leaves the model unchanged", async () => {
+		const client = new FakeClient();
+		client.rankingResult = {
+			...client.rankingResult,
+			scopeAuthority: "exact-session",
+			recommendation: {
+				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+				utilityDelta: 0.3,
+				confidence: 0.9,
+			},
+		};
+		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
+		(app.ctx.ui as unknown as { custom: unknown }).custom = suggestDialogCustom("n");
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		expect(app.modelChanges).toEqual([]);
+	});
+
+	it("suppresses a repeat Suggest-mode dialog for the same candidate across turns while effort stays unchanged", async () => {
+		const client = new FakeClient();
+		client.rankingResult = {
+			...client.rankingResult,
+			scopeAuthority: "exact-session",
+			recommendation: {
+				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+				utilityDelta: 0.3,
+				confidence: 0.9,
+			},
+		};
+		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
+		const calls = { count: 0 };
+		(app.ctx.ui as unknown as { custom: unknown }).custom = suggestDialogCustom("n", calls);
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await app.handlers.get("turn_end")![0]!({ turnIndex: 1, message: { role: "assistant" }, toolResults: [] }, app.ctx);
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 2, timestamp: 2000 }, app.ctx);
+		expect(calls.count).toBe(1);
+	});
+
+	it("falls back to a plain notify outside TUI mode instead of an interactive dialog", async () => {
+		const client = new FakeClient();
+		client.rankingResult = {
+			...client.rankingResult,
+			scopeAuthority: "exact-session",
+			recommendation: {
+				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+				utilityDelta: 0.3,
+				confidence: 0.9,
+			},
+		};
+		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
+		(app.ctx as unknown as { mode: string }).mode = "headless";
 		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
 		expect(app.modelChanges).toEqual([]);
 		expect(app.notifications.some((message) => message.includes("Jittor suggests") && message.includes("openai-codex/gpt-5.6-sol"))).toBe(
 			true,
 		);
-	});
-
-	it("suppresses a repeat Suggest-mode notification for the same candidate across turns while effort stays unchanged", async () => {
-		const client = new FakeClient();
-		client.rankingResult = {
-			...client.rankingResult,
-			scopeAuthority: "exact-session",
-			recommendation: {
-				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
-				utilityDelta: 0.3,
-				confidence: 0.9,
-			},
-		};
-		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
-		await app.handlers.get("turn_end")![0]!({ turnIndex: 1, message: { role: "assistant" }, toolResults: [] }, app.ctx);
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 2, timestamp: 2000 }, app.ctx);
-		expect(app.notifications.filter((message) => message.includes("Jittor suggests"))).toHaveLength(1);
 	});
 
 	it("budget/enforcement precedence: skips Auto mode entirely the turn budget pressure already forced an action", async () => {

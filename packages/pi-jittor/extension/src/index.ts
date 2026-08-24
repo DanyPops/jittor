@@ -57,6 +57,7 @@ import { ProviderResponseTelemetry } from "./observability/provider-response.ts"
 import { buildFooterBudget, providerBudgetMetricQuery } from "./observability/status.ts";
 import { showUsagePanel } from "./observability/usage.ts";
 import { candidateIdentityOf, decideAutoMode, newAutoModeSessionState, recordAutoModeDismissal } from "./optimization/auto-mode.ts";
+import { showAutoModeSuggestion } from "./optimization/auto-mode-dialog.ts";
 import { fetchBenchmarkRanking } from "./optimization/model-selection-panel.ts";
 import { CodexRecoveryCapability, type CodexRecoveryRuntime, SYSTEM_RECOVERY_RUNTIME } from "./optimization/recovery/codex.ts";
 import { callJittor } from "./service-client.ts";
@@ -127,9 +128,17 @@ function recoveryControl(enforcement: EnforcementControl): CodexRecoveryControl 
  */
 function autoModeControl(enforcement: EnforcementControl): AutoModeControl {
 	const candidate = enforcement as EnforcementControl & Partial<AutoModeControl>;
-	return typeof candidate.getAutoMode === "function" && typeof candidate.setAutoMode === "function"
-		? { getAutoMode: () => candidate.getAutoMode!(), setAutoMode: (mode) => candidate.setAutoMode!(mode) }
-		: { getAutoMode: () => "off", setAutoMode() {} };
+	return typeof candidate.getAutoMode === "function" &&
+		typeof candidate.setAutoMode === "function" &&
+		typeof candidate.isAutoModeVerbose === "function" &&
+		typeof candidate.setAutoModeVerbose === "function"
+		? {
+				getAutoMode: () => candidate.getAutoMode!(),
+				setAutoMode: (mode) => candidate.setAutoMode!(mode),
+				isAutoModeVerbose: () => candidate.isAutoModeVerbose!(),
+				setAutoModeVerbose: (verbose) => candidate.setAutoModeVerbose!(verbose),
+			}
+		: { getAutoMode: () => "off", setAutoMode() {}, isAutoModeVerbose: () => false, setAutoModeVerbose() {} };
 }
 
 async function recordMetrics(client: JittorExtensionClient, metrics: MetricObservation[]): Promise<void> {
@@ -461,13 +470,18 @@ export function registerJittorExtension(
 				autoModeSwitchNotifiedThisSession = true;
 			}
 		} else if (decision.kind === "suggest") {
-			// Placeholder presentation: a plain notify today. The real interactive Dialog
-			// (compact + Details expansion into the benchmark panel) is a separate, dedicated task.
-			ctx.ui.notify(
-				`Jittor suggests ${candidateIdentityOf(decision.candidate)} for this turn -- effort: ${classification.effort}, +${decision.utilityDelta.toFixed(2)} utility, ${(decision.confidence * 100).toFixed(0)}% confidence. Run /jittor benchmarks for details.`,
-				"info",
+			const choice = await showAutoModeSuggestion(
+				ctx,
+				decision.candidate,
+				classification.effort,
+				decision.utilityDelta,
+				decision.confidence,
+				ranking,
+				`${currentCandidate.provider}/${currentCandidate.model}`,
+				autoMode.isAutoModeVerbose(),
 			);
-			recordAutoModeDismissal(autoModeState, decision.candidate);
+			if (choice === "switch") await applyRoute(pi, ctx, decision.candidate);
+			else recordAutoModeDismissal(autoModeState, decision.candidate);
 		}
 	};
 	const providerResponseTelemetry = new ProviderResponseTelemetry();
@@ -668,6 +682,7 @@ export function registerJittorExtension(
 							await codexRecovery.setCodexRecoveryEnabled(enabled);
 						},
 						setAutoMode: (mode) => autoMode.setAutoMode(mode),
+						setAutoModeVerbose: (verbose) => autoMode.setAutoModeVerbose(verbose),
 					},
 				},
 				status: { client },

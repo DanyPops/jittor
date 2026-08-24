@@ -34,6 +34,9 @@ export interface UsageBudgetControl {
 export interface AutoModeControl {
 	getAutoMode(): AutoModeSetting;
 	setAutoMode(mode: AutoModeSetting): void | Promise<void>;
+	/** Whether a Suggest-mode dialog opens straight to the full benchmark breakdown instead of requiring the "Details" keypress. Purely a display preference -- never changes what action is taken. */
+	isAutoModeVerbose(): boolean;
+	setAutoModeVerbose(verbose: boolean): void | Promise<void>;
 }
 
 export interface PersistentExtensionControl extends EnforcementControl, CodexRecoveryControl, UsageBudgetControl, AutoModeControl {}
@@ -45,10 +48,18 @@ interface ExtensionSettings {
 	usageTokenBudgets: Partial<Record<UsagePeriod, number>>;
 	/** Suggest, not Auto-switch, is the recorded default -- Auto-switch (an active mutation) is fully available from day one but never silently pre-selected, per this project's shadow-mode-first governance for optimization interventions. */
 	autoMode: AutoModeSetting;
+	autoModeVerbose: boolean;
 }
 
 function defaultSettings(): ExtensionSettings {
-	return { enforcementEnabled: true, footerEnabled: true, codexRecoveryEnabled: false, usageTokenBudgets: {}, autoMode: "suggest" };
+	return {
+		enforcementEnabled: true,
+		footerEnabled: true,
+		codexRecoveryEnabled: false,
+		usageTokenBudgets: {},
+		autoMode: "suggest",
+		autoModeVerbose: false,
+	};
 }
 
 function parseUsageTokenBudgets(value: unknown): Partial<Record<UsagePeriod, number>> {
@@ -78,6 +89,7 @@ function loadSettings(path: string): ExtensionSettings {
 			codexRecoveryEnabled: record.codexRecoveryEnabled === true,
 			usageTokenBudgets: parseUsageTokenBudgets(record.usageTokenBudgets),
 			autoMode: AUTO_MODE_SETTINGS.includes(record.autoMode as AutoModeSetting) ? (record.autoMode as AutoModeSetting) : "suggest",
+			autoModeVerbose: record.autoModeVerbose === true,
 		};
 	} catch {
 		return defaultSettings();
@@ -122,6 +134,11 @@ export function persistentEnforcementControl(env: Record<string, string | undefi
 		async setAutoMode(mode): Promise<void> {
 			if (!AUTO_MODE_SETTINGS.includes(mode)) throw new Error("auto mode must be one of off, suggest, auto-switch");
 			settings.autoMode = mode;
+			await persistSettings(path, settings);
+		},
+		isAutoModeVerbose: () => settings.autoModeVerbose,
+		async setAutoModeVerbose(verbose): Promise<void> {
+			settings.autoModeVerbose = verbose;
 			await persistSettings(path, settings);
 		},
 	};
