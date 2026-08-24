@@ -21,6 +21,15 @@ export const TASK_DOMAINS = ["coding", "design", "math", "general"] as const;
 export type ModelTaskDomain = (typeof TASK_DOMAINS)[number];
 export const TASK_TYPES = ["research", "planning", "general"] as const;
 export type ModelTaskType = (typeof TASK_TYPES)[number];
+/**
+ * A third, independent axis from domain/type: how much reasoning/engineering effort a turn
+ * needs, which drives model-tier selection (a cheap fast model for "low", a frontier model for
+ * "high") the way domain/type drive quality-evidence matching. See
+ * `optimization/model-selection/effort.ts` for the classifier that derives this from structural
+ * signals -- this file only owns the type, not the classification logic.
+ */
+export const TASK_EFFORTS = ["low", "medium", "high"] as const;
+export type ModelTaskEffort = (typeof TASK_EFFORTS)[number];
 export type ExplicitOutcome = "accepted" | "rejected" | "unknown";
 
 export interface ModelRunObservation {

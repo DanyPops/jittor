@@ -41,6 +41,28 @@ export const MODEL_RANKING_DEFAULT_LATENCY_WEIGHT = 1;
 export const MODEL_RANKING_DEFAULT_CONTEXT_WEIGHT = 1;
 export const MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT = 2;
 export const MODEL_OBSERVATION_FRESH_MS = 7 * 24 * 60 * 60 * 1_000;
+export const EFFORT_DIMENSION_WEIGHT_TOKEN_COUNT = 0.1;
+export const EFFORT_DIMENSION_WEIGHT_CODE_PRESENCE = 0.2;
+export const EFFORT_DIMENSION_WEIGHT_REASONING_MARKERS = 0.2;
+export const EFFORT_DIMENSION_WEIGHT_TECHNICAL_TERMS = 0.15;
+export const EFFORT_DIMENSION_WEIGHT_SIMPLE_INDICATORS = 0.1;
+export const EFFORT_DIMENSION_WEIGHT_MULTI_STEP_PATTERNS = 0.05;
+export const EFFORT_DIMENSION_WEIGHT_QUESTION_COMPLEXITY = 0.05;
+export const EFFORT_DIMENSION_WEIGHT_TOOL_CALL_MIX = 0.15;
+/** Below this many estimated tokens, a short user message is itself simple-indicator evidence. */
+export const EFFORT_TOKEN_SIMPLE_THRESHOLD = 15;
+/** Above this many estimated tokens, a long user message is itself complexity evidence. */
+export const EFFORT_TOKEN_COMPLEX_THRESHOLD = 400;
+export const EFFORT_LOW_MEDIUM_BOUNDARY = 0.2;
+export const EFFORT_MEDIUM_HIGH_BOUNDARY = 0.45;
+/** 2+ reasoning-marker phrases in the user's own message force "high" regardless of the weighted score -- mirrors LiteLLM's complexity_router reasoning override. */
+export const EFFORT_REASONING_MARKER_OVERRIDE_COUNT = 2;
+/** Prior-turn tool-call counts at or below this are simple-indicator evidence (e.g. a single read, or no tools at all). */
+export const EFFORT_TOOL_CALL_LOW_THRESHOLD = 1;
+/** Prior-turn tool-call counts at or above this are complexity evidence (sustained multi-tool engineering work). */
+export const EFFORT_TOOL_CALL_HIGH_THRESHOLD = 4;
+export const EFFORT_CLASSIFICATION_MAX_TEXT_CHARACTERS = 20_000;
+export const EFFORT_CLASSIFICATION_MAX_TOOL_NAMES = 200;
 export const MAINTENANCE_INTERVAL_MS = 15 * 60 * 1_000;
 export const TELEMETRY_POLL_INTERVAL_MS = 60_000;
 export const TELEMETRY_STALE_AFTER_MS = 120_000;

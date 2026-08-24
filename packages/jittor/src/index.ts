@@ -227,9 +227,11 @@ export {
 	type ModelRunObservation,
 	type ModelTaskClassification,
 	type ModelTaskDomain,
+	type ModelTaskEffort,
 	type ModelTaskType,
 	modelRunMetrics,
 	TASK_DOMAINS,
+	TASK_EFFORTS,
 	TASK_TYPES,
 	validateModelRunObservation,
 } from "./observability/model-observation.ts";
@@ -302,6 +304,12 @@ export {
 	ModelsDevCatalogSource,
 	translateModelsDevCatalog,
 } from "./optimization/model-selection/catalog.ts";
+export {
+	classifyEffort,
+	type EffortClassification,
+	type EffortClassificationInput,
+	type EffortClassifierOptions,
+} from "./optimization/model-selection/effort.ts";
 export {
 	type ModelCandidate,
 	type ModelRankingInput,
