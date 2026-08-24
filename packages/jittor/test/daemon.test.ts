@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync as mkdtempSyncRaw, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readDaemonHandle as readSharedVehicleHandle, resolveSharedVehicleHandlePath } from "@danypops/vehicle-server/paths";
 import { renderSystemdUnit } from "../src/cli.ts";
 import {
 	benchmarkSourcesFromEnvironment,
@@ -10,7 +11,6 @@ import {
 	startDaemon,
 	telemetrySourcesFromEnvironment,
 } from "../src/daemon.ts";
-import { readDaemonHandle as readSharedVehicleHandle, resolveSharedVehicleHandlePath } from "@danypops/vehicle-server/paths";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, writeDaemonHandle } from "../src/state.ts";
 import { connectJittorClient } from "../src/vehicle/client.ts";
 import { VERSION } from "../src/version.ts";
@@ -269,7 +269,7 @@ describe("Jittor daemon state", () => {
 	// Zodiac's VehicleSurfaceGateway, resolving purely by vehicleName "jittor") could never
 	// discover a real, running jittor daemon. See Zodiac task "Wire Jittor as Zodiac's
 	// canonical live token/cost/context meter".
-	it("publishes into the shared Vehicle Handle Directory under vehicleName \"jittor\", with a real tokenPath, and clears it on stop", async () => {
+	it('publishes into the shared Vehicle Handle Directory under vehicleName "jittor", with a real tokenPath, and clears it on stop', async () => {
 		const root = mkdtempSync(join(tmpdir(), "jittor-daemon-shared-handle-"));
 		const env = {
 			XDG_DATA_HOME: join(root, "data"),
