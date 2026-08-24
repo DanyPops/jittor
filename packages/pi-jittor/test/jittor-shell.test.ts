@@ -4,6 +4,7 @@ import type {
 	ModelCandidate,
 	ModelRankingResult,
 	ModelTaskDomain,
+	ModelTaskEffort,
 	ModelTaskType,
 	RouterStatus,
 } from "@danypops/jittor";
@@ -115,6 +116,8 @@ function deps(calls: Array<{ operation: string; input: unknown }>): JittorShellD
 			currentIdentity: "openai/gpt",
 			domain: "general" as ModelTaskDomain,
 			type: "general" as ModelTaskType,
+			effort: "medium" as ModelTaskEffort,
+			currentCandidate: { provider: "openai", model: "gpt", thinking: "high" },
 		},
 		cache: {
 			client: {

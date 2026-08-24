@@ -1,9 +1,20 @@
-import { BENCHMARK_MAX_OBSERVATIONS_PER_SNAPSHOT, MAX_DYNAMIC_ROUTES, MODEL_AGGREGATE_MAX_ROWS } from "../../constants.ts";
+import {
+	BENCHMARK_MAX_OBSERVATIONS_PER_SNAPSHOT,
+	MAX_DYNAMIC_ROUTES,
+	MODEL_AGGREGATE_MAX_ROWS,
+	MODEL_RANKING_EFFORT_COST_MULTIPLIER_HIGH,
+	MODEL_RANKING_EFFORT_COST_MULTIPLIER_LOW,
+	MODEL_RANKING_EFFORT_COST_MULTIPLIER_MEDIUM,
+	MODEL_RANKING_UPLIFT_MIN_CONFIDENCE,
+	MODEL_RANKING_UPLIFT_MIN_UTILITY_DELTA,
+} from "../../constants.ts";
 import {
 	type ModelMetricAggregate,
 	type ModelTaskDomain,
+	type ModelTaskEffort,
 	type ModelTaskType,
 	TASK_DOMAINS,
+	TASK_EFFORTS,
 	TASK_TYPES,
 } from "../../observability/model-observation.ts";
 import { type BenchmarkObservation, normalizeModelIdentity } from "./benchmark.ts";
@@ -30,11 +41,21 @@ export interface ModelRankingInput {
 	scopeAuthority: ScopeAuthority;
 	domain: ModelTaskDomain;
 	type: ModelTaskType;
+	/** Predicts how much reasoning/engineering effort this turn needs; shifts the effective cost weight (see MODEL_RANKING_EFFORT_COST_MULTIPLIER_*) the same way budgetPressure already does. */
+	effort: ModelTaskEffort;
+	/** The model actually in use right now -- the uplift gate's baseline. A recommendation requires a real, evidence-backed improvement over this, never just "ranked #1". Null when there is no active model to compare against (pure ranking still proceeds; there is simply nothing to gate an uplift over, so recommendation stays null). */
+	currentCandidate: ModelCandidate | null;
 	budgetPressure: number;
 	weights: UtilityWeights;
 	externalEvidence: BenchmarkObservation[];
 	localEvidence: ModelMetricAggregate[];
 	now: number;
+}
+
+export interface ModelRankingRecommendation {
+	candidate: ModelCandidate;
+	utilityDelta: number;
+	confidence: number;
 }
 
 export interface UtilityComponent {
@@ -71,6 +92,9 @@ export interface ModelRankingResult {
 	type: ModelTaskType;
 	completeness: "complete" | "partial" | "insufficient-evidence";
 	ranked: RankedModel[];
+	/** A candidate that cleared the uplift gate (real utility margin + confidence over currentCandidate), regardless of scope authority -- the evidence question, independent of whether automation is currently allowed. Null when the current model is already the best choice, or no candidate clears the gate. */
+	recommendation: ModelRankingRecommendation | null;
+	/** recommendation's candidate, but only once scopeAuthority is "exact-session" -- the governance question layered on top of the evidence question. */
 	automaticSelection: ModelCandidate | null;
 }
 
@@ -226,11 +250,19 @@ export function rankModelCandidates(value: ModelRankingInput): ModelRankingResul
 		throw new Error("scope authority is invalid");
 	if (!TASK_DOMAINS.includes(value.domain)) throw new Error("task domain is invalid");
 	if (!TASK_TYPES.includes(value.type)) throw new Error("task type is invalid");
+	if (!TASK_EFFORTS.includes(value.effort)) throw new Error("task effort is invalid");
+	const currentIdentity = value.currentCandidate === null ? null : candidateIdentity(value.currentCandidate);
 	if (!Number.isSafeInteger(value.now) || value.now <= 0) throw new Error("ranking time is invalid");
 	const budgetPressure = finiteBound(value.budgetPressure, "budget pressure", 0, 2);
 	const weights = Object.fromEntries(
 		COMPONENTS.map((name) => [name, finiteBound(value.weights[name], `${name} weight`, 0, 10)]),
 	) as unknown as UtilityWeights;
+	const effortCostMultiplier =
+		value.effort === "low"
+			? MODEL_RANKING_EFFORT_COST_MULTIPLIER_LOW
+			: value.effort === "high"
+				? MODEL_RANKING_EFFORT_COST_MULTIPLIER_HIGH
+				: MODEL_RANKING_EFFORT_COST_MULTIPLIER_MEDIUM;
 	const seen = new Set<string>();
 	const candidates = value.candidates
 		.map((candidate) => ({ ...candidate }))
@@ -241,7 +273,7 @@ export function rankModelCandidates(value: ModelRankingInput): ModelRankingResul
 			return true;
 		});
 	const raw = candidates.map((candidate) => rawComponents(candidate, value));
-	const effectiveWeights: UtilityWeights = { ...weights, cost: weights.cost * (1 + budgetPressure) };
+	const effectiveWeights: UtilityWeights = { ...weights, cost: weights.cost * (1 + budgetPressure) * effortCostMultiplier };
 	const ranked = candidates
 		.map((candidate, index): RankedModel => {
 			const source = raw[index]!;
@@ -277,8 +309,8 @@ export function rankModelCandidates(value: ModelRankingInput): ModelRankingResul
 				components,
 				provenance,
 				trace: [
-					`domain ${value.domain}, type ${value.type}`,
-					`budget pressure ${budgetPressure.toFixed(3)} makes cost weight ${effectiveWeights.cost.toFixed(3)}`,
+					`domain ${value.domain}, type ${value.type}, effort ${value.effort}`,
+					`budget pressure ${budgetPressure.toFixed(3)} and effort ${value.effort} make cost weight ${effectiveWeights.cost.toFixed(3)}`,
 					`${known.length}/${components.length} utility components have evidence`,
 					`scope authority ${value.scopeAuthority}`,
 				],
@@ -292,6 +324,20 @@ export function rankModelCandidates(value: ModelRankingInput): ModelRankingResul
 	const possibleComponents = ranked.length * COMPONENTS.length;
 	const completeness = knownComponents === 0 ? "insufficient-evidence" : knownComponents === possibleComponents ? "complete" : "partial";
 	const exact = value.scopeAuthority === "exact-session";
+	const top = ranked[0];
+	const current = currentIdentity === null ? undefined : ranked.find((item) => item.identity === currentIdentity);
+	// Uplift gate (Cursor-style): a recommendation requires a real, evidence-backed improvement
+	// over the current model -- never just "ranked #1". Without a located current baseline (it
+	// wasn't among the input candidates) there is nothing to uplift over, so no recommendation.
+	const recommendation: ModelRankingRecommendation | null =
+		top && current && top.identity !== current.identity && top.utility !== null && current.utility !== null
+			? (() => {
+					const utilityDelta = top.utility! - current.utility!;
+					return utilityDelta >= MODEL_RANKING_UPLIFT_MIN_UTILITY_DELTA && top.confidence >= MODEL_RANKING_UPLIFT_MIN_CONFIDENCE
+						? { candidate: top.candidate, utilityDelta, confidence: top.confidence }
+						: null;
+				})()
+			: null;
 	return {
 		scopeAuthority: value.scopeAuthority,
 		scopeWarning: exact ? null : "Pi available models are not the exact session scope; automatic selection is disabled",
@@ -299,6 +345,7 @@ export function rankModelCandidates(value: ModelRankingInput): ModelRankingResul
 		type: value.type,
 		completeness,
 		ranked,
-		automaticSelection: exact && ranked[0]?.utility !== null ? ranked[0]!.candidate : null,
+		recommendation,
+		automaticSelection: exact && recommendation ? recommendation.candidate : null,
 	};
 }

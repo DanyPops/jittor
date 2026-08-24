@@ -7,7 +7,14 @@ import {
 	MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT,
 	MODEL_RANKING_MAX_SOURCES,
 } from "../constants.ts";
-import { type ModelTaskDomain, type ModelTaskType, TASK_DOMAINS, TASK_TYPES } from "../observability/model-observation.ts";
+import {
+	type ModelTaskDomain,
+	type ModelTaskEffort,
+	type ModelTaskType,
+	TASK_DOMAINS,
+	TASK_EFFORTS,
+	TASK_TYPES,
+} from "../observability/model-observation.ts";
 import type { BenchmarkQuery, BenchmarkQueryResult, BenchmarkRefreshResult } from "../optimization/model-selection/benchmark.ts";
 import type { ModelRecommendationInput } from "../optimization/model-selection/ranker.ts";
 import type { ModelCandidate, ModelRankingResult, ScopeAuthority, UtilityWeights } from "../optimization/model-selection/ranking.ts";
@@ -34,6 +41,8 @@ function parseBenchmarkArgs(action: string | undefined, args: string[]): Benchma
 	let scopeAuthority: ScopeAuthority = "available-models";
 	let domain: ModelTaskDomain = "general";
 	let type: ModelTaskType = "general";
+	let effort: ModelTaskEffort = "medium";
+	let currentCandidate: ModelCandidate | null = null;
 	let budgetPressure = 0;
 	let sessionId: string | undefined;
 	let sessionSecret: string | undefined;
@@ -63,6 +72,8 @@ function parseBenchmarkArgs(action: string | undefined, args: string[]): Benchma
 							"--source",
 							"--domain",
 							"--type",
+							"--effort",
+							"--current",
 							"--scope",
 							"--budget",
 							"--weight-quality",
@@ -98,6 +109,13 @@ function parseBenchmarkArgs(action: string | undefined, args: string[]): Benchma
 		} else if (argument === "--type") {
 			if (!TASK_TYPES.includes(raw as ModelTaskType)) return null;
 			type = raw as ModelTaskType;
+		} else if (argument === "--effort") {
+			if (!TASK_EFFORTS.includes(raw as ModelTaskEffort)) return null;
+			effort = raw as ModelTaskEffort;
+		} else if (argument === "--current") {
+			const candidate = parseCandidate(raw);
+			if (!candidate) return null;
+			currentCandidate = candidate;
 		} else if (argument === "--scope") {
 			if (raw !== "exact-session" && raw !== "available-models") return null;
 			scopeAuthority = raw;
@@ -133,6 +151,8 @@ function parseBenchmarkArgs(action: string | undefined, args: string[]): Benchma
 						scopeAuthority,
 						domain,
 						type,
+						effort,
+						currentCandidate,
 						budgetPressure,
 						weights,
 						...(sessionId ? { session_id: sessionId } : {}),

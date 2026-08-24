@@ -40,6 +40,13 @@ export const MODEL_RANKING_DEFAULT_COST_WEIGHT = 2;
 export const MODEL_RANKING_DEFAULT_LATENCY_WEIGHT = 1;
 export const MODEL_RANKING_DEFAULT_CONTEXT_WEIGHT = 1;
 export const MODEL_RANKING_DEFAULT_RELIABILITY_WEIGHT = 2;
+/** A low-effort turn tolerates a cheaper model, so its cost weight is amplified; a high-effort turn tolerates spending more for quality, so its cost weight is dampened. Medium is neutral (matches pre-effort-axis behavior exactly). */
+export const MODEL_RANKING_EFFORT_COST_MULTIPLIER_LOW = 1.5;
+export const MODEL_RANKING_EFFORT_COST_MULTIPLIER_MEDIUM = 1;
+export const MODEL_RANKING_EFFORT_COST_MULTIPLIER_HIGH = 0.5;
+/** Cursor-style uplift gate: a recommendation requires the top candidate to clear a real utility margin over the current model, never just "ranked #1". */
+export const MODEL_RANKING_UPLIFT_MIN_UTILITY_DELTA = 0.05;
+export const MODEL_RANKING_UPLIFT_MIN_CONFIDENCE = 0.5;
 export const MODEL_OBSERVATION_FRESH_MS = 7 * 24 * 60 * 60 * 1_000;
 export const EFFORT_DIMENSION_WEIGHT_TOKEN_COUNT = 0.1;
 export const EFFORT_DIMENSION_WEIGHT_CODE_PRESENCE = 0.2;

@@ -615,6 +615,11 @@ export function registerJittorExtension(
 					currentIdentity: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "",
 					domain: benchmarksTask?.domain ?? "general",
 					type: benchmarksTask?.type ?? "general",
+					// This on-demand panel is not tied to a live turn, so it always uses the neutral
+					// "medium" effort (matching the pre-effort-axis cost weighting exactly) -- live
+					// per-turn effort detection feeds the turn_start Auto-mode decision path instead.
+					effort: "medium",
+					currentCandidate: ctx.model ? { provider: ctx.model.provider, model: ctx.model.id, thinking: pi.getThinkingLevel() } : null,
 				},
 				cache: { client, windowMs: 7 * MILLISECONDS_PER_DAY },
 			});

@@ -19,7 +19,7 @@
  * shell first opens. Switching to a tab that has never been visited fetches it once, on first
  * visit, not before.
  */
-import type { ModelCandidate, ModelRankingResult, ModelTaskDomain, ModelTaskType, RouterStatus } from "@danypops/jittor";
+import type { ModelCandidate, ModelRankingResult, ModelTaskDomain, ModelTaskEffort, ModelTaskType, RouterStatus } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { BorderedSelectPanel, type MnemonicContext, type TabBarTheme, TabbedContainer, type TextMeasure } from "malevich-tui-components";
@@ -73,6 +73,8 @@ export interface JittorShellDeps {
 		currentIdentity: string;
 		domain: ModelTaskDomain;
 		type: ModelTaskType;
+		effort: ModelTaskEffort;
+		currentCandidate: ModelCandidate | null;
 	};
 	cache: { client: CacheEconomicsPanelClient; windowMs: number; now?: () => number };
 }
@@ -169,6 +171,8 @@ async function ensureLoaded(
 			deps.benchmarks.candidates,
 			deps.benchmarks.domain,
 			deps.benchmarks.type,
+			deps.benchmarks.effort,
+			deps.benchmarks.currentCandidate,
 		);
 	}
 	if (activeKey === "cache" && state.cache === undefined) {
@@ -215,6 +219,8 @@ async function showNonTuiFallback(ctx: ExtensionCommandContext, deps: JittorShel
 			deps.benchmarks.currentIdentity,
 			deps.benchmarks.domain,
 			deps.benchmarks.type,
+			deps.benchmarks.effort,
+			deps.benchmarks.currentCandidate,
 		);
 	return showCacheEconomicsPanel(ctx, deps.cache.client, deps.cache.windowMs, deps.cache.now);
 }

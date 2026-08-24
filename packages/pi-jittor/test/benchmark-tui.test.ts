@@ -10,6 +10,7 @@ function ranking(count = 2): ModelRankingResult {
 		domain: "coding",
 		type: "general",
 		completeness: "partial",
+		recommendation: null,
 		automaticSelection: null,
 		ranked: Array.from({ length: count }, (_, index) => ({
 			candidate: { provider: index % 2 ? "anthropic" : "openai", model: `model-${index}`, thinking: "high" },
@@ -91,6 +92,8 @@ describe("benchmark recommendation TUI", () => {
 			"openai/model-1",
 			"coding",
 			"general",
+			"medium",
+			{ provider: "openai", model: "model-1", thinking: "high" },
 		);
 		expect(calls[0]).toMatchObject({ operation: "models.rank", input: { scopeAuthority: "available-models", session_id: "test-session" } });
 		expect(component.render(80).join("\n")).not.toMatch(/(?:Enter|s|a) (?:select|apply|activate)/i);
@@ -114,6 +117,8 @@ describe("benchmark recommendation TUI", () => {
 			[{ provider: "openai", model: "model-0", thinking: "high" }],
 			"coding",
 			"general",
+			"medium",
+			{ provider: "openai", model: "model-0", thinking: "high" },
 		);
 		expect(calls[0]).toMatchObject({ input: { scopeAuthority: "exact-session" } });
 
@@ -124,6 +129,8 @@ describe("benchmark recommendation TUI", () => {
 			[{ provider: "openai", model: "model-0", thinking: "high" }],
 			"coding",
 			"general",
+			"medium",
+			null,
 		);
 		expect(calls[1]).toMatchObject({ input: { scopeAuthority: "available-models" } });
 	});

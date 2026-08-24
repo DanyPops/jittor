@@ -65,6 +65,8 @@ function input(overrides: Partial<ModelRankingInput> = {}): ModelRankingInput {
 		scopeAuthority: "available-models",
 		domain: "coding",
 		type: "general",
+		effort: "medium",
+		currentCandidate: candidates[0]!,
 		budgetPressure: 0.5,
 		weights: { quality: 3, cost: 2, latency: 1, context: 1, reliability: 2 },
 		externalEvidence: [
@@ -247,6 +249,8 @@ describe("model utility ranking", () => {
 			scopeAuthority: "available-models",
 			domain: "coding",
 			type: "general",
+			effort: "medium",
+			currentCandidate: null,
 			budgetPressure: 0.5,
 			weights: { quality: 3, cost: 2, latency: 1, context: 1, reliability: 2 },
 			sourceIds: ["benchmark"],
@@ -260,12 +264,80 @@ describe("model utility ranking", () => {
 		const advisory = rankModelCandidates(input({ scopeAuthority: "available-models" }));
 		expect(advisory.automaticSelection).toBeNull();
 		expect(advisory.scopeWarning).toContain("not the exact session scope");
-		const exact = rankModelCandidates(input({ scopeAuthority: "exact-session" }));
-		expect(exact.automaticSelection).toEqual(exact.ranked[0]!.candidate);
 		expect(
-			exact.ranked.every((item) =>
+			advisory.ranked.every((item) =>
 				candidates.some((candidate) => candidate.provider === item.candidate.provider && candidate.model === item.candidate.model),
 			),
 		).toBe(true);
+	});
+
+	function lopsidedInput(overrides: Partial<ModelRankingInput> = {}): ModelRankingInput {
+		return input({
+			externalEvidence: [
+				evidence("openai", "gpt-fast", "quality-coding", 0.3, 0.95),
+				evidence("openai", "gpt-fast", "price-input", 5, 0.95),
+				evidence("openai", "gpt-fast", "latency", 500, 0.95),
+				evidence("anthropic", "claude-strong", "quality-coding", 0.95, 0.95),
+				evidence("anthropic", "claude-strong", "price-input", 1, 0.95),
+				evidence("anthropic", "claude-strong", "latency", 100, 0.95),
+			],
+			localEvidence: [],
+			...overrides,
+		});
+	}
+
+	it("recommends and automatically selects a candidate that clears a real utility-and-confidence margin over the current model", () => {
+		const result = rankModelCandidates(lopsidedInput({ scopeAuthority: "exact-session", currentCandidate: candidates[0]! }));
+		expect(result.ranked[0]!.candidate).toEqual(candidates[1]!);
+		expect(result.recommendation).not.toBeNull();
+		expect(result.recommendation!.candidate).toEqual(candidates[1]!);
+		expect(result.recommendation!.utilityDelta).toBeGreaterThan(0);
+		expect(result.recommendation!.confidence).toBeGreaterThanOrEqual(0.5);
+		expect(result.automaticSelection).toEqual(candidates[1]!);
+	});
+
+	it("never recommends switching away from a current model that is already the top-ranked candidate", () => {
+		const result = rankModelCandidates(lopsidedInput({ scopeAuthority: "exact-session", currentCandidate: candidates[1]! }));
+		expect(result.ranked[0]!.candidate).toEqual(candidates[1]!);
+		expect(result.recommendation).toBeNull();
+		expect(result.automaticSelection).toBeNull();
+	});
+
+	it("withholds a recommendation when the top candidate's own confidence does not clear the gate, even with a real utility gap", () => {
+		const result = rankModelCandidates(
+			input({
+				scopeAuthority: "exact-session",
+				currentCandidate: candidates[0]!,
+				externalEvidence: [
+					evidence("openai", "gpt-fast", "quality-coding", 0.3, 0.2),
+					evidence("anthropic", "claude-strong", "quality-coding", 0.9, 0.2),
+				],
+				localEvidence: [],
+			}),
+		);
+		expect(result.ranked[0]!.candidate).toEqual(candidates[1]!);
+		expect(result.ranked[0]!.confidence).toBeLessThan(0.5);
+		expect(result.recommendation).toBeNull();
+		expect(result.automaticSelection).toBeNull();
+	});
+
+	it("has no recommendation to make when currentCandidate is null (no active model to compare against)", () => {
+		const result = rankModelCandidates(lopsidedInput({ scopeAuthority: "exact-session", currentCandidate: null }));
+		expect(result.recommendation).toBeNull();
+		expect(result.automaticSelection).toBeNull();
+	});
+
+	it("rejects an unsupported task effort", () => {
+		expect(() => rankModelCandidates(input({ effort: "extreme" as never }))).toThrow(/effort/);
+	});
+
+	it("shifts the effective cost weight by effort the same way it already does for budget pressure -- low tolerates cost more, high tolerates it less", () => {
+		const low = rankModelCandidates(input({ effort: "low", budgetPressure: 0 }));
+		const medium = rankModelCandidates(input({ effort: "medium", budgetPressure: 0 }));
+		const high = rankModelCandidates(input({ effort: "high", budgetPressure: 0 }));
+		const costWeight = (result: ReturnType<typeof rankModelCandidates>) =>
+			result.ranked[0]!.components.find((component) => component.name === "cost")!.weight;
+		expect(costWeight(low)).toBeGreaterThan(costWeight(medium));
+		expect(costWeight(high)).toBeLessThan(costWeight(medium));
 	});
 });

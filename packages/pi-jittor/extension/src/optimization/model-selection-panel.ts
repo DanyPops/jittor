@@ -9,6 +9,7 @@ import {
 	type ModelCandidate,
 	type ModelRankingResult,
 	type ModelTaskDomain,
+	type ModelTaskEffort,
 	type ModelTaskType,
 	type RankedModel,
 	type UtilityComponentName,
@@ -150,6 +151,8 @@ export async function fetchBenchmarkRanking(
 	candidates: ModelCandidate[],
 	domain: ModelTaskDomain,
 	type: ModelTaskType,
+	effort: ModelTaskEffort,
+	currentCandidate: ModelCandidate | null,
 ): Promise<ModelRankingResult> {
 	const session_id = ctx.sessionManager.getSessionId();
 	return (await client.call("models.rank", {
@@ -159,6 +162,8 @@ export async function fetchBenchmarkRanking(
 		scopeAuthority: scopeAuthorityFor(ctx),
 		domain,
 		type,
+		effort,
+		currentCandidate,
 		budgetPressure: 0,
 		weights: {
 			quality: MODEL_RANKING_DEFAULT_QUALITY_WEIGHT,
@@ -178,9 +183,11 @@ export async function showBenchmarkPanel(
 	currentIdentity: string,
 	domain: ModelTaskDomain,
 	type: ModelTaskType,
+	effort: ModelTaskEffort,
+	currentCandidate: ModelCandidate | null,
 ): Promise<void> {
 	for (;;) {
-		const result = await fetchBenchmarkRanking(ctx, client, candidates, domain, type);
+		const result = await fetchBenchmarkRanking(ctx, client, candidates, domain, type, effort, currentCandidate);
 		if (ctx.mode !== "tui") {
 			ctx.ui.notify(
 				renderBenchmarkView(result, currentIdentity, 100, { fg: (_color, text) => text, bold: (text) => text }).join("\n"),

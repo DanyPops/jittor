@@ -231,11 +231,47 @@ describe("Jittor CLI context telemetry parity", () => {
 				scopeAuthority: "available-models",
 				domain: "coding",
 				type: "general",
+				effort: "medium",
+				currentCandidate: null,
 				budgetPressure: 0.5,
 				sourceIds: ["openrouter-models"],
 			},
 		});
 		expect(JSON.parse(output[0]!)).toEqual(ranking);
+	});
+
+	it("exposes model ranking's effort axis and current-model baseline via CLI flags with parity to the daemon operation", async () => {
+		const calls: Array<{ operation: string; input: any }> = [];
+		const client = {
+			async call(operation: string, input: unknown) {
+				calls.push({ operation, input });
+				return { ranked: [] };
+			},
+		};
+		const deps = {
+			client: client as never,
+			stdout: () => {},
+			stderr: () => {},
+			systemctl: () => {},
+			installService: async () => {},
+			serve: async () => {},
+		};
+		expect(
+			await runCli(
+				["benchmarks", "rank", "--candidate", "openai/gpt-5.4@high", "--source", "s", "--effort", "high", "--current", "openai/gpt-4@low"],
+				deps,
+			),
+		).toBe(0);
+		expect(calls[0]).toMatchObject({
+			operation: "models.rank",
+			input: { effort: "high", currentCandidate: { provider: "openai", model: "gpt-4", thinking: "low" } },
+		});
+		expect(
+			await runCli(["benchmarks", "rank", "--candidate", "openai/gpt-5.4@high", "--source", "s", "--effort", "extreme"], deps),
+		).not.toBe(0);
+		expect(
+			await runCli(["benchmarks", "rank", "--candidate", "openai/gpt-5.4@high", "--source", "s", "--current", "not-a-candidate"], deps),
+		).not.toBe(0);
 	});
 
 	it("records, queries, and prunes metrics through the typed daemon client with validated flags", async () => {
