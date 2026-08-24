@@ -140,6 +140,7 @@ describe("Jittor unified /jittor shell", () => {
 		const ctx = {
 			mode: "headless",
 			sessionManager: { getSessionId: () => "session-1" },
+			scopedModels: [],
 			ui: { notify: (message: string) => notifications.push(message) },
 		} as unknown as ExtensionCommandContext;
 		await showJittorShell(ctx, deps(calls), "cache");
@@ -153,6 +154,7 @@ describe("Jittor unified /jittor shell", () => {
 		const ctx = {
 			mode: "tui",
 			sessionManager: { getSessionId: () => "session-1" },
+			scopedModels: [],
 			ui: {
 				async custom(factory: (...args: unknown[]) => { render(width: number): string[]; handleInput?(data: string): void }) {
 					const component = factory({ requestRender() {} }, theme, {}, () => undefined);
@@ -173,6 +175,7 @@ describe("Jittor unified /jittor shell", () => {
 		const ctx = {
 			mode: "tui",
 			sessionManager: { getSessionId: () => "session-1" },
+			scopedModels: [],
 			ui: {
 				async custom(factory: (...args: unknown[]) => { render(width: number): string[]; handleInput?(data: string): void }) {
 					panelCount += 1;
@@ -199,6 +202,7 @@ describe("Jittor unified /jittor shell", () => {
 		const ctx = {
 			mode: "tui",
 			sessionManager: { getSessionId: () => "session-1" },
+			scopedModels: [],
 			ui: {
 				async custom(factory: (...args: unknown[]) => { render(width: number): string[]; handleInput?(data: string): void }) {
 					let resolved: unknown;
@@ -221,6 +225,7 @@ describe("Jittor unified /jittor shell", () => {
 		const ctx = {
 			mode: "tui",
 			sessionManager: { getSessionId: () => "session-1" },
+			scopedModels: [],
 			ui: {
 				async custom(factory: (...args: unknown[]) => { render(width: number): string[]; handleInput?(data: string): void }) {
 					panelCount += 1;

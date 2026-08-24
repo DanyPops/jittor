@@ -130,6 +130,19 @@ export function renderBenchmarkView(result: ModelRankingResult, currentIdentity:
 	return createBenchmarkPanel(result, currentIdentity, theme, () => undefined).render(Math.max(1, width));
 }
 
+/**
+ * Pi's own `--models`/`enabledModels` scoping (`ctx.scopedModels`, the same set the
+ * `/scoped-models` command shows) is the exact-session authority once it is configured -- an
+ * empty list means "no scoping configured" (matching Pi's own semantics), not "scoped to
+ * nothing", and stays advisory. Mirrors the identical predicate `scopedOrAvailableModels` in
+ * `index.ts` already uses to build the candidate set itself; this call site independently
+ * hardcoded `"available-models"` after that fix landed, which kept automatic selection
+ * disabled for a reason (Pi lacking `ctx.scopedModels`) that no longer exists.
+ */
+function scopeAuthorityFor(ctx: ExtensionCommandContext): ModelRankingResult["scopeAuthority"] {
+	return ctx.scopedModels.length > 0 ? "exact-session" : "available-models";
+}
+
 /** Shared by the standalone benchmark panel below and the unified /jittor shell, so both fetch identically. */
 export async function fetchBenchmarkRanking(
 	ctx: ExtensionCommandContext,
@@ -143,7 +156,7 @@ export async function fetchBenchmarkRanking(
 		candidates,
 		session_id,
 		...sessionSecretField(session_id),
-		scopeAuthority: "available-models",
+		scopeAuthority: scopeAuthorityFor(ctx),
 		domain,
 		type,
 		budgetPressure: 0,

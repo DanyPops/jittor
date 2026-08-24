@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { BENCHMARK_TUI_MAX_CANDIDATES, type ModelRankingResult } from "@danypops/jittor";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderBenchmarkView, showBenchmarkPanel } from "../extension/src/optimization/model-selection-panel.ts";
+import { fetchBenchmarkRanking, renderBenchmarkView, showBenchmarkPanel } from "../extension/src/optimization/model-selection-panel.ts";
 
 function ranking(count = 2): ModelRankingResult {
 	return {
@@ -68,6 +68,7 @@ describe("benchmark recommendation TUI", () => {
 		const calls: Array<{ operation: string; input: unknown }> = [];
 		const ctx = {
 			mode: "tui",
+			scopedModels: [],
 			sessionManager: { getSessionId: () => "test-session" },
 			ui: {
 				async custom(factory: Function) {
@@ -93,5 +94,37 @@ describe("benchmark recommendation TUI", () => {
 		);
 		expect(calls[0]).toMatchObject({ operation: "models.rank", input: { scopeAuthority: "available-models", session_id: "test-session" } });
 		expect(component.render(80).join("\n")).not.toMatch(/(?:Enter|s|a) (?:select|apply|activate)/i);
+	});
+
+	it("derives exact-session scope authority from ctx.scopedModels instead of a hardcoded literal", async () => {
+		const calls: Array<{ operation: string; input: unknown }> = [];
+		const client = {
+			async call(operation: string, input: unknown) {
+				calls.push({ operation, input });
+				return ranking();
+			},
+		};
+		const scopedCtx = {
+			scopedModels: [{ model: { provider: "openai", id: "model-0" } }],
+			sessionManager: { getSessionId: () => "scoped-session" },
+		};
+		await fetchBenchmarkRanking(
+			scopedCtx as never,
+			client,
+			[{ provider: "openai", model: "model-0", thinking: "high" }],
+			"coding",
+			"general",
+		);
+		expect(calls[0]).toMatchObject({ input: { scopeAuthority: "exact-session" } });
+
+		const unscopedCtx = { scopedModels: [], sessionManager: { getSessionId: () => "unscoped-session" } };
+		await fetchBenchmarkRanking(
+			unscopedCtx as never,
+			client,
+			[{ provider: "openai", model: "model-0", thinking: "high" }],
+			"coding",
+			"general",
+		);
+		expect(calls[1]).toMatchObject({ input: { scopeAuthority: "available-models" } });
 	});
 });
