@@ -1,3 +1,15 @@
+/**
+ * Exposed as its own package.json subpath export ("@danypops/jittor/usage")
+ * alongside the main barrel: this module and its own single dependency
+ * (constants.ts) are the only fully browser/Node-tsc-safe slice of jittor's
+ * source tree (pure functions and types, no bun:sqlite, no Bun-only
+ * globals) -- importing the whole barrel instead drags in every other
+ * module's own raw `.ts` import specifiers, which a consumer's tsc rejects
+ * outright (TS5097) unless it enables allowImportingTsExtensions project-
+ * wide. A consumer that only needs buildUsageGraph/buildCostGraph/
+ * resolveUsageWindow (e.g. Zodiac's own React usage meter) should import
+ * this subpath directly, not the main entry.
+ */
 import { MAX_USAGE_BUCKETS, MILLISECONDS_PER_DAY, MILLISECONDS_PER_HOUR } from "../constants.ts";
 
 export const USAGE_PERIODS = [

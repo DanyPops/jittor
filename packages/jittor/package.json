@@ -1,6 +1,6 @@
 {
   "name": "@danypops/jittor",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "description": "Just-in-Time Token Optimization Router for Pi -- token and context observability with optimization policies",
   "license": "MIT",
   "type": "module",
@@ -8,6 +8,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./usage": "./src/observability/usage.ts",
     "./package.json": "./package.json"
   },
   "sideEffects": false,
