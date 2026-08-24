@@ -14,7 +14,7 @@ import {
 	type RankedModel,
 	type UtilityComponentName,
 } from "@danypops/jittor";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { BorderedSelectPanel, Table, type TextMeasure } from "malevich-tui-components";
 import { sessionSecretField } from "../session-identity.ts";
@@ -140,13 +140,13 @@ export function renderBenchmarkView(result: ModelRankingResult, currentIdentity:
  * hardcoded `"available-models"` after that fix landed, which kept automatic selection
  * disabled for a reason (Pi lacking `ctx.scopedModels`) that no longer exists.
  */
-function scopeAuthorityFor(ctx: ExtensionCommandContext): ModelRankingResult["scopeAuthority"] {
+function scopeAuthorityFor(ctx: ExtensionContext): ModelRankingResult["scopeAuthority"] {
 	return ctx.scopedModels.length > 0 ? "exact-session" : "available-models";
 }
 
 /** Shared by the standalone benchmark panel below and the unified /jittor shell, so both fetch identically. */
 export async function fetchBenchmarkRanking(
-	ctx: ExtensionCommandContext,
+	ctx: ExtensionContext,
 	client: BenchmarkPanelClient,
 	candidates: ModelCandidate[],
 	domain: ModelTaskDomain,

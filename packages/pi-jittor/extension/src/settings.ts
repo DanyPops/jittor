@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { JITTOR_EXTENSION_SETTINGS_FILENAME, JITTOR_STATE_DIRECTORY, USAGE_PERIODS, type UsagePeriod } from "@danypops/jittor";
 import { createAtomicJsonWriter } from "@danypops/vehicle-core";
 import { createNodeAtomicJsonFsAdapter } from "@danypops/vehicle-server/atomic-json";
+import { AUTO_MODE_SETTINGS, type AutoModeSetting } from "./optimization/auto-mode.ts";
 
 const atomicJson = createAtomicJsonWriter({ fs: createNodeAtomicJsonFsAdapter() });
 
@@ -30,17 +31,24 @@ export interface UsageBudgetControl {
 	setUsageTokenBudget(period: UsagePeriod, tokens: number | undefined): void | Promise<void>;
 }
 
-export interface PersistentExtensionControl extends EnforcementControl, CodexRecoveryControl, UsageBudgetControl {}
+export interface AutoModeControl {
+	getAutoMode(): AutoModeSetting;
+	setAutoMode(mode: AutoModeSetting): void | Promise<void>;
+}
+
+export interface PersistentExtensionControl extends EnforcementControl, CodexRecoveryControl, UsageBudgetControl, AutoModeControl {}
 
 interface ExtensionSettings {
 	enforcementEnabled: boolean;
 	footerEnabled: boolean;
 	codexRecoveryEnabled: boolean;
 	usageTokenBudgets: Partial<Record<UsagePeriod, number>>;
+	/** Suggest, not Auto-switch, is the recorded default -- Auto-switch (an active mutation) is fully available from day one but never silently pre-selected, per this project's shadow-mode-first governance for optimization interventions. */
+	autoMode: AutoModeSetting;
 }
 
 function defaultSettings(): ExtensionSettings {
-	return { enforcementEnabled: true, footerEnabled: true, codexRecoveryEnabled: false, usageTokenBudgets: {} };
+	return { enforcementEnabled: true, footerEnabled: true, codexRecoveryEnabled: false, usageTokenBudgets: {}, autoMode: "suggest" };
 }
 
 function parseUsageTokenBudgets(value: unknown): Partial<Record<UsagePeriod, number>> {
@@ -69,6 +77,7 @@ function loadSettings(path: string): ExtensionSettings {
 			footerEnabled: record.footerEnabled !== false,
 			codexRecoveryEnabled: record.codexRecoveryEnabled === true,
 			usageTokenBudgets: parseUsageTokenBudgets(record.usageTokenBudgets),
+			autoMode: AUTO_MODE_SETTINGS.includes(record.autoMode as AutoModeSetting) ? (record.autoMode as AutoModeSetting) : "suggest",
 		};
 	} catch {
 		return defaultSettings();
@@ -107,6 +116,12 @@ export function persistentEnforcementControl(env: Record<string, string | undefi
 				throw new Error("usage token budget must be a positive finite number");
 			if (tokens === undefined) delete settings.usageTokenBudgets[period];
 			else settings.usageTokenBudgets[period] = tokens;
+			await persistSettings(path, settings);
+		},
+		getAutoMode: () => settings.autoMode,
+		async setAutoMode(mode): Promise<void> {
+			if (!AUTO_MODE_SETTINGS.includes(mode)) throw new Error("auto mode must be one of off, suggest, auto-switch");
+			settings.autoMode = mode;
 			await persistSettings(path, settings);
 		},
 	};

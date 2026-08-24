@@ -6,7 +6,9 @@ import {
 	CONTEXT_HUB_CONTRIBUTION_CHANNEL,
 	CompactionTelemetry,
 	type ContextAssessment,
+	classifyEffort,
 	classifyTaskFromTools,
+	EFFORT_CLASSIFICATION_MAX_TOOL_NAMES,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
 	HmacContextFingerprinter,
 	loadOpenAiTextTokenCounter,
@@ -54,10 +56,18 @@ import { captureProviderContextSnapshot } from "./observability/provider-context
 import { ProviderResponseTelemetry } from "./observability/provider-response.ts";
 import { buildFooterBudget, providerBudgetMetricQuery } from "./observability/status.ts";
 import { showUsagePanel } from "./observability/usage.ts";
+import { candidateIdentityOf, decideAutoMode, newAutoModeSessionState, recordAutoModeDismissal } from "./optimization/auto-mode.ts";
+import { fetchBenchmarkRanking } from "./optimization/model-selection-panel.ts";
 import { CodexRecoveryCapability, type CodexRecoveryRuntime, SYSTEM_RECOVERY_RUNTIME } from "./optimization/recovery/codex.ts";
 import { callJittor } from "./service-client.ts";
 import { cacheSessionSecret, forgetSessionSecret, sessionSecretField } from "./session-identity.ts";
-import { type CodexRecoveryControl, type EnforcementControl, persistentEnforcementControl, type UsageBudgetControl } from "./settings.ts";
+import {
+	type AutoModeControl,
+	type CodexRecoveryControl,
+	type EnforcementControl,
+	persistentEnforcementControl,
+	type UsageBudgetControl,
+} from "./settings.ts";
 
 export { formatFooterStatus } from "./observability/status.ts";
 export type { CodexRecoveryRuntime } from "./optimization/recovery/codex.ts";
@@ -106,6 +116,20 @@ function recoveryControl(enforcement: EnforcementControl): CodexRecoveryControl 
 				setCodexRecoveryEnabled: (enabled) => set.call(candidate, enabled),
 			}
 		: { isCodexRecoveryEnabled: () => false, setCodexRecoveryEnabled() {} };
+}
+
+/**
+ * Falls back to "off" (never "suggest", the real persisted default in persistentEnforcementControl
+ * itself) when the passed-in control doesn't implement AutoModeControl -- e.g. a test harness's
+ * minimal enforcement-only fake. Matches usageBudgetControl/recoveryControl's own conservative
+ * fallback stubs: assume the feature is off/unconfigured rather than defaulting it on somewhere
+ * a caller never actually wired real persisted state for it.
+ */
+function autoModeControl(enforcement: EnforcementControl): AutoModeControl {
+	const candidate = enforcement as EnforcementControl & Partial<AutoModeControl>;
+	return typeof candidate.getAutoMode === "function" && typeof candidate.setAutoMode === "function"
+		? { getAutoMode: () => candidate.getAutoMode!(), setAutoMode: (mode) => candidate.setAutoMode!(mode) }
+		: { getAutoMode: () => "off", setAutoMode() {} };
 }
 
 async function recordMetrics(client: JittorExtensionClient, metrics: MetricObservation[]): Promise<void> {
@@ -404,12 +428,48 @@ export function registerJittorExtension(
 	codexRecovery: CodexRecoveryControl = recoveryControl(enforcement),
 	recoveryRuntime: CodexRecoveryRuntime = SYSTEM_RECOVERY_RUNTIME,
 	contextGrowth: ContextGrowthCapability = new ContextGrowthCapability(),
+	autoMode: AutoModeControl = autoModeControl(enforcement),
 ): void {
 	const footerState: IntegratedFooterState = { providerBudget: null };
 	const usageBudgets = usageBudgetControl(enforcement);
 	let compactionTelemetry = new CompactionTelemetry();
 	let contextGrowthTurn = 0;
 	const localRunTelemetry = new LocalRunTelemetry();
+	// Auto mode's own turn-boundary state: the just-received user text and the completed prior
+	// turn's tool-call mix feed classifyEffort; autoModeState remembers the last-seen effort and
+	// any dismissed suggestion (see optimization/auto-mode.ts's own anti-nag doc comment).
+	let pendingUserText: string | null = null;
+	let currentTurnToolNames: string[] = [];
+	let priorTurnToolNames: string[] = [];
+	const autoModeState = newAutoModeSessionState();
+	let autoModeSwitchNotifiedThisSession = false;
+	// Advisory/best-effort by construction: any failure here must never block or halt the turn the
+	// way budget enforcement's own fail-closed halt does -- callers wrap this in try/catch and swallow.
+	const runAutoModeTurn = async (ctx: ExtensionContext): Promise<void> => {
+		const mode = autoMode.getAutoMode();
+		if (mode === "off" || !ctx.model) return;
+		const candidates = benchmarkCandidatesFromPi(scopedOrAvailableModels(ctx), pi.getThinkingLevel());
+		if (candidates.length === 0) return;
+		const currentCandidate: ModelCandidate = { provider: ctx.model.provider, model: ctx.model.id, thinking: pi.getThinkingLevel() };
+		const classification = classifyEffort({ userText: pendingUserText ?? "", priorTurnToolNames });
+		const ranking = await fetchBenchmarkRanking(ctx, client, candidates, "general", "general", classification.effort, currentCandidate);
+		const decision = decideAutoMode({ mode, effort: classification.effort, ranking, state: autoModeState });
+		if (decision.kind === "switch") {
+			const applied = await applyRoute(pi, ctx, decision.candidate);
+			if (applied && !autoModeSwitchNotifiedThisSession) {
+				ctx.ui.notify(`Jittor auto-switched to ${candidateIdentityOf(decision.candidate)} (effort: ${classification.effort}).`, "info");
+				autoModeSwitchNotifiedThisSession = true;
+			}
+		} else if (decision.kind === "suggest") {
+			// Placeholder presentation: a plain notify today. The real interactive Dialog
+			// (compact + Details expansion into the benchmark panel) is a separate, dedicated task.
+			ctx.ui.notify(
+				`Jittor suggests ${candidateIdentityOf(decision.candidate)} for this turn -- effort: ${classification.effort}, +${decision.utilityDelta.toFixed(2)} utility, ${(decision.confidence * 100).toFixed(0)}% confidence. Run /jittor benchmarks for details.`,
+				"info",
+			);
+			recordAutoModeDismissal(autoModeState, decision.candidate);
+		}
+	};
 	const providerResponseTelemetry = new ProviderResponseTelemetry();
 	const codexRecoveryCapability = new CodexRecoveryCapability(pi, codexRecovery, recoveryRuntime);
 	const contextHub = new ContextHubCapability();
@@ -595,6 +655,7 @@ export function registerJittorExtension(
 					enforcement,
 					recovery: codexRecovery,
 					budgets: usageBudgets,
+					autoMode,
 					effects: {
 						setEnforcement: async (enabled) => (enabled ? enable(ctx) : disable(ctx)),
 						setFooter: async (enabled) => {
@@ -606,6 +667,7 @@ export function registerJittorExtension(
 							if (!enabled) cancelRecovery(true);
 							await codexRecovery.setCodexRecoveryEnabled(enabled);
 						},
+						setAutoMode: (mode) => autoMode.setAutoMode(mode),
 					},
 				},
 				status: { client },
@@ -923,7 +985,13 @@ export function registerJittorExtension(
 	});
 
 	pi.on("input", async (event, ctx) => {
-		if (event.source !== "extension") cancelRecovery(true);
+		if (event.source !== "extension") {
+			cancelRecovery(true);
+			// Auto mode's own effort classifier reads this at the next turn_start -- captured
+			// unconditionally (independent of enforcement.isEnabled()) since Auto mode is a
+			// separate, independently-toggled feature from budget enforcement.
+			pendingUserText = event.text;
+		}
 		if (event.source === "extension" || !enforcement.isEnabled()) return { action: "continue" as const };
 		try {
 			const next = (await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() })) as PolicyDecision;
@@ -955,20 +1023,26 @@ export function registerJittorExtension(
 		codexRecoveryCapability.resetTurn();
 		providerResponseTelemetry.resetTurn();
 		localRunTelemetry.beginTurn(event.timestamp);
-		if (!enforcement.isEnabled()) return;
-		try {
-			await syncCurrentRoute(pi, client, ctx);
-			await syncAvailableRoutes(pi, client, ctx);
-			await applyDecision(
-				pi,
-				client,
-				ctx,
-				(await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() })) as PolicyDecision,
-			);
-			await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
-		} catch {
-			halt(ctx, "Jittor could not verify or apply a safe route");
+		// Budget/enforcement routing is safety-critical and always wins on conflict: Auto mode is
+		// only evaluated when budget pressure required no action this turn (action === "continue"),
+		// so the two decision sources never fight over the model mid-turn.
+		let budgetActedThisTurn = false;
+		if (enforcement.isEnabled()) {
+			try {
+				await syncCurrentRoute(pi, client, ctx);
+				await syncAvailableRoutes(pi, client, ctx);
+				const budgetDecision = (await client.call("router.decide", {
+					session_id: ctx.sessionManager.getSessionId(),
+				})) as PolicyDecision;
+				budgetActedThisTurn = budgetDecision.action !== "continue";
+				await applyDecision(pi, client, ctx, budgetDecision);
+				await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
+			} catch {
+				halt(ctx, "Jittor could not verify or apply a safe route");
+				return;
+			}
 		}
+		if (!budgetActedThisTurn) await runAutoModeTurn(ctx).catch(() => undefined);
 	});
 
 	pi.on("message_update", async (event) => {
@@ -979,6 +1053,10 @@ export function registerJittorExtension(
 		localRunTelemetry.onToolExecutionEnd(event.toolName, event.isError);
 		const classification = classifyTaskFromTools([event.toolName]);
 		compactionTelemetry.observeToolClass(`${classification.domain}-${classification.type}`, event.isError);
+		// Bounded accumulation for the effort classifier's tool-call-mix signal -- classifyEffort
+		// itself would slice defensively too, but there's no reason to grow this array unboundedly
+		// across a very long turn in the meantime.
+		if (currentTurnToolNames.length < EFFORT_CLASSIFICATION_MAX_TOOL_NAMES) currentTurnToolNames.push(event.toolName);
 	});
 
 	pi.on("after_provider_response", async (event, ctx) => {
@@ -996,6 +1074,8 @@ export function registerJittorExtension(
 		if (typeof tokens === "number" && Number.isFinite(tokens)) contextGrowth.observe(++contextGrowthTurn, tokens);
 		const metrics = localRunTelemetry.completeTurn(event.message, pi.getThinkingLevel());
 		await recordMetrics(client, metrics).catch(() => undefined);
+		priorTurnToolNames = currentTurnToolNames;
+		currentTurnToolNames = [];
 	});
 
 	pi.on("message_end", async (event, ctx) => {

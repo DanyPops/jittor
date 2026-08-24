@@ -46,7 +46,7 @@ import {
 	fetchBenchmarkRanking,
 	showBenchmarkPanel,
 } from "./optimization/model-selection-panel.ts";
-import type { CodexRecoveryControl, EnforcementControl, UsageBudgetControl } from "./settings.ts";
+import type { AutoModeControl, CodexRecoveryControl, EnforcementControl, UsageBudgetControl } from "./settings.ts";
 import {
 	createSettingsPanel,
 	runSettingsAction,
@@ -64,6 +64,7 @@ export interface JittorShellDeps {
 		enforcement: EnforcementControl;
 		recovery: CodexRecoveryControl;
 		budgets: UsageBudgetControl;
+		autoMode: AutoModeControl;
 		effects: SettingsEffects;
 	};
 	status: { client: JittorPanelClient };
@@ -160,7 +161,7 @@ async function ensureLoaded(
 ): Promise<void> {
 	// Settings reads already-in-memory persisted state -- no daemon round trip, so eagerly keeping
 	// it fresh costs nothing and never violates "no network call for a tab never visited".
-	state.settings = settingsSnapshot(deps.settings.enforcement, deps.settings.recovery, deps.settings.budgets);
+	state.settings = settingsSnapshot(deps.settings.enforcement, deps.settings.recovery, deps.settings.budgets, deps.settings.autoMode);
 	if (activeKey === "status" && state.status === undefined) {
 		state.status = await fetchStatusSnapshot(deps.status.client, ctx.sessionManager.getSessionId());
 	}
@@ -209,7 +210,14 @@ function tabBarTheme(theme: ShellTheme): TabBarTheme {
  */
 async function showNonTuiFallback(ctx: ExtensionCommandContext, deps: JittorShellDeps, initialTab: JittorTabKey): Promise<void> {
 	if (initialTab === "settings")
-		return showSettingsPanel(ctx, deps.settings.enforcement, deps.settings.recovery, deps.settings.budgets, deps.settings.effects);
+		return showSettingsPanel(
+			ctx,
+			deps.settings.enforcement,
+			deps.settings.recovery,
+			deps.settings.budgets,
+			deps.settings.autoMode,
+			deps.settings.effects,
+		);
 	if (initialTab === "status") return showJittorPanel(ctx, deps.status.client);
 	if (initialTab === "benchmarks")
 		return showBenchmarkPanel(
@@ -320,6 +328,7 @@ export async function showJittorShell(
 				deps.settings.recovery,
 				deps.settings.budgets,
 				deps.settings.effects,
+				deps.settings.autoMode,
 			);
 			continue;
 		}

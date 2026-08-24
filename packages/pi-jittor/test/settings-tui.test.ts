@@ -9,6 +9,7 @@ const snapshot: SettingsSnapshot = {
 	footerEnabled: true,
 	codexRecoveryEnabled: false,
 	usageTokenBudgets: { hourly: 25_000, daily: undefined, weekly: 750_000, monthly: 2_000_000 },
+	autoMode: "suggest",
 };
 
 function control(): PersistentExtensionControl & { values: SettingsSnapshot } {
@@ -33,6 +34,10 @@ function control(): PersistentExtensionControl & { values: SettingsSnapshot } {
 		setUsageTokenBudget(period, tokens) {
 			values.usageTokenBudgets[period] = tokens;
 		},
+		getAutoMode: () => values.autoMode,
+		setAutoMode(mode) {
+			values.autoMode = mode;
+		},
 	};
 }
 
@@ -46,28 +51,34 @@ describe("Jittor settings TUI", () => {
 		expect(text).toContain("Informational footer");
 		expect(text).toContain("Codex recovery");
 		for (const label of ["Hourly", "Daily", "Weekly", "Monthly"]) expect(text).toContain(label);
+		expect(text).toContain("Auto mode");
+		expect(text).toContain("SUGGEST");
 		expect(text).toContain("ON");
 		expect(text).toContain("OFF");
 		expect(text).toContain("not configured");
 		expect(lines.every((line) => visibleWidth(line) <= 40)).toBe(true);
 	});
 
-	it("groups rows under Enforcement/Budget/Providers/UI category headers, in that order, so a single provider-specific row never reads as a peer of a global switch", () => {
+	it("groups rows under Enforcement/Routing/Budget/Providers/UI category headers, in that order, so a single provider-specific row never reads as a peer of a global switch", () => {
 		const lines = renderSettingsView(snapshot, 0, 60, theme);
 		const text = lines.join("\n");
-		for (const header of ["Enforcement", "Budget", "Providers", "UI"]) expect(text).toContain(header);
+		for (const header of ["Enforcement", "Routing", "Budget", "Providers", "UI"]) expect(text).toContain(header);
 		const indexOf = (needle: string) => lines.findIndex((line) => line.includes(needle));
 		const enforcementHeader = indexOf("Enforcement");
+		const routingHeader = lines.findIndex((line, index) => index > enforcementHeader && line.trim() === "Routing");
 		const budgetHeader = indexOf("Budget");
 		const providersHeader = indexOf("Providers");
 		const uiHeader = indexOf("UI");
-		// Category headers appear in priority order (safety, then money, then provider quirks, then
-		// display), and each real row appears strictly after its own category's header.
-		expect(enforcementHeader).toBeLessThan(budgetHeader);
+		// Category headers appear in priority order (safety, then routing behavior, then money, then
+		// provider quirks, then display), and each real row appears strictly after its own category's header.
+		expect(enforcementHeader).toBeLessThan(routingHeader);
+		expect(routingHeader).toBeLessThan(budgetHeader);
 		expect(budgetHeader).toBeLessThan(providersHeader);
 		expect(providersHeader).toBeLessThan(uiHeader);
 		expect(indexOf("Routing enforcement")).toBeGreaterThan(enforcementHeader);
-		expect(indexOf("Routing enforcement")).toBeLessThan(budgetHeader);
+		expect(indexOf("Routing enforcement")).toBeLessThan(routingHeader);
+		expect(indexOf("Auto mode")).toBeGreaterThan(routingHeader);
+		expect(indexOf("Auto mode")).toBeLessThan(budgetHeader);
 		expect(indexOf("Hourly")).toBeGreaterThan(budgetHeader);
 		expect(indexOf("Codex recovery")).toBeGreaterThan(providersHeader);
 		expect(indexOf("Codex recovery")).toBeLessThan(uiHeader);
@@ -86,16 +97,16 @@ describe("Jittor settings TUI", () => {
 						result = value;
 					});
 					if (panels++ === 0) {
-						// Footer is now the last row (Enforcement -> Budget -> Providers -> UI order) --
-						// seven real rows precede it (enforcement, 5x budget, recovery).
-						for (let i = 0; i < 7; i += 1) component.handleInput("\x1b[B");
+						// Footer is now the last row (Enforcement -> Routing -> Budget -> Providers -> UI
+						// order) -- eight real rows precede it (enforcement, auto-mode, 5x budget, recovery).
+						for (let i = 0; i < 8; i += 1) component.handleInput("\x1b[B");
 						component.handleInput("\r");
 					} else component.handleInput("\x1b");
 					return result;
 				},
 			},
 		} as unknown as ExtensionCommandContext;
-		await showSettingsPanel(ctx, settings, settings, settings);
+		await showSettingsPanel(ctx, settings, settings, settings, settings);
 		expect(settings.values.footerEnabled).toBe(false);
 		expect(panels).toBe(2);
 	});
@@ -138,7 +149,7 @@ describe("Jittor settings TUI", () => {
 				},
 			},
 		} as unknown as ExtensionCommandContext;
-		await showSettingsPanel(ctx, settings, settings, settings);
+		await showSettingsPanel(ctx, settings, settings, settings, settings);
 		expect(settings.values.enforcementEnabled).toBe(true);
 		expect(settings.values.codexRecoveryEnabled).toBe(true);
 		expect(step).toBe(5);
@@ -160,7 +171,7 @@ describe("Jittor settings TUI", () => {
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
-		await showSettingsPanel(ctx, settings, settings, settings);
+		await showSettingsPanel(ctx, settings, settings, settings, settings);
 		expect(settings.values.usageTokenBudgets.daily).toBe(300_000);
 		expect(settings.values.usageTokenBudgets.hourly).toBeUndefined();
 	});

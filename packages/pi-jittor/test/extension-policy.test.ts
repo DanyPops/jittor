@@ -11,7 +11,8 @@ import {
 } from "../extension/src/index.ts";
 import { ContextGrowthCapability } from "../extension/src/observability/context-growth.ts";
 import { buildFooterBudget } from "../extension/src/observability/status.ts";
-import type { EnforcementControl } from "../extension/src/settings.ts";
+import type { AutoModeSetting } from "../extension/src/optimization/auto-mode.ts";
+import type { AutoModeControl, EnforcementControl } from "../extension/src/settings.ts";
 
 function decision(overrides: Partial<PolicyDecision> = {}): PolicyDecision {
 	return { action: "continue", pressure: 0.5, reason: "ok", decidedAt: 1000, trace: [], ...overrides };
@@ -39,6 +40,16 @@ class FakeClient implements JittorExtensionClient {
 	};
 	metrics: any[] = [];
 	contextDelta: any = null;
+	rankingResult: any = {
+		scopeAuthority: "available-models",
+		scopeWarning: "exact session scope unavailable",
+		domain: "general",
+		type: "general",
+		completeness: "insufficient-evidence",
+		ranked: [],
+		recommendation: null,
+		automaticSelection: null,
+	};
 	cacheEconomics: unknown;
 	compactionEstimate: { ms: number | null; confidence: "cold-start" | "learned"; sampleSize: number; observedAt: number } = {
 		ms: null,
@@ -65,16 +76,7 @@ class FakeClient implements JittorExtensionClient {
 		if (operation === "metrics.record") return { id: this.calls.length, ...(input as object) };
 		if (operation === "metrics.record_batch")
 			return (input as { observations: object[] }).observations.map((observation) => ({ id: this.calls.length, ...observation }));
-		if (operation === "models.rank")
-			return {
-				scopeAuthority: "available-models",
-				scopeWarning: "exact session scope unavailable",
-				domain: "coding",
-				type: "general",
-				completeness: "insufficient-evidence",
-				ranked: [],
-				automaticSelection: null,
-			};
+		if (operation === "models.rank") return this.rankingResult;
 		if (operation === "session.register")
 			return {
 				sessionId: (input as { session_id: string }).session_id,
@@ -128,6 +130,7 @@ function harness(
 	recovery: { enabled: boolean; runtime: CodexRecoveryRuntime } = { enabled: false, runtime: new FakeRecoveryRuntime() },
 	modelOverride?: { provider: string; id: string },
 	contextGrowth: ContextGrowthCapability = new ContextGrowthCapability(),
+	autoMode?: AutoModeControl,
 ) {
 	let defaultEnabled = true;
 	let footerEnabled = true;
@@ -189,6 +192,7 @@ function harness(
 		},
 		recovery.runtime,
 		contextGrowth,
+		autoMode,
 	);
 	const statuses: Array<string | undefined> = [];
 	const footers: unknown[] = [];
@@ -1505,5 +1509,122 @@ describe("Jittor footer status", () => {
 				metrics.filter((row) => row.source !== "anthropic-vertex"),
 			),
 		).toBeNull();
+	});
+});
+
+function fakeAutoModeControl(initial: AutoModeSetting): AutoModeControl {
+	let mode = initial;
+	return {
+		getAutoMode: () => mode,
+		setAutoMode(value) {
+			mode = value;
+		},
+	};
+}
+
+describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure routing)", () => {
+	it("never evaluates Auto mode when no AutoModeControl is wired (defaults to off)", async () => {
+		const client = new FakeClient();
+		client.rankingResult = {
+			...client.rankingResult,
+			scopeAuthority: "exact-session",
+			recommendation: {
+				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+				utilityDelta: 0.3,
+				confidence: 0.9,
+			},
+			automaticSelection: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+		};
+		const app = harness(client);
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		expect(client.calls.some((call) => call.operation === "models.rank")).toBe(false);
+		expect(app.modelChanges).toEqual([]);
+		expect(app.notifications.some((message) => message.includes("Jittor suggests") || message.includes("auto-switched"))).toBe(false);
+	});
+
+	it("Auto-switch mode applies a real uplift-gated recommendation via the same applyRoute path budget-routing already uses", async () => {
+		const client = new FakeClient();
+		client.rankingResult = {
+			...client.rankingResult,
+			scopeAuthority: "exact-session",
+			recommendation: {
+				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+				utilityDelta: 0.3,
+				confidence: 0.9,
+			},
+		};
+		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		expect(app.modelChanges).toEqual([{ provider: "openai-codex", id: "gpt-5.6-sol" }]);
+		expect(app.thinkingChanges).toEqual(["high"]);
+		expect(app.notifications.filter((message) => message.includes("auto-switched"))).toHaveLength(1);
+	});
+
+	it("Suggest mode notifies without switching the model", async () => {
+		const client = new FakeClient();
+		client.rankingResult = {
+			...client.rankingResult,
+			scopeAuthority: "exact-session",
+			recommendation: {
+				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+				utilityDelta: 0.3,
+				confidence: 0.9,
+			},
+		};
+		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		expect(app.modelChanges).toEqual([]);
+		expect(app.notifications.some((message) => message.includes("Jittor suggests") && message.includes("openai-codex/gpt-5.6-sol"))).toBe(
+			true,
+		);
+	});
+
+	it("suppresses a repeat Suggest-mode notification for the same candidate across turns while effort stays unchanged", async () => {
+		const client = new FakeClient();
+		client.rankingResult = {
+			...client.rankingResult,
+			scopeAuthority: "exact-session",
+			recommendation: {
+				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+				utilityDelta: 0.3,
+				confidence: 0.9,
+			},
+		};
+		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await app.handlers.get("turn_end")![0]!({ turnIndex: 1, message: { role: "assistant" }, toolResults: [] }, app.ctx);
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 2, timestamp: 2000 }, app.ctx);
+		expect(app.notifications.filter((message) => message.includes("Jittor suggests"))).toHaveLength(1);
+	});
+
+	it("budget/enforcement precedence: skips Auto mode entirely the turn budget pressure already forced an action", async () => {
+		const client = new FakeClient();
+		client.decision = decision({
+			action: "switch-model",
+			route: { provider: "openai-codex", model: "gpt-5.1-codex-mini", thinking: "medium" },
+		});
+		client.rankingResult = {
+			...client.rankingResult,
+			scopeAuthority: "exact-session",
+			recommendation: {
+				candidate: { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high" },
+				utilityDelta: 0.3,
+				confidence: 0.9,
+			},
+		};
+		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		expect(client.calls.some((call) => call.operation === "models.rank")).toBe(false);
+		expect(app.modelChanges).toEqual([{ provider: "openai-codex", id: "gpt-5.1-codex-mini" }]);
+		expect(app.notifications.some((message) => message.includes("auto-switched"))).toBe(false);
+	});
+
+	it("takes no action at all when the ranking has no gate-clearing recommendation", async () => {
+		const client = new FakeClient();
+		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
+		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		expect(client.calls.some((call) => call.operation === "models.rank")).toBe(true);
+		expect(app.modelChanges).toEqual([]);
+		expect(app.notifications).toEqual([]);
 	});
 });

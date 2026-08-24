@@ -2,7 +2,8 @@ import { USAGE_PERIODS, type UsagePeriod } from "@danypops/jittor";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { BorderedSelectPanel, Menu, type MenuTheme, type TextMeasure } from "malevich-tui-components";
-import type { CodexRecoveryControl, EnforcementControl, UsageBudgetControl } from "./settings.ts";
+import { AUTO_MODE_SETTINGS, type AutoModeSetting } from "./optimization/auto-mode.ts";
+import type { AutoModeControl, CodexRecoveryControl, EnforcementControl, UsageBudgetControl } from "./settings.ts";
 import { showConfirmDialog } from "./tui-prompts.ts";
 
 export interface SettingsSnapshot {
@@ -10,6 +11,7 @@ export interface SettingsSnapshot {
 	footerEnabled: boolean;
 	codexRecoveryEnabled: boolean;
 	usageTokenBudgets: Partial<Record<UsagePeriod, number>>;
+	autoMode: AutoModeSetting;
 }
 
 interface SettingsTheme {
@@ -17,26 +19,35 @@ interface SettingsTheme {
 	bold(text: string): string;
 }
 
-export type SettingsKey = "enforcement" | "footer" | "recovery" | `budget-${UsagePeriod}`;
+export type SettingsKey = "enforcement" | "auto-mode" | "footer" | "recovery" | `budget-${UsagePeriod}`;
 export type SettingsAction = { kind: "activate"; key: SettingsKey } | { kind: "close" };
 
 export interface SettingsEffects {
 	setEnforcement(enabled: boolean): void | Promise<void>;
 	setFooter(enabled: boolean): void | Promise<void>;
 	setRecovery(enabled: boolean): void | Promise<void>;
+	setAutoMode(mode: AutoModeSetting): void | Promise<void>;
 }
 
-// Enforcement -> Budget -> Providers -> UI: safety posture (the global kill-switch everything
-// else is downstream of) leads, followed by spend limits, then provider-specific quirks (today,
-// only Codex recovery -- grouped under its own header instead of sitting flat next to global
-// switches, which read as "too Codex-oriented" with nothing to signal its narrower scope), then
-// display preferences last.
-const SETTINGS_KEYS: SettingsKey[] = ["enforcement", ...USAGE_PERIODS.map(({ id }) => `budget-${id}` as const), "recovery", "footer"];
+// Enforcement -> Routing -> Budget -> Providers -> UI: safety posture (the global kill-switch
+// everything else is downstream of) leads, followed by effort-based Auto mode (a routing
+// behavior, not a safety switch, but consequential enough to sit right after Enforcement), then
+// spend limits, then provider-specific quirks (today, only Codex recovery -- grouped under its
+// own header instead of sitting flat next to global switches, which read as "too Codex-oriented"
+// with nothing to signal its narrower scope), then display preferences last.
+const SETTINGS_KEYS: SettingsKey[] = [
+	"enforcement",
+	"auto-mode",
+	...USAGE_PERIODS.map(({ id }) => `budget-${id}` as const),
+	"recovery",
+	"footer",
+];
 
-type SettingsCategory = "Enforcement" | "Budget" | "Providers" | "UI";
+type SettingsCategory = "Enforcement" | "Routing" | "Budget" | "Providers" | "UI";
 
 function categoryOf(key: SettingsKey): SettingsCategory {
 	if (key === "enforcement") return "Enforcement";
+	if (key === "auto-mode") return "Routing";
 	if (key === "recovery") return "Providers";
 	if (key === "footer") return "UI";
 	return "Budget";
@@ -51,8 +62,15 @@ function budgetLabel(period: UsagePeriod, snapshot: SettingsSnapshot): string {
 	return value === undefined ? "not configured" : `${value.toLocaleString()} tokens`;
 }
 
+function autoModeLabel(mode: AutoModeSetting, theme: SettingsTheme): string {
+	if (mode === "off") return theme.fg("muted", "OFF");
+	if (mode === "auto-switch") return theme.fg("success", "AUTO-SWITCH");
+	return theme.fg("accent", "SUGGEST");
+}
+
 function rowText(key: SettingsKey, snapshot: SettingsSnapshot, theme: SettingsTheme): string {
 	if (key === "enforcement") return `Routing enforcement  ${state(snapshot.enforcementEnabled, theme)}`;
+	if (key === "auto-mode") return `Auto mode  ${autoModeLabel(snapshot.autoMode, theme)}`;
 	if (key === "footer") return `Informational footer  ${state(snapshot.footerEnabled, theme)}`;
 	if (key === "recovery") return `Codex recovery  ${state(snapshot.codexRecoveryEnabled, theme)}`;
 	const period = key.slice("budget-".length) as UsagePeriod;
@@ -63,12 +81,14 @@ export function settingsSnapshot(
 	enforcement: EnforcementControl,
 	recovery: CodexRecoveryControl,
 	budgets: UsageBudgetControl,
+	autoMode: AutoModeControl,
 ): SettingsSnapshot {
 	return {
 		enforcementEnabled: enforcement.isEnabled(),
 		footerEnabled: enforcement.isFooterEnabled(),
 		codexRecoveryEnabled: recovery.isCodexRecoveryEnabled(),
 		usageTokenBudgets: Object.fromEntries(USAGE_PERIODS.map(({ id }) => [id, budgets.getUsageTokenBudget(id)])),
+		autoMode: autoMode.getAutoMode(),
 	};
 }
 
@@ -201,8 +221,27 @@ export async function runSettingsAction(
 	recovery: CodexRecoveryControl,
 	budgets: UsageBudgetControl,
 	effects: SettingsEffects,
+	autoMode: AutoModeControl,
 ): Promise<void> {
 	if (action.kind === "close") return;
+	if (action.key === "auto-mode") {
+		const current = autoMode.getAutoMode();
+		const next = AUTO_MODE_SETTINGS[(AUTO_MODE_SETTINGS.indexOf(current) + 1) % AUTO_MODE_SETTINGS.length]!;
+		// Entering the highest-autonomy state gets the same explicit confirmation Codex recovery's
+		// own opt-in already gets; leaving it (like disabling enforcement) needs none -- becoming
+		// more conservative is never something to gate behind a confirmation.
+		if (next === "auto-switch") {
+			if (
+				await showConfirmDialog(
+					ctx,
+					"Enable Auto-switch?",
+					"Jittor may switch your active model on its own when a turn's effort clearly calls for a different one, with no confirmation prompt.",
+				)
+			)
+				await effects.setAutoMode(next);
+		} else await effects.setAutoMode(next);
+		return;
+	}
 	if (action.key === "enforcement") {
 		if (enforcement.isEnabled()) {
 			if (
@@ -241,19 +280,21 @@ export async function showSettingsPanel(
 	enforcement: EnforcementControl,
 	recovery: CodexRecoveryControl,
 	budgets: UsageBudgetControl,
+	autoMode: AutoModeControl,
 	effects: SettingsEffects = {
 		setEnforcement: (enabled) => enforcement.setEnabled(enabled),
 		setFooter: (enabled) => enforcement.setFooterEnabled(enabled),
 		setRecovery: (enabled) => recovery.setCodexRecoveryEnabled(enabled),
+		setAutoMode: (mode) => autoMode.setAutoMode(mode),
 	},
 ): Promise<void> {
 	if (ctx.mode !== "tui") {
-		const snapshot = settingsSnapshot(enforcement, recovery, budgets);
+		const snapshot = settingsSnapshot(enforcement, recovery, budgets, autoMode);
 		ctx.ui.notify(["Jittor Settings", ...SETTINGS_KEYS.map((key) => rowText(key, snapshot, plainTheme()))].join("\n"), "info");
 		return;
 	}
 	for (;;) {
-		const snapshot = settingsSnapshot(enforcement, recovery, budgets);
+		const snapshot = settingsSnapshot(enforcement, recovery, budgets, autoMode);
 		const action = await ctx.ui.custom<SettingsAction>((tui, theme, _keybindings, done) => {
 			const panel = createSettingsPanel(snapshot, theme, done);
 			return {
@@ -266,6 +307,6 @@ export async function showSettingsPanel(
 			};
 		});
 		if (!action || action.kind === "close") return;
-		await runSettingsAction(ctx, action, enforcement, recovery, budgets, effects);
+		await runSettingsAction(ctx, action, enforcement, recovery, budgets, effects, autoMode);
 	}
 }

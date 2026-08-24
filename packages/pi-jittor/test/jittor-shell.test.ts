@@ -11,6 +11,7 @@ import type {
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { assertNoMnemonicConflicts } from "malevich-tui-components";
 import { type JittorShellDeps, jittorShellMnemonicTree, showJittorShell } from "../extension/src/jittor-shell.ts";
+import type { AutoModeSetting } from "../extension/src/optimization/auto-mode.ts";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 
@@ -18,6 +19,7 @@ function settingsControl() {
 	let enforcementEnabled = true;
 	let footerEnabled = true;
 	let codexRecoveryEnabled = false;
+	let autoMode: AutoModeSetting = "suggest";
 	const budgets: Record<string, number | undefined> = {};
 	return {
 		isEnabled: () => enforcementEnabled,
@@ -35,6 +37,10 @@ function settingsControl() {
 		getUsageTokenBudget: (period: string) => budgets[period],
 		setUsageTokenBudget: (period: string, tokens: number | undefined) => {
 			budgets[period] = tokens;
+		},
+		getAutoMode: () => autoMode,
+		setAutoMode: (mode: AutoModeSetting) => {
+			autoMode = mode;
 		},
 	};
 }
@@ -89,10 +95,12 @@ function deps(calls: Array<{ operation: string; input: unknown }>): JittorShellD
 			enforcement: settings,
 			recovery: settings,
 			budgets: settings,
+			autoMode: settings,
 			effects: {
 				setEnforcement: async () => {},
 				setFooter: async () => {},
 				setRecovery: async () => {},
+				setAutoMode: async () => {},
 			},
 		},
 		status: {

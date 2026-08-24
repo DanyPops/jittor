@@ -14,6 +14,7 @@ describe("Jittor extension enforcement settings", () => {
 			expect(first.isFooterEnabled()).toBe(true);
 			expect(first.isCodexRecoveryEnabled()).toBe(false);
 			expect(first.getUsageTokenBudget("hourly")).toBeUndefined();
+			expect(first.getAutoMode()).toBe("suggest");
 			// Every setter now persists atomically (temp file + rename) via vehicle-core's
 			// createAtomicJsonWriter -- a real async fs write, not a synchronous writeFileSync -- so each
 			// call must be awaited before the next one, or before a fresh control re-reads the file, the
@@ -21,6 +22,7 @@ describe("Jittor extension enforcement settings", () => {
 			await first.setUsageTokenBudget("hourly", 25_000);
 			await first.setUsageTokenBudget("daily", 250_000);
 			await first.setCodexRecoveryEnabled(true);
+			await first.setAutoMode("auto-switch");
 			await first.setEnabled(false);
 			expect(first.isFooterEnabled()).toBe(true);
 			await first.setFooterEnabled(false);
@@ -30,6 +32,10 @@ describe("Jittor extension enforcement settings", () => {
 			expect(second.isCodexRecoveryEnabled()).toBe(true);
 			expect(second.getUsageTokenBudget("hourly")).toBe(25_000);
 			expect(second.getUsageTokenBudget("daily")).toBe(250_000);
+			expect(second.getAutoMode()).toBe("auto-switch");
+			await expect(second.setAutoMode("extreme" as never)).rejects.toThrow("auto mode");
+			await second.setAutoMode("off");
+			expect(second.getAutoMode()).toBe("off");
 			// A validation failure now rejects (async function) rather than throwing synchronously.
 			await expect(second.setUsageTokenBudget("weekly", -1)).rejects.toThrow("positive finite");
 			await second.setUsageTokenBudget("hourly", undefined);
