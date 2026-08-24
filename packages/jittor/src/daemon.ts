@@ -137,6 +137,22 @@ export async function startDaemon(
 		handlePath: paths.handle,
 		logger,
 		buildApp: () => createApp({ service, token }),
+		// Publishes into the shared, cross-package Vehicle Handle Directory
+		// (see @danypops/vehicle-server/paths's resolveSharedVehicleHandlePath)
+		// -- without this, a discovering caller with no prior knowledge of
+		// jittor's own private handlePath (e.g. Zodiac's VehicleSurfaceGateway,
+		// resolving purely by vehicleName) can never find a real, running
+		// jittor daemon. Papyrus's own hand-rolled daemon.ts already does this
+		// explicitly; jittor uses this shared startDaemonKit but was never
+		// passing the option that turns the exact same behavior on.
+		vehicleName: "jittor",
+		tokenPath: paths.token,
+		// startDaemon()'s own `env` param was already used for telemetry/
+		// benchmark/catalog source detection above, but never forwarded to
+		// startDaemonKit itself -- meaning the shared-handle write above would
+		// silently always resolve against real process.env regardless of what
+		// env a caller (e.g. a test, or a future multi-instance setup) supplied.
+		env,
 		maintenanceTasks: [
 			{
 				name: "checkpoint",

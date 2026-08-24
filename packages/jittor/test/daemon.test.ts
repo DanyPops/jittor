@@ -10,6 +10,7 @@ import {
 	startDaemon,
 	telemetrySourcesFromEnvironment,
 } from "../src/daemon.ts";
+import { readDaemonHandle as readSharedVehicleHandle, resolveSharedVehicleHandlePath } from "@danypops/vehicle-server/paths";
 import { ensureAuthToken, readDaemonHandle, resolveJittorPaths, writeDaemonHandle } from "../src/state.ts";
 import { connectJittorClient } from "../src/vehicle/client.ts";
 import { VERSION } from "../src/version.ts";
@@ -260,6 +261,32 @@ describe("Jittor daemon state", () => {
 			await daemon.stop();
 		}
 		expect(readDaemonHandle(paths)).toBeNull();
+	});
+
+	// Regression: jittor used startDaemonKit (this same startDaemon) without ever passing
+	// vehicleName, so it never published into the shared, cross-package Vehicle Handle
+	// Directory -- a caller with no prior knowledge of jittor's own private handlePath (e.g.
+	// Zodiac's VehicleSurfaceGateway, resolving purely by vehicleName "jittor") could never
+	// discover a real, running jittor daemon. See Zodiac task "Wire Jittor as Zodiac's
+	// canonical live token/cost/context meter".
+	it("publishes into the shared Vehicle Handle Directory under vehicleName \"jittor\", with a real tokenPath, and clears it on stop", async () => {
+		const root = mkdtempSync(join(tmpdir(), "jittor-daemon-shared-handle-"));
+		const env = {
+			XDG_DATA_HOME: join(root, "data"),
+			XDG_STATE_HOME: join(root, "state"),
+			XDG_RUNTIME_DIR: join(root, "run"),
+			XDG_CONFIG_HOME: join(root, "config"),
+		};
+		const paths = resolveJittorPaths({ home: root, uid: 1000, env });
+		const sharedHandlePath = resolveSharedVehicleHandlePath("jittor", { env });
+		const daemon = await startDaemon(paths, env);
+		try {
+			const shared = readSharedVehicleHandle(sharedHandlePath);
+			expect(shared).toMatchObject({ host: "127.0.0.1", port: daemon.port, tokenPath: paths.token });
+		} finally {
+			await daemon.stop();
+		}
+		expect(readSharedVehicleHandle(sharedHandlePath)).toBeNull();
 	});
 });
 
