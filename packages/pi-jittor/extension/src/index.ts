@@ -8,6 +8,7 @@ import {
 	type ContextAssessment,
 	classifyEffort,
 	classifyTaskFromTools,
+	declaredEffortFromTaskFocusEvent,
 	EFFORT_CLASSIFICATION_MAX_TOOL_NAMES,
 	FOOTER_COMPACTION_RENDER_INTERVAL_MS,
 	HmacContextFingerprinter,
@@ -17,6 +18,7 @@ import {
 	MILLISECONDS_PER_DAY,
 	type ModelCandidate,
 	type ModelTaskDomain,
+	type ModelTaskEffort,
 	type ModelTaskType,
 	PAPYRUS_CONTEXT_INJECTION_CHANNEL,
 	PAPYRUS_TASK_FOCUS_CHANNEL,
@@ -454,26 +456,30 @@ export function registerJittorExtension(
 	let autoModeSwitchNotifiedThisSession = false;
 	// Advisory/best-effort by construction: any failure here must never block or halt the turn the
 	// way budget enforcement's own fail-closed halt does -- callers wrap this in try/catch and swallow.
+	// Bind-beforehand: a Papyrus task focused with a declared `extra.effort` pins routing to that
+	// effort for as long as it stays focused -- no live per-turn detection needed for that task.
+	// Live classification remains the fallback whenever no task is focused, or the focused task
+	// declares no effort. Reset semantics mirror focusedTaskId's own handling below.
 	const runAutoModeTurn = async (ctx: ExtensionContext): Promise<void> => {
 		const mode = autoMode.getAutoMode();
 		if (mode === "off" || !ctx.model) return;
 		const candidates = benchmarkCandidatesFromPi(scopedOrAvailableModels(ctx), pi.getThinkingLevel());
 		if (candidates.length === 0) return;
 		const currentCandidate: ModelCandidate = { provider: ctx.model.provider, model: ctx.model.id, thinking: pi.getThinkingLevel() };
-		const classification = classifyEffort({ userText: pendingUserText ?? "", priorTurnToolNames });
-		const ranking = await fetchBenchmarkRanking(ctx, client, candidates, "general", "general", classification.effort, currentCandidate);
-		const decision = decideAutoMode({ mode, effort: classification.effort, ranking, state: autoModeState });
+		const effort = declaredEffort ?? classifyEffort({ userText: pendingUserText ?? "", priorTurnToolNames }).effort;
+		const ranking = await fetchBenchmarkRanking(ctx, client, candidates, "general", "general", effort, currentCandidate);
+		const decision = decideAutoMode({ mode, effort, ranking, state: autoModeState });
 		if (decision.kind === "switch") {
 			const applied = await applyRoute(pi, ctx, decision.candidate);
 			if (applied && !autoModeSwitchNotifiedThisSession) {
-				ctx.ui.notify(`Jittor auto-switched to ${candidateIdentityOf(decision.candidate)} (effort: ${classification.effort}).`, "info");
+				ctx.ui.notify(`Jittor auto-switched to ${candidateIdentityOf(decision.candidate)} (effort: ${effort}).`, "info");
 				autoModeSwitchNotifiedThisSession = true;
 			}
 		} else if (decision.kind === "suggest") {
 			const choice = await showAutoModeSuggestion(
 				ctx,
 				decision.candidate,
-				classification.effort,
+				effort,
 				decision.utilityDelta,
 				decision.confidence,
 				ranking,
@@ -568,11 +574,14 @@ export function registerJittorExtension(
 	// affect this one's attribution.
 	let currentSessionId: string | undefined;
 	let focusedTaskId: string | null = null;
+	// Read by runAutoModeTurn (declared above, only ever invoked later) as the bind-beforehand pin.
+	let declaredEffort: ModelTaskEffort | null = null;
 	const stopPapyrusTaskFocus = pi.events?.on?.(PAPYRUS_TASK_FOCUS_CHANNEL, (payload) => {
 		try {
 			const event = validateTaskFocusEvent(payload);
 			if (event.sessionId !== undefined && event.sessionId !== currentSessionId) return;
 			focusedTaskId = applyTaskFocusEvent(event);
+			declaredEffort = declaredEffortFromTaskFocusEvent(event);
 		} catch {
 			// Reject malformed or stale cross-extension events without retaining payloads or crashing the extension.
 		}
@@ -903,6 +912,7 @@ export function registerJittorExtension(
 	pi.on("session_start", async (_event, ctx) => {
 		currentSessionId = ctx.sessionManager.getSessionId();
 		focusedTaskId = null;
+		declaredEffort = null;
 		finishCompactionUi();
 		compactionTelemetry = new CompactionTelemetry();
 		contextGrowthTurn = 0;

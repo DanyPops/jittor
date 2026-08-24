@@ -1,4 +1,5 @@
 import { PAPYRUS_TASK_FOCUS_SCHEMA, TASK_FOCUS_EVENT_MAX_AGE_MS, TASK_FOCUS_ID_MAX_LENGTH } from "../constants.ts";
+import { type ModelTaskEffort, TASK_EFFORTS } from "./model-observation.ts";
 
 export type TaskFocusStatus = "focused" | "paused" | "unpaused" | "cleared";
 
@@ -8,9 +9,16 @@ export interface TaskFocusEvent {
 	sessionId?: string;
 	status: TaskFocusStatus;
 	observedAt: number;
+	/**
+	 * Additive to the papyrus.task-focus/v1 schema: an older Jittor build predates this field, but
+	 * since it's optional here (never required) and this validator only rejects a field it has
+	 * never heard of, a coordinated same-session rollout across both packages is what keeps that
+	 * safe -- see the recorded compatibility decision in the effort-aware Auto mode design Doc.
+	 */
+	effort?: ModelTaskEffort;
 }
 
-const TOP_LEVEL_FIELDS = new Set(["schema", "taskId", "sessionId", "status", "observedAt"]);
+const TOP_LEVEL_FIELDS = new Set(["schema", "taskId", "sessionId", "status", "observedAt", "effort"]);
 const STATUSES = new Set<string>(["focused", "paused", "unpaused", "cleared"]);
 
 function record(value: unknown): Record<string, unknown> {
@@ -48,12 +56,16 @@ export function validateTaskFocusEvent(value: unknown, now = Date.now()): TaskFo
 	if (taskId === null && status !== "cleared") throw new Error(`task-focus event of status "${status}" requires a taskId`);
 	const rawSessionId = input.sessionId;
 	const sessionId = rawSessionId === undefined ? undefined : boundedId(rawSessionId, "sessionId");
+	const rawEffort = input.effort;
+	if (rawEffort !== undefined && !TASK_EFFORTS.includes(rawEffort as ModelTaskEffort))
+		throw new Error("task-focus event effort is invalid");
 	return {
 		schema: PAPYRUS_TASK_FOCUS_SCHEMA,
 		taskId,
 		status: status as TaskFocusStatus,
 		observedAt,
 		...(sessionId === undefined ? {} : { sessionId }),
+		...(rawEffort === undefined ? {} : { effort: rawEffort as ModelTaskEffort }),
 	};
 }
 
@@ -65,4 +77,14 @@ export function validateTaskFocusEvent(value: unknown, now = Date.now()): TaskFo
  */
 export function applyTaskFocusEvent(event: TaskFocusEvent): string | null {
 	return event.status === "focused" || event.status === "unpaused" ? event.taskId : null;
+}
+
+/**
+ * The task-effort analogue of applyTaskFocusEvent: a declared effort is a live "bind-beforehand"
+ * routing prior only while its task is actually focused, using the identical focused/unpaused
+ * vs. paused/cleared semantics -- a task that declared "high" while paused must not keep pinning
+ * routing to "high" once it's no longer the thing being worked on.
+ */
+export function declaredEffortFromTaskFocusEvent(event: TaskFocusEvent): ModelTaskEffort | null {
+	return (event.status === "focused" || event.status === "unpaused") && event.effort !== undefined ? event.effort : null;
 }

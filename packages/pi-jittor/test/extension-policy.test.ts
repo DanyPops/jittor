@@ -1686,4 +1686,105 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 		expect(app.modelChanges).toEqual([]);
 		expect(app.notifications).toEqual([]);
 	});
+
+	describe("bind-beforehand: a focused Papyrus task's declared effort", () => {
+		function rankCalls(client: FakeClient) {
+			return client.calls.filter((call) => call.operation === "models.rank");
+		}
+
+		it("pins routing to the focused task's declared effort instead of live-detecting it", async () => {
+			const client = new FakeClient();
+			const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
+			await app.handlers.get("session_start")![0]!({}, app.ctx);
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				taskId: "ship-feature-x",
+				sessionId: "test-session",
+				status: "focused",
+				observedAt: Date.now(),
+				effort: "high",
+			});
+			// No "input" event ever fired -- pendingUserText stays empty, which live classification
+			// would score as "low". The declared effort must win regardless.
+			await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+			expect(rankCalls(client)[0]).toMatchObject({ input: { effort: "high" } });
+		});
+
+		it("falls back to live detection once the task is cleared", async () => {
+			const client = new FakeClient();
+			const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
+			await app.handlers.get("session_start")![0]!({}, app.ctx);
+			const now = Date.now();
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				taskId: "ship-feature-x",
+				sessionId: "test-session",
+				status: "focused",
+				observedAt: now,
+				effort: "high",
+			});
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				taskId: null,
+				sessionId: "test-session",
+				status: "cleared",
+				observedAt: now,
+			});
+			await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+			expect(rankCalls(client)[0]).toMatchObject({ input: { effort: "low" } });
+		});
+
+		it("falls back to live detection while the declaring task is only paused, not focused", async () => {
+			const client = new FakeClient();
+			const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
+			await app.handlers.get("session_start")![0]!({}, app.ctx);
+			const now = Date.now();
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				taskId: "ship-feature-x",
+				sessionId: "test-session",
+				status: "focused",
+				observedAt: now,
+				effort: "high",
+			});
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				taskId: "ship-feature-x",
+				sessionId: "test-session",
+				status: "paused",
+				observedAt: now,
+				effort: "high",
+			});
+			await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+			expect(rankCalls(client)[0]).toMatchObject({ input: { effort: "low" } });
+		});
+
+		it("fails closed on a malformed declared effort, leaving any prior pin untouched rather than corrupting it", async () => {
+			const client = new FakeClient();
+			const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
+			await app.handlers.get("session_start")![0]!({}, app.ctx);
+			const now = Date.now();
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				taskId: "ship-feature-x",
+				sessionId: "test-session",
+				status: "focused",
+				observedAt: now,
+				effort: "high",
+			});
+			// A malformed follow-up event (unrecognized effort value) must be rejected outright by
+			// validateTaskFocusEvent, same as any other schema violation -- the previously pinned
+			// "high" must survive untouched, not silently reset or corrupt to the bad value.
+			app.emit("papyrus.task-focus.v1", {
+				schema: "papyrus.task-focus/v1",
+				taskId: "ship-feature-x",
+				sessionId: "test-session",
+				status: "unpaused",
+				observedAt: now,
+				effort: "extreme",
+			});
+			await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+			expect(rankCalls(client)[0]).toMatchObject({ input: { effort: "high" } });
+		});
+	});
 });

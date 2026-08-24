@@ -255,6 +255,7 @@ export {
 export type { DistinctScopesFilter, MetricStore, UsageAggregateFilter } from "./observability/store.ts";
 export {
 	applyTaskFocusEvent,
+	declaredEffortFromTaskFocusEvent,
 	type TaskFocusEvent,
 	type TaskFocusStatus,
 	validateTaskFocusEvent,
