@@ -52,7 +52,12 @@ import {
 import { ContextGrowthCapability } from "./observability/context-growth.ts";
 import { ContextHubCapability } from "./observability/context-hub.ts";
 import { showContextView } from "./observability/context-view.ts";
-import { type CompactionProgress, type IntegratedFooterState, installIntegratedFooter } from "./observability/footer.ts";
+import {
+	type CompactionProgress,
+	type IntegratedFooterState,
+	installIntegratedFooter,
+	type RouterFooterInfo,
+} from "./observability/footer.ts";
 import { LocalRunTelemetry } from "./observability/model-run.ts";
 import { captureProviderContextSnapshot } from "./observability/provider-context-snapshot.ts";
 import { ProviderResponseTelemetry } from "./observability/provider-response.ts";
@@ -623,7 +628,13 @@ export function registerJittorExtension(
 		else footerState.requestRender?.();
 	};
 	const showFooter = (ctx: ExtensionContext): void => {
-		if (enforcement.isFooterEnabled()) installIntegratedFooter(ctx, footerState, () => pi.getThinkingLevel());
+		if (enforcement.isFooterEnabled())
+			installIntegratedFooter(
+				ctx,
+				footerState,
+				() => pi.getThinkingLevel(),
+				(): RouterFooterInfo => ({ autoMode: autoMode.getAutoMode() }),
+			);
 		else ctx.ui.setFooter(undefined);
 	};
 	const disable = async (ctx: ExtensionContext): Promise<void> => {

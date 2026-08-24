@@ -305,4 +305,34 @@ describe("Jittor integrated footer", () => {
 		expect(lines[0]).toContain("58% left");
 		expect(lines[0]).not.toContain("resets");
 	});
+
+	it("omits the router segment entirely when no Auto mode info is supplied, rather than showing a placeholder", () => {
+		const line = renderFooterLines(context(), footerData, theme, weekly, "high", 220, 2_000)[0]!;
+		expect(line).not.toContain("auto");
+	});
+
+	it("shows the current Auto mode state on wide terminals", () => {
+		const line = renderFooterLines(context(), footerData, theme, weekly, "high", 220, 2_000, undefined, { autoMode: "suggest" })[0]!;
+		expect(line).toContain("auto suggest");
+	});
+
+	it("colors off dim, suggest plain, and auto-switch as an eye-catching accent -- the only state that can act without asking", () => {
+		colorCalls.length = 0;
+		renderFooterLines(context(), footerData, theme, weekly, "high", 220, 2_000, undefined, { autoMode: "off" });
+		expect(colorCalls.some((call) => call.color === "dim" && call.text === "off")).toBe(true);
+		colorCalls.length = 0;
+		renderFooterLines(context(), footerData, theme, weekly, "high", 220, 2_000, undefined, { autoMode: "suggest" });
+		expect(colorCalls.some((call) => call.text === "suggest" && call.color !== "dim" && call.color !== "accent")).toBe(false);
+		colorCalls.length = 0;
+		renderFooterLines(context(), footerData, theme, weekly, "high", 220, 2_000, undefined, { autoMode: "auto-switch" });
+		expect(colorCalls.some((call) => call.color === "accent" && call.text === "auto-switch")).toBe(true);
+	});
+
+	it("drops the router segment on a narrow terminal rather than overflowing the line", () => {
+		const wide = renderFooterLines(context(), footerData, theme, weekly, "high", 220, 2_000, undefined, { autoMode: "suggest" })[0]!;
+		const narrow = renderFooterLines(context(), footerData, theme, weekly, "high", 30, 2_000, undefined, { autoMode: "suggest" })[0]!;
+		expect(wide).toContain("auto suggest");
+		expect(narrow).not.toContain("auto");
+		expect(visibleWidth(narrow)).toBeLessThanOrEqual(30);
+	});
 });

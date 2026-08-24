@@ -69,6 +69,11 @@ export type ProviderBudget =
 			valueText: string;
 	  };
 
+/** Compact, always-visible state of Jittor's effort-based Auto mode -- the newer, effort-driven router, distinct from the existing budget-pressure route already reflected by the model/budget segments. */
+export interface RouterFooterInfo {
+	autoMode: "off" | "suggest" | "auto-switch";
+}
+
 export interface CompactionProgress {
 	startedAt: number;
 	initialFraction: number;
@@ -238,6 +243,19 @@ function budgetSegment(
 	return `${budget.label} ${bar} ${value}${reset ? ` · ${reset}` : ""}${staleText}`;
 }
 
+/**
+ * "off" is dim (nothing happening); "suggest" is plain/unstyled -- it evaluates and may prompt,
+ * but only ever acts on explicit confirmation; "auto-switch" alone gets the eye-catching accent
+ * color, since it is the only state that can change the active model without asking first --
+ * the same distinction that already gates entering it behind an explicit settings confirmation.
+ */
+function routerSegment(info: RouterFooterInfo | undefined, theme: FooterTheme): string | undefined {
+	if (!info) return undefined;
+	if (info.autoMode === "off") return `auto ${theme.fg("dim", info.autoMode)}`;
+	if (info.autoMode === "auto-switch") return `auto ${theme.fg("accent", info.autoMode)}`;
+	return `auto ${info.autoMode}`;
+}
+
 function usageSegment(context: FooterContext): string {
 	const totals = usageTotals(context);
 	const parts: string[] = [];
@@ -295,6 +313,7 @@ export function renderFooterLines(
 	width: number,
 	now = Date.now(),
 	compaction?: CompactionProgress,
+	router?: RouterFooterInfo,
 ): string[] {
 	const safeWidth = Math.max(1, width);
 	const repository = repositorySegment(context, footerData, theme);
@@ -306,6 +325,7 @@ export function renderFooterLines(
 	const minimalContext = minimalContextSegment(context, theme, safeWidth, now, compaction);
 	const fullBudget = budgetSegment(providerBudget, theme, safeWidth, false, now);
 	const compactBudget = budgetSegment(providerBudget, theme, safeWidth, true, now);
+	const routerInfo = routerSegment(router, theme);
 	const statuses = [...footerData.getExtensionStatuses().entries()]
 		.filter(([key]) => key !== "jittor")
 		.sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
@@ -313,8 +333,11 @@ export function renderFooterLines(
 		.join(" ");
 
 	const candidates = [
+		joinSegments([repository, model.full, usage, fullContext, fullBudget, routerInfo, statuses]),
+		joinSegments([repository, model.full, usage, fullContext, fullBudget, routerInfo]),
 		joinSegments([repository, model.full, usage, fullContext, fullBudget, statuses]),
 		joinSegments([repository, model.full, usage, fullContext, fullBudget]),
+		joinSegments([model.full, usage, compactContext, compactBudget, routerInfo, statuses]),
 		joinSegments([model.full, usage, compactContext, compactBudget, statuses]),
 		joinSegments([model.full, usage, compactContext, compactBudget]),
 		joinSegments([model.full, compactUsage, compactContext, compactBudget]),
@@ -332,7 +355,14 @@ export interface IntegratedFooterState {
 	requestRender?: () => void;
 }
 
-export function installIntegratedFooter(ctx: ExtensionContext, state: IntegratedFooterState, getThinkingLevel: () => string): void {
+export function installIntegratedFooter(
+	ctx: ExtensionContext,
+	state: IntegratedFooterState,
+	getThinkingLevel: () => string,
+	// Called fresh every render, the same as getThinkingLevel -- Auto mode's setting can change at
+	// any time via /jittor settings, so the footer must never cache a stale snapshot of it.
+	getRouterInfo: () => RouterFooterInfo | undefined = () => undefined,
+): void {
 	ctx.ui.setStatus("jittor", undefined);
 	ctx.ui.setFooter((tui, theme, footerData) => {
 		state.requestRender = () => tui.requestRender();
@@ -349,6 +379,7 @@ export function installIntegratedFooter(ctx: ExtensionContext, state: Integrated
 					width,
 					Date.now(),
 					state.compaction,
+					getRouterInfo(),
 				);
 			},
 			dispose() {
