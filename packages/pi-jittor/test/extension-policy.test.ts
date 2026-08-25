@@ -25,6 +25,17 @@ function recordedMetrics(client: FakeClient): Array<Record<string, unknown>> {
 		.flatMap((call) => (call.input as { observations: Record<string, unknown>[] }).observations);
 }
 
+async function drainAmbientWork(): Promise<void> {
+	for (let index = 0; index < 20; index++) await Promise.resolve();
+	await Bun.sleep(1);
+	for (let index = 0; index < 20; index++) await Promise.resolve();
+}
+
+async function runAmbientRouting(app: { handlers: Map<string, Function[]>; ctx: ExtensionContext }): Promise<void> {
+	await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+	await drainAmbientWork();
+}
+
 class FakeClient implements JittorExtensionClient {
 	calls: Array<{ operation: string; input: unknown }> = [];
 	decision = decision();
@@ -289,6 +300,7 @@ describe("Jittor Pi actuator", () => {
 		const handler = app.handlers.get("before_provider_request")?.[0];
 		expect(handler).toBeDefined();
 		expect(await handler!({ payload: privatePayload }, app.ctx)).toBeUndefined();
+		await drainAmbientWork();
 		const call = client.calls.find((candidate) => candidate.operation === "context.snapshot");
 		expect(call).toBeDefined();
 		const snapshot = call!.input as Record<string, unknown> & { segments: Array<Record<string, unknown>> };
@@ -357,6 +369,7 @@ describe("Jittor Pi actuator", () => {
 			{ payload: { system: "post compaction", messages: [{ role: "user", content: "remaining" }] } },
 			app.ctx,
 		);
+		await drainAmbientWork();
 		const recorded = recordedMetrics(client) as Array<{ source: string; metric: string; attributes?: Record<string, unknown> }>;
 		expect(recorded.some((metric) => metric.source === "papyrus-context" && metric.metric === "injected-characters")).toBe(true);
 		expect(
@@ -547,13 +560,13 @@ describe("Jittor Pi actuator", () => {
 		}
 	});
 
-	it("blocks input before a forbidden provider request with actionable recovery guidance", async () => {
+	it("never waits for or blocks on a routing decision in the input path", async () => {
 		const client = new FakeClient();
 		client.decision = decision({ action: "halt", pressure: Infinity, reason: "budget exhausted" });
 		const app = harness(client);
 		const result = await app.handlers.get("input")![0]!({ source: "interactive", text: "go" }, app.ctx);
-		expect(result).toEqual({ action: "handled" });
-		expect(app.notifications.join("\n")).toContain("/jittor off");
+		expect(result).toEqual({ action: "continue" });
+		expect(client.calls.some((call) => call.operation === "router.decide")).toBe(false);
 	});
 
 	it("opens the consolidated settings TUI through /jittor settings, and through bare /jittor since settings is now its default", async () => {
@@ -778,7 +791,8 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client);
 
 		await app.handlers.get("session_start")![0]!({}, app.ctx);
-		await app.handlers.get("input")![0]!({ source: "interactive", text: "work" }, app.ctx);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		await drainAmbientWork();
 
 		const routerCalls = client.calls.filter((call) => call.operation.startsWith("router."));
 		expect(routerCalls.map((call) => call.operation)).toEqual(
@@ -844,6 +858,7 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client, enforcement);
 
 		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		await drainAmbientWork();
 
 		expect(client.calls.some((call) => call.operation === "router.current_route")).toBe(true);
 		expect(client.calls.some((call) => call.operation === "router.available_routes")).toBe(true);
@@ -851,27 +866,52 @@ describe("Jittor Pi actuator", () => {
 		expect(client.calls.some((call) => call.operation === "metrics.query")).toBe(true);
 	});
 
-	it("applies model and thinking decisions before a turn", async () => {
+	it("applies model and thinking decisions ambiently while Pi is idle", async () => {
 		const client = new FakeClient();
 		client.decision = decision({
 			action: "switch-model",
 			route: { provider: "openai-codex", model: "gpt-5.1-codex-mini", thinking: "medium" },
 		});
 		const app = harness(client);
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		await drainAmbientWork();
 		expect(app.modelChanges).toEqual([{ provider: "openai-codex", id: "gpt-5.1-codex-mini" }]);
 		expect(app.thinkingChanges).toEqual(["medium"]);
 		expect(app.aborted()).toBe(false);
 	});
 
-	it("applies a cross-provider fallback selected from Pi's authenticated routes", async () => {
+	it("does not apply a delayed ambient decision after Pi becomes busy", async () => {
+		const gate = Promise.withResolvers<void>();
+		class DelayedDecisionClient extends FakeClient {
+			override async call(operation: string, input: unknown): Promise<any> {
+				if (operation === "router.decide") await gate.promise;
+				return super.call(operation, input);
+			}
+		}
+		const client = new DelayedDecisionClient();
+		client.decision = decision({
+			action: "switch-model",
+			route: { provider: "openai-codex", model: "gpt-5.1-codex-mini", thinking: "medium" },
+		});
+		const app = harness(client);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		await drainAmbientWork();
+		app.setIdle(false);
+		gate.resolve();
+		await drainAmbientWork();
+		expect(app.modelChanges).toEqual([]);
+		expect(app.thinkingChanges).toEqual([]);
+	});
+
+	it("applies a cross-provider fallback selected from Pi's authenticated routes while idle", async () => {
 		const client = new FakeClient();
 		client.decision = decision({
 			action: "switch-provider",
 			route: { provider: "openrouter", model: "openai/gpt-4.1-mini", thinking: "off" },
 		});
 		const app = harness(client);
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await app.handlers.get("agent_settled")![0]!({}, app.ctx);
+		await drainAmbientWork();
 		expect(app.modelChanges).toEqual([{ provider: "openrouter", id: "openai/gpt-4.1-mini" }]);
 		expect(app.aborted()).toBe(false);
 	});
@@ -883,7 +923,7 @@ describe("Jittor Pi actuator", () => {
 			decision({ action: "lower-thinking", route: { provider: "openai-codex", model: "gpt-5.3-codex", thinking: "medium" } }),
 		];
 		const app = harness(client);
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await runAmbientRouting(app);
 		expect(client.calls.some((call) => call.operation === "router.available_routes")).toBe(true);
 		expect(app.modelChanges).toEqual([]);
 		expect(app.thinkingChanges).toEqual(["medium"]);
@@ -1073,10 +1113,8 @@ describe("Jittor Pi actuator", () => {
 					record.source === "anthropic" && record.scope === "tokens" && record.metric === "used-fraction" && record.value === 0.25,
 			),
 		).toBe(true);
-		expect(client.calls).toContainEqual({
-			operation: "metrics.query",
-			input: { source: "anthropic", metric: "used-fraction", limit: 20, order: "desc" },
-		});
+		// Footer reload is consolidated at agent_settled, outside the provider response path.
+		expect(client.calls.some((call) => call.operation === "router.status")).toBe(false);
 	});
 
 	it("notifies instead of silently dropping telemetry on Anthropic header schema drift", async () => {
@@ -1159,10 +1197,8 @@ describe("Jittor Pi actuator", () => {
 			expect.objectContaining({ source: "anthropic-vertex", scope: "tokens", metric: "used-fraction", value: 0.6 }),
 		);
 		expect(records.some((record) => record.source === "anthropic")).toBe(false);
-		expect(client.calls).toContainEqual({
-			operation: "metrics.query",
-			input: { source: "anthropic-vertex", metric: "used-fraction", limit: 20, order: "desc" },
-		});
+		// Footer reload is consolidated at agent_settled, outside the provider response path.
+		expect(client.calls.some((call) => call.operation === "router.status")).toBe(false);
 	});
 
 	it("notifies instead of silently dropping telemetry on anthropic-vertex header schema drift", async () => {
@@ -1559,7 +1595,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 			},
 		};
 		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await runAmbientRouting(app);
 		expect(app.modelChanges).toEqual([{ provider: "openai-codex", id: "gpt-5.6-sol" }]);
 		expect(app.thinkingChanges).toEqual(["high"]);
 		expect(app.notifications.filter((message) => message.includes("auto-switched"))).toHaveLength(1);
@@ -1595,7 +1631,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 		};
 		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
 		(app.ctx.ui as unknown as { custom: unknown }).custom = suggestDialogCustom("s");
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await runAmbientRouting(app);
 		expect(app.modelChanges).toEqual([{ provider: "openai-codex", id: "gpt-5.6-sol" }]);
 	});
 
@@ -1630,9 +1666,8 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
 		const calls = { count: 0 };
 		(app.ctx.ui as unknown as { custom: unknown }).custom = suggestDialogCustom("n", calls);
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
-		await app.handlers.get("turn_end")![0]!({ turnIndex: 1, message: { role: "assistant" }, toolResults: [] }, app.ctx);
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 2, timestamp: 2000 }, app.ctx);
+		await runAmbientRouting(app);
+		await runAmbientRouting(app);
 		expect(calls.count).toBe(1);
 	});
 
@@ -1649,7 +1684,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 		};
 		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("suggest"));
 		(app.ctx as unknown as { mode: string }).mode = "headless";
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await runAmbientRouting(app);
 		expect(app.modelChanges).toEqual([]);
 		expect(app.notifications.some((message) => message.includes("Jittor suggests") && message.includes("openai-codex/gpt-5.6-sol"))).toBe(
 			true,
@@ -1672,7 +1707,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 			},
 		};
 		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await runAmbientRouting(app);
 		expect(client.calls.some((call) => call.operation === "models.rank")).toBe(false);
 		expect(app.modelChanges).toEqual([{ provider: "openai-codex", id: "gpt-5.1-codex-mini" }]);
 		expect(app.notifications.some((message) => message.includes("auto-switched"))).toBe(false);
@@ -1681,7 +1716,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 	it("takes no action at all when the ranking has no gate-clearing recommendation", async () => {
 		const client = new FakeClient();
 		const app = harness(client, undefined, undefined, undefined, undefined, fakeAutoModeControl("auto-switch"));
-		await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+		await runAmbientRouting(app);
 		expect(client.calls.some((call) => call.operation === "models.rank")).toBe(true);
 		expect(app.modelChanges).toEqual([]);
 		expect(app.notifications).toEqual([]);
@@ -1706,7 +1741,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 			});
 			// No "input" event ever fired -- pendingUserText stays empty, which live classification
 			// would score as "low". The declared effort must win regardless.
-			await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+			await runAmbientRouting(app);
 			expect(rankCalls(client)[0]).toMatchObject({ input: { effort: "high" } });
 		});
 
@@ -1730,7 +1765,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 				status: "cleared",
 				observedAt: now,
 			});
-			await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+			await runAmbientRouting(app);
 			expect(rankCalls(client)[0]).toMatchObject({ input: { effort: "low" } });
 		});
 
@@ -1755,7 +1790,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 				observedAt: now,
 				effort: "high",
 			});
-			await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+			await runAmbientRouting(app);
 			expect(rankCalls(client)[0]).toMatchObject({ input: { effort: "low" } });
 		});
 
@@ -1783,7 +1818,7 @@ describe("Jittor Auto mode routing (effort-based, distinct from budget-pressure 
 				observedAt: now,
 				effort: "extreme",
 			});
-			await app.handlers.get("turn_start")![0]!({ turnIndex: 1, timestamp: 1000 }, app.ctx);
+			await runAmbientRouting(app);
 			expect(rankCalls(client)[0]).toMatchObject({ input: { effort: "high" } });
 		});
 	});

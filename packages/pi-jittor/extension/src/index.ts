@@ -164,21 +164,6 @@ async function refreshFooter(client: JittorExtensionClient, state: IntegratedFoo
 	state.requestRender?.();
 }
 
-function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
-	if (milliseconds <= 0) return Promise.resolve();
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(resolve, milliseconds);
-		signal?.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timer);
-				reject(new Error("Jittor throttle cancelled"));
-			},
-			{ once: true },
-		);
-	});
-}
-
 function routeModelAvailable(ctx: ExtensionContext, route: Route): boolean {
 	return ctx.modelRegistry.getAvailable().some((model) => model.provider === route.provider && model.id === route.model);
 }
@@ -316,38 +301,6 @@ async function syncCurrentRoute(
 		session_id,
 		...sessionSecretField(session_id),
 	});
-}
-
-function halt(ctx: ExtensionContext, reason: string): false {
-	ctx.ui.notify(`${reason}. ${RECOVERY_GUIDANCE}.`, "warning");
-	ctx.abort();
-	return false;
-}
-
-async function applyDecision(
-	pi: ExtensionAPI,
-	client: JittorExtensionClient,
-	ctx: ExtensionContext,
-	decision: PolicyDecision,
-	allowResync = true,
-): Promise<boolean> {
-	if (decision.action === "halt") return halt(ctx, `Jittor blocked this provider request: ${decision.reason}`);
-	if (decision.action === "throttle") await delay(decision.delayMs ?? 0, ctx.signal);
-	if (!decision.route || (await applyRoute(pi, ctx, decision.route))) return true;
-	if (allowResync) {
-		await syncAvailableRoutes(pi, client, ctx);
-		return applyDecision(
-			pi,
-			client,
-			ctx,
-			(await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() })) as PolicyDecision,
-			false,
-		);
-	}
-	return halt(
-		ctx,
-		`Jittor could not apply any authenticated Pi route after ${decision.route.provider}/${decision.route.model} became unavailable`,
-	);
 }
 
 let assistantUsageRunSequence = 0;
@@ -503,54 +456,61 @@ export function registerJittorExtension(
 	const contextFingerprinter = new HmacContextFingerprinter(contextFingerprintKey);
 	let contextCaptureSequence = 0;
 	pi.on("before_provider_request", (event, ctx) => {
-		try {
-			const sessionId = ctx.sessionManager.getSessionId();
-			let history:
-				| {
-						roots: SessionTreeNodeLike[];
-						activeEntryIds: Set<string>;
-						branchEntryIds: Set<string>;
-				  }
-				| undefined;
+		// Pi awaits this hook immediately before opening the provider request. Snapshotting a large
+		// payload here used to add its full CPU cost to TTFT even though persistence was detached.
+		// Defer the entire observational path to a later macrotask; the provider payload is immutable
+		// after serialization in Pi's request path, and a missed snapshot is preferable to delaying it.
+		const timer = setTimeout(() => {
 			try {
-				history = {
-					roots: ctx.sessionManager.getTree() as SessionTreeNodeLike[],
-					activeEntryIds: new Set((ctx.sessionManager.buildContextEntries() as SessionEntryLike[]).map((entry) => entry.id)),
-					branchEntryIds: new Set((ctx.sessionManager.getBranch() as SessionEntryLike[]).map((entry) => entry.id)),
+				const sessionId = ctx.sessionManager.getSessionId();
+				let history:
+					| {
+							roots: SessionTreeNodeLike[];
+							activeEntryIds: Set<string>;
+							branchEntryIds: Set<string>;
+					  }
+					| undefined;
+				try {
+					history = {
+						roots: ctx.sessionManager.getTree() as SessionTreeNodeLike[],
+						activeEntryIds: new Set((ctx.sessionManager.buildContextEntries() as SessionEntryLike[]).map((entry) => entry.id)),
+						branchEntryIds: new Set((ctx.sessionManager.getBranch() as SessionEntryLike[]).map((entry) => entry.id)),
+					};
+				} catch {
+					// Older/custom SessionManager implementations may not expose tree projections.
+				}
+				const captureInput = {
+					payload: event.payload,
+					captureId: `${++contextCaptureSequence}`,
+					sessionId,
+					provider: ctx.model?.provider ?? "unknown",
+					model: ctx.model?.id ?? "unknown",
+					capturedAt: Date.now(),
+					fingerprinter: contextFingerprinter,
 				};
+				let snapshot: ContextSnapshot;
+				try {
+					snapshot = captureProviderContextSnapshot({ ...captureInput, ...(history ? { history } : {}) });
+				} catch {
+					// A custom SessionManager tree shape must not suppress the real request-payload snapshot.
+					snapshot = captureProviderContextSnapshot(captureInput);
+				}
+				// Observation must never alter or abort the provider request. Both local writes are detached;
+				// they receive only bounded token sizes and keyed fingerprints.
+				const requestTokens = snapshot.segments
+					.filter((segment) => segment.requestPosition !== null)
+					.reduce((sum, segment) => sum + segment.tokens, 0);
+				const compactionMetrics = compactionTelemetry.observeContextSnapshot(requestTokens, "structural-estimate", snapshot.capturedAt, {
+					provider: snapshot.provider,
+					model: snapshot.model,
+				});
+				void client.call("context.snapshot", snapshot).catch(() => undefined);
+				if (compactionMetrics.length > 0) void recordMetrics(client, compactionMetrics).catch(() => undefined);
 			} catch {
-				// Older/custom SessionManager implementations may not expose tree projections.
+				// Snapshot collection is strictly failure-isolated from provider delivery.
 			}
-			const captureInput = {
-				payload: event.payload,
-				captureId: `${++contextCaptureSequence}`,
-				sessionId,
-				provider: ctx.model?.provider ?? "unknown",
-				model: ctx.model?.id ?? "unknown",
-				capturedAt: Date.now(),
-				fingerprinter: contextFingerprinter,
-			};
-			let snapshot: ContextSnapshot;
-			try {
-				snapshot = captureProviderContextSnapshot({ ...captureInput, ...(history ? { history } : {}) });
-			} catch {
-				// A custom SessionManager tree shape must not suppress the real request-payload snapshot.
-				snapshot = captureProviderContextSnapshot(captureInput);
-			}
-			// Observation must never alter or abort the provider request. Both local writes are detached;
-			// they receive only bounded token sizes and keyed fingerprints.
-			const requestTokens = snapshot.segments
-				.filter((segment) => segment.requestPosition !== null)
-				.reduce((sum, segment) => sum + segment.tokens, 0);
-			const compactionMetrics = compactionTelemetry.observeContextSnapshot(requestTokens, "structural-estimate", snapshot.capturedAt, {
-				provider: snapshot.provider,
-				model: snapshot.model,
-			});
-			void client.call("context.snapshot", snapshot).catch(() => undefined);
-			if (compactionMetrics.length > 0) void recordMetrics(client, compactionMetrics).catch(() => undefined);
-		} catch {
-			// Snapshot collection is strictly failure-isolated from provider delivery.
-		}
+		}, 0);
+		timer.unref?.();
 	});
 	const stopContextHub = pi.events?.on?.(CONTEXT_HUB_CONTRIBUTION_CHANNEL, (payload) => contextHub.observe(payload));
 	// Cached from the most recent before_agent_start observation: Pi's own base system prompt is
@@ -1002,25 +962,58 @@ export function registerJittorExtension(
 		]).catch(() => undefined);
 	});
 
-	pi.on("agent_settled", async (_event, ctx) => {
+	let ambientRouting: Promise<void> | null = null;
+	const scheduleAmbientRouting = (ctx: ExtensionContext): void => {
+		if (ambientRouting || !ctx.isIdle()) return;
+		ambientRouting = (async () => {
+			try {
+				await syncCurrentRoute(pi, client, ctx);
+				await syncAvailableRoutes(pi, client, ctx);
+				if (!ctx.isIdle()) return;
+				let budgetActed = false;
+				if (enforcement.isEnabled()) {
+					const decision = (await client.call("router.decide", {
+						session_id: ctx.sessionManager.getSessionId(),
+					})) as PolicyDecision;
+					if (!ctx.isIdle()) return;
+					budgetActed = decision.action !== "continue";
+					if (decision.action === "halt") {
+						ctx.ui.notify(`Jittor recommends pausing future requests: ${decision.reason}.`, "warning");
+					} else if (decision.route && !(await applyRoute(pi, ctx, decision.route)) && ctx.isIdle()) {
+						// Catalogs can change while an ambient decision is in flight. Refresh and try one
+						// newly-computed route; failure simply leaves the current model in place.
+						await syncAvailableRoutes(pi, client, ctx);
+						const refreshed = (await client.call("router.decide", {
+							session_id: ctx.sessionManager.getSessionId(),
+						})) as PolicyDecision;
+						if (ctx.isIdle() && refreshed.route) await applyRoute(pi, ctx, refreshed.route);
+					}
+				}
+				if (!budgetActed && ctx.isIdle()) await runAutoModeTurn(ctx);
+			} catch {
+				// Routing is opportunistic: daemon latency or failure must never enter Pi's request path.
+			} finally {
+				ambientRouting = null;
+			}
+		})();
+	};
+
+	pi.on("agent_settled", (_event, ctx) => {
 		if (footerState.compaction) {
 			finishCompactionUi();
 			if (compactionTelemetry.hasOpenCompaction())
-				await recordMetrics(client, [compactionTelemetry.abort(Date.now(), "agent-settled-without-completion")]).catch(() => undefined);
+				void recordMetrics(client, [compactionTelemetry.abort(Date.now(), "agent-settled-without-completion")]).catch(() => undefined);
 		}
 		scheduleCodexRecovery(ctx);
+		scheduleAmbientRouting(ctx);
 		if (!enforcement.isFooterEnabled()) return;
-		try {
-			await syncCurrentRoute(pi, client, ctx);
-			await syncAvailableRoutes(pi, client, ctx);
-			await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
-		} catch {
+		void refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => {
 			footerState.providerBudget = null;
 			footerState.requestRender?.();
-		}
+		});
 	});
 
-	pi.on("input", async (event, ctx) => {
+	pi.on("input", (event) => {
 		if (event.source !== "extension") {
 			cancelRecovery(true);
 			// Auto mode's own effort classifier reads this at the next turn_start -- captured
@@ -1028,57 +1021,34 @@ export function registerJittorExtension(
 			// separate, independently-toggled feature from budget enforcement.
 			pendingUserText = event.text;
 		}
-		if (event.source === "extension" || !enforcement.isEnabled()) return { action: "continue" as const };
-		try {
-			const next = (await client.call("router.decide", { session_id: ctx.sessionManager.getSessionId() })) as PolicyDecision;
-			if (next.action === "halt") {
-				ctx.ui.notify(`Jittor blocked input: ${next.reason}. ${RECOVERY_GUIDANCE}.`, "warning");
-				return { action: "handled" as const };
-			}
-			return { action: "continue" as const };
-		} catch {
-			ctx.ui.notify(`Jittor could not verify budget telemetry, so fail-closed enforcement blocked input. ${RECOVERY_GUIDANCE}.`, "error");
-			return { action: "handled" as const };
-		}
+		// Routing is advisory and ambient. The submitted message always enters Pi immediately;
+		// daemon decisions computed while idle can optimize a later turn.
+		return { action: "continue" as const };
 	});
 
-	pi.on("model_select", async (event, ctx) => {
-		await syncCurrentRoute(pi, client, ctx, event.model)
+	pi.on("model_select", (event, ctx) => {
+		void syncCurrentRoute(pi, client, ctx, event.model)
 			.then(() => syncAvailableRoutes(pi, client, ctx))
+			.then(() =>
+				enforcement.isFooterEnabled()
+					? refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined)
+					: undefined,
+			)
 			.catch(() => undefined);
-		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
 	});
 
-	pi.on("thinking_level_select", async (event, ctx) => {
-		await syncCurrentRoute(pi, client, ctx, ctx.model, event.level).catch(() => undefined);
+	pi.on("thinking_level_select", (event, ctx) => {
+		void syncCurrentRoute(pi, client, ctx, ctx.model, event.level).catch(() => undefined);
 	});
 
-	pi.on("turn_start", async (event, ctx) => {
+	pi.on("turn_start", (event, ctx) => {
 		currentSessionId = ctx.sessionManager.getSessionId();
 		compactionTelemetry.observeTurn();
 		codexRecoveryCapability.resetTurn();
 		providerResponseTelemetry.resetTurn();
 		localRunTelemetry.beginTurn(event.timestamp);
-		// Budget/enforcement routing is safety-critical and always wins on conflict: Auto mode is
-		// only evaluated when budget pressure required no action this turn (action === "continue"),
-		// so the two decision sources never fight over the model mid-turn.
-		let budgetActedThisTurn = false;
-		if (enforcement.isEnabled()) {
-			try {
-				await syncCurrentRoute(pi, client, ctx);
-				await syncAvailableRoutes(pi, client, ctx);
-				const budgetDecision = (await client.call("router.decide", {
-					session_id: ctx.sessionManager.getSessionId(),
-				})) as PolicyDecision;
-				budgetActedThisTurn = budgetDecision.action !== "continue";
-				await applyDecision(pi, client, ctx, budgetDecision);
-				await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
-			} catch {
-				halt(ctx, "Jittor could not verify or apply a safe route");
-				return;
-			}
-		}
-		if (!budgetActedThisTurn) await runAutoModeTurn(ctx).catch(() => undefined);
+		// Deliberately no daemon or routing work here: Pi awaits turn_start before provider delivery.
+		// The previous agent_settled event computes and applies recommendations for later turns.
 	});
 
 	pi.on("message_update", async (event) => {
@@ -1095,35 +1065,35 @@ export function registerJittorExtension(
 		if (currentTurnToolNames.length < EFFORT_CLASSIFICATION_MAX_TOOL_NAMES) currentTurnToolNames.push(event.toolName);
 	});
 
-	pi.on("after_provider_response", async (event, ctx) => {
+	pi.on("after_provider_response", (event, ctx) => {
 		localRunTelemetry.onProviderResponse();
 		if (ctx.model?.provider === "openai-codex") codexRecoveryCapability.notifyResponse(event.status, event.headers);
 		const notifySchemaDrift = (message: string) => {
 			if (enforcement.isEnabled()) ctx.ui.notify(`Jittor detected ${message}. ${RECOVERY_GUIDANCE}.`, "error");
 		};
-		await providerResponseTelemetry.handleProviderResponse(client, ctx.model?.provider, event.status, event.headers, notifySchemaDrift);
-		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
+		// Pi fires this before consuming the provider stream. Never put telemetry or footer RPCs
+		// between the HTTP response and the first streamed token.
+		void providerResponseTelemetry
+			.handleProviderResponse(client, ctx.model?.provider, event.status, event.headers, notifySchemaDrift)
+			.catch(() => undefined);
 	});
 
-	pi.on("turn_end", async (event, ctx) => {
+	pi.on("turn_end", (event, ctx) => {
 		const tokens = ctx.getContextUsage()?.tokens;
 		if (typeof tokens === "number" && Number.isFinite(tokens)) contextGrowth.observe(++contextGrowthTurn, tokens);
 		const metrics = localRunTelemetry.completeTurn(event.message, pi.getThinkingLevel());
-		await recordMetrics(client, metrics).catch(() => undefined);
+		void recordMetrics(client, metrics).catch(() => undefined);
 		priorTurnToolNames = currentTurnToolNames;
 		currentTurnToolNames = [];
 	});
 
-	pi.on("message_end", async (event, ctx) => {
+	pi.on("message_end", (event, ctx) => {
 		if (event.message.role === "assistant") {
 			if (event.message.provider === "openai-codex")
 				codexRecoveryCapability.notifyMessageEnd(event.message.stopReason, event.message.errorMessage);
-			await providerResponseTelemetry.handleMessageEnd(
-				client,
-				event.message.provider,
-				event.message.stopReason,
-				event.message.errorMessage,
-			);
+			void providerResponseTelemetry
+				.handleMessageEnd(client, event.message.provider, event.message.stopReason, event.message.errorMessage)
+				.catch(() => undefined);
 		}
 		const metrics = assistantUsageMetrics(
 			event.message,
@@ -1143,9 +1113,10 @@ export function registerJittorExtension(
 				cacheRead: amount("cache-read-tokens"),
 				cacheWrite: amount("cache-write-tokens"),
 			});
-			await recordMetrics(client, metrics).catch(() => undefined);
+			void recordMetrics(client, metrics).catch(() => undefined);
 		}
-		if (enforcement.isFooterEnabled()) await refreshFooter(client, footerState, ctx.sessionManager.getSessionId()).catch(() => undefined);
+		// Footer refresh is consolidated in agent_settled; finalized-message accounting must not
+		// hold back streamed lifecycle delivery or the next queued prompt.
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
