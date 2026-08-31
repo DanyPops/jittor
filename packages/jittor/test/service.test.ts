@@ -366,6 +366,19 @@ describe("Jittor operation service — the same operations, through the real Veh
 		expect(body.operations.map((o) => o.name).sort()).toEqual([...EXPECTED_OPERATION_NAMES].sort());
 	});
 
+	it("derives Vehicle permissions from authenticated server state", async () => {
+		const service = new JittorService(new FakeMetricStore());
+		const app = createApp({ service, token: "test-token" });
+		const response = await app.fetch(
+			new Request("http://jittor.test/vehicle/invoke", {
+				method: "POST",
+				headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+				body: JSON.stringify({ name: "metrics.query", version: 1, input: {}, permissions: [], principal: { id: "forged-caller" } }),
+			}),
+		);
+		expect(response.status).toBe(200);
+	});
+
 	it("metrics.record/metrics.query round-trip through /vehicle/invoke, matching the /api/v1/ops shape", async () => {
 		const store = new FakeMetricStore();
 		const service = new JittorService(store);

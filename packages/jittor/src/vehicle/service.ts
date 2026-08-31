@@ -315,7 +315,12 @@ export function createApp(options: JittorAppOptions): { fetch(request: Request):
 	// composed here rather than replacing /api/v1/ops, matching every other Vehicle-migrated
 	// daemon in this ecosystem ("served alongside", not "instead of"). Routed before the
 	// top-level bearer check below since createVehicleHttpApp performs its own.
-	const vehicleApp = createVehicleHttpApp({ registry: options.service.vehicleRegistry, token: options.token });
+	const permissions = [...new Set(options.service.vehicleRegistry.manifest().operations.flatMap((operation) => operation.permissions))];
+	const vehicleApp = createVehicleHttpApp({
+		registry: options.service.vehicleRegistry,
+		token: options.token,
+		invocationAuthority: { mode: "attested", resolve: () => ({ permissions, principal: { id: "jittor-authenticated-client" } }) },
+	});
 	return {
 		async fetch(request: Request): Promise<Response> {
 			const url = new URL(request.url);
