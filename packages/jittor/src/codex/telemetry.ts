@@ -1,5 +1,12 @@
 import { readFileSync, statSync } from "node:fs";
+import {
+	type ResetOutcome,
+	type ResetRedemption,
+	type SubscriptionResetList,
+	validateResetRedemption,
+} from "../observability/subscription-resets.ts";
 import { type CodexRateLimitSnapshot, type CodexUsageSnapshot, parseCodexRateLimitHeaders, parseCodexUsage } from "./contracts.ts";
+import { parseResetList, parseResetOutcome, readResetJson } from "./resets.ts";
 
 export {
 	type CodexCredits,
@@ -91,6 +98,47 @@ export class CodexSubscriptionTelemetryAdapter {
 			throw new Error("Codex experimental usage response was not JSON");
 		}
 		return parseCodexUsage(payload, observedAt);
+	}
+
+	async readResets(): Promise<SubscriptionResetList> {
+		return parseResetList(await this.resetRequest("/wham/rate-limit-reset-credits"));
+	}
+
+	async redeemReset(input: ResetRedemption): Promise<ResetOutcome> {
+		validateResetRedemption(input);
+		return parseResetOutcome(
+			await this.resetRequest("/wham/rate-limit-reset-credits/consume", {
+				credit_id: input.creditId,
+				redeem_request_id: input.idempotencyKey,
+			}),
+		);
+	}
+
+	private async resetRequest(path: string, body?: { credit_id: string; redeem_request_id: string }): Promise<unknown> {
+		let response: Response;
+		try {
+			response = await this.transport(
+				new Request(`${this.baseUrl}${path}`, {
+					method: body ? "POST" : "GET",
+					redirect: "error",
+					signal: AbortSignal.timeout(10_000),
+					headers: {
+						authorization: `Bearer ${this.credentials.accessToken}`,
+						"chatgpt-account-id": this.credentials.accountId,
+						accept: "application/json",
+						...(body ? { "content-type": "application/json" } : {}),
+					},
+					...(body ? { body: JSON.stringify(body) } : {}),
+				}),
+			);
+		} catch {
+			throw new Error("Codex reset request failed; for redemption retry only with the same idempotency key");
+		}
+		if (!response.ok) {
+			await response.body?.cancel().catch(() => {});
+			throw new Error(`Codex reset request failed with HTTP ${response.status}; for redemption retry only with the same idempotency key`);
+		}
+		return readResetJson(response);
 	}
 
 	readResponseHeaders(headers: Headers, observedAt = Date.now()): CodexRateLimitSnapshot[] {

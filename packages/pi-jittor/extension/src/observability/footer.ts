@@ -48,7 +48,7 @@ interface FooterContext {
 }
 
 /** A bounded quota is explicitly remaining; unbounded values never receive a fabricated bar. */
-export type ProviderBudget =
+export type ProviderBudget = { availableResets?: { count: number; observedAt: number } } & (
 	| {
 			kind: "bounded";
 			label: string;
@@ -67,7 +67,21 @@ export type ProviderBudget =
 			kind: "unavailable";
 			label: string;
 			valueText: string;
-	  };
+	  }
+);
+
+export function resetAvailabilityText(budget: ProviderBudget | null | undefined, now: number): string | undefined {
+	const resets = budget?.availableResets;
+	if (
+		!resets ||
+		!Number.isSafeInteger(resets.count) ||
+		resets.count < 1 ||
+		resets.count > 10000 ||
+		now - resets.observedAt > TELEMETRY_STALE_AFTER_MS
+	)
+		return undefined;
+	return `${resets.count} reset${resets.count === 1 ? "" : "s"} available`;
+}
 
 /** Compact, always-visible state of Jittor's effort-based Auto mode -- the newer, effort-driven router, distinct from the existing budget-pressure route already reflected by the model/budget segments. */
 export interface RouterFooterInfo {
@@ -222,6 +236,18 @@ function resetLabel(resetsAt: number | undefined, now: number): string | undefin
  * `null` means not known yet but might resolve, which still earns the `?` placeholder.
  */
 function budgetSegment(
+	budget: ProviderBudget | null | undefined,
+	theme: FooterTheme,
+	width: number,
+	compact: boolean,
+	now: number,
+): string | undefined {
+	const quota = quotaSegment(budget, theme, width, compact, now);
+	const resets = resetAvailabilityText(budget, now);
+	return resets ? `${quota ?? "Codex"} · ${resets}` : quota;
+}
+
+function quotaSegment(
 	budget: ProviderBudget | null | undefined,
 	theme: FooterTheme,
 	width: number,

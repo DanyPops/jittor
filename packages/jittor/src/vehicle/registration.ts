@@ -76,6 +76,12 @@ const WRITE: VehicleIdempotency = { mode: "unsafe" };
  *   rows plus catalog pricing; never mutates anything).
  */
 const OPERATION_META: Record<OperationName, OperationMeta> = {
+	"subscription.resets.list": { description: "Lists up to 100 Codex banked resets and the authoritative available count.", effect: "read" },
+	"subscription.resets.redeem": {
+		description:
+			"Consumes a selected Codex banked reset. Requires confirm:true, creditId and a UUID idempotencyKey; reuse the same key on retries.",
+		effect: "external-write",
+	},
 	"metrics.record": { description: "Records one metric observation.", effect: "local-write" },
 	"metrics.record_batch": { description: "Records a bounded batch of metric observations as one atomic unit.", effect: "local-write" },
 	"metrics.query": { description: "Queries recorded metric observations.", effect: "read" },

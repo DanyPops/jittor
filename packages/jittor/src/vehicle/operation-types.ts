@@ -10,6 +10,8 @@ export type OperationHandlerMap = Partial<Record<string, OperationHandler>>;
  * while service.ts value-imported registerJittorVehicleOperations from registration.ts.
  */
 export const EXPECTED_OPERATION_NAMES = [
+	"subscription.resets.list",
+	"subscription.resets.redeem",
 	"metrics.record",
 	"metrics.record_batch",
 	"metrics.query",

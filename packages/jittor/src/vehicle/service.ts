@@ -8,6 +8,7 @@ import { type ContextSnapshotHistory, MetricContextSnapshotHistory } from "../ob
 import type { CompactionDurationEstimate, ContextAssessment } from "../observability/context-telemetry.ts";
 import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../observability/metric.ts";
 import type { MetricStore } from "../observability/store.ts";
+import type { ResetOutcome, ResetRedemption, SubscriptionResetList, SubscriptionResets } from "../observability/subscription-resets.ts";
 import type { TaskCostSummary } from "../observability/task-cost.ts";
 import type { UsageAggregateRow } from "../observability/usage.ts";
 import type { UsageImportController, UsageImportResult, UsageImportStatus } from "../observability/usage-import.ts";
@@ -38,6 +39,7 @@ import { EXPECTED_OPERATION_NAMES, type OperationHandlerMap, type OperationName 
 import { registerJittorVehicleOperations } from "./registration.ts";
 import { routerOperations } from "./routing-operations.ts";
 import { sessionIdentityOperations } from "./session-operations.ts";
+import { subscriptionResetOperations } from "./subscription-reset-operations.ts";
 import { usageImportOperations } from "./usage-import-operations.ts";
 
 export { EXPECTED_OPERATION_NAMES, type OperationName };
@@ -47,6 +49,8 @@ interface RouterScopeInput {
 	session_secret?: string;
 }
 export interface OperationInputs {
+	"subscription.resets.list": Record<string, never>;
+	"subscription.resets.redeem": ResetRedemption & { confirm: boolean };
 	"session.register": { session_id: string };
 	"session.release": { session_id: string; session_secret?: string };
 	"metrics.record": MetricObservation;
@@ -85,6 +89,8 @@ export interface OperationInputs {
 	"cache.economics": { since: number; until: number };
 }
 export interface OperationOutputs {
+	"subscription.resets.list": SubscriptionResetList;
+	"subscription.resets.redeem": ResetOutcome & { telemetryRefreshed: boolean };
 	"session.register": RegisterSessionIdentityResult;
 	"session.release": { released: boolean };
 	"metrics.record": StoredMetricObservation;
@@ -237,6 +243,7 @@ export class JittorService {
 		catalog: ModelCatalogController = new UnavailableModelCatalog(),
 		usageImporter: UsageImportController = new UnavailableUsageImporter(),
 		exporter: ObservationExporter = new DisabledObservationExporter(),
+		resets?: SubscriptionResets,
 	) {
 		this.router = router;
 		const authorize = routerMutationAuthorizer(sessionIdentity);
@@ -244,6 +251,7 @@ export class JittorService {
 		// the collaborators it needs -- adding a new operation domain means adding a new module here,
 		// not another switch case in a single responsibility magnet.
 		this.operations = {
+			...subscriptionResetOperations(resets),
 			...metricsOperations(metrics),
 			...benchmarkOperations(benchmarks),
 			...catalogOperations(catalog),

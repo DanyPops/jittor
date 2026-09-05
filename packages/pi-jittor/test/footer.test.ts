@@ -57,6 +57,14 @@ const weekly: ProviderBudget = {
 };
 
 describe("Jittor integrated footer", () => {
+	it("renders fresh reset availability within terminal bounds", () => {
+		const budget = { ...weekly, availableResets: { count: 1, observedAt: 1000 } };
+		expect(renderFooterLines(context(), footerData, theme, budget, "high", 260, 2000)[0]).toContain("1 reset available");
+		for (const width of [20, 60, 100, 160, 260]) {
+			expect(visibleWidth(renderFooterLines(context(), footerData, theme, budget, "high", width, 2000)[0]!)).toBeLessThanOrEqual(width);
+		}
+		expect(renderFooterLines(context(), footerData, theme, budget, "high", 260, 601000)[0]).not.toContain("reset available");
+	});
 	it("renders repository, model, token usage, context, budget, and statuses on one unlabeled line", () => {
 		const lines = renderFooterLines(context(), footerData, theme, weekly, "high", 220, 2_000);
 		expect(lines).toHaveLength(1);

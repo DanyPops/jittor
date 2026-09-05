@@ -4,6 +4,7 @@ import { openVehicleMetricsStore } from "@danypops/vehicle-server/metrics";
 import { createVehicleMetricsMiddleware } from "@danypops/vehicle-server/metrics-middleware";
 import { registerVehicleMetricsOperations } from "@danypops/vehicle-server/metrics-operations";
 import { ArtificialAnalysisDirectSource } from "./artificial-analysis/benchmark-source.ts";
+import { CodexResetSource } from "./codex/reset-source.ts";
 import { CodexTelemetrySource } from "./codex/source.ts";
 import { MAINTENANCE_INTERVAL_MS, TELEMETRY_POLL_INTERVAL_MS } from "./constants.ts";
 import { createGoogleAdcTokenProvider } from "./google-vertex/auth.ts";
@@ -12,6 +13,7 @@ import type { GoogleVertexMetricSource } from "./google-vertex/failures.ts";
 import { GoogleVertexBudgetTelemetrySource } from "./google-vertex/source.ts";
 import { LmArenaHfSource } from "./lmarena/benchmark-source.ts";
 import { logEvent, logger } from "./log.ts";
+import { SubscriptionResets } from "./observability/subscription-resets.ts";
 import type { TelemetrySource } from "./observability/telemetry-source.ts";
 import { HistoricalUsageImporter } from "./observability/usage-import.ts";
 import { OpenRouterBenchmarkSource } from "./openrouter/benchmark-source.ts";
@@ -118,7 +120,27 @@ export async function startDaemon(
 		routes: [],
 		currentRoute: UNCONFIGURED_ROUTE,
 	});
-	const service = new JittorService(metrics, router, benchmarks, modelRanker, sessionIdentity, undefined, catalog, usageImporter, exporter);
+	const resets = env.JITTOR_CODEX_AUTH_FILE
+		? new SubscriptionResets(new CodexResetSource(env.JITTOR_CODEX_AUTH_FILE), async () => {
+				// Drain any poll started before redemption, then request fresh window state.
+				await router.poll();
+				const result = await router.poll();
+				if (!result.sources.some((source) => source.id === "codex-subscription" && source.ok))
+					throw new Error("Codex telemetry refresh failed");
+			})
+		: undefined;
+	const service = new JittorService(
+		metrics,
+		router,
+		benchmarks,
+		modelRanker,
+		sessionIdentity,
+		undefined,
+		catalog,
+		usageImporter,
+		exporter,
+		resets,
+	);
 
 	// Records how often each real operation is invoked (server-side, every caller) plus, via
 	// vehicle_usage.recordClientEvent, client-observed Vehicle Shell meta-tool calls -- see

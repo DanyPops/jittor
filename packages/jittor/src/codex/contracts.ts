@@ -1,4 +1,5 @@
 import type { MetricObservation } from "../observability/metric.ts";
+import { parseResetSummary } from "./resets.ts";
 
 export interface CodexWindow {
 	usedPercent: number;
@@ -44,6 +45,7 @@ export interface CodexSpendControl {
 export interface CodexUsageSnapshot {
 	stability: "experimental";
 	planType: string;
+	availableResets: number | null;
 	defaultLimit: CodexRateLimitSnapshot;
 	additionalLimits: CodexRateLimitSnapshot[];
 	credits: CodexCredits | null;
@@ -147,7 +149,7 @@ function parseRateLimit(
 function metric(
 	scope: string,
 	name: string,
-	value: number,
+	value: number | null,
 	unit: MetricObservation["unit"],
 	observedAt: number,
 	attributes: Record<string, unknown> = {},
@@ -214,7 +216,12 @@ export function parseCodexUsage(value: unknown, observedAt = Date.now()): CodexU
 	});
 	const reached = optionalRecord(payload.rate_limit_reached_type, "rate limit reached type");
 	const spendControl = parseSpendControl(payload.spend_control);
-	const metrics = [...defaultLimit.metrics, ...additionalLimits.flatMap((limit) => limit.metrics)];
+	const availableResets = parseResetSummary(payload.rate_limit_reset_credits);
+	const metrics = [
+		...defaultLimit.metrics,
+		...additionalLimits.flatMap((limit) => limit.metrics),
+		metric("codex:resets", "available-resets", availableResets, "count", observedAt),
+	];
 	if (credits?.balance !== null && credits?.balance !== undefined) {
 		const balance = Number(credits.balance);
 		if (Number.isFinite(balance)) metrics.push(metric("codex:credits", "balance", balance, "count", observedAt));
@@ -229,6 +236,7 @@ export function parseCodexUsage(value: unknown, observedAt = Date.now()): CodexU
 	return {
 		stability: "experimental",
 		planType,
+		availableResets,
 		defaultLimit,
 		additionalLimits,
 		credits,

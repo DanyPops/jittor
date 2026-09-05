@@ -10,6 +10,20 @@ interface Case {
 const routeArg = "openai/gpt-5.4@high";
 
 const cases: Case[] = [
+	{ args: ["resets", "list", "--json"], operation: "subscription.resets.list" },
+	{
+		args: [
+			"resets",
+			"redeem",
+			"--credit-id",
+			"reset-1",
+			"--idempotency-key",
+			"00000000-0000-4000-8000-000000000001",
+			"--confirm",
+			"--json",
+		],
+		operation: "subscription.resets.redeem",
+	},
 	{ args: ["session", "register", "--session-id", "s", "--json"], operation: "session.register" },
 	{ args: ["session", "release", "--session-id", "s", "--json"], operation: "session.release" },
 	{

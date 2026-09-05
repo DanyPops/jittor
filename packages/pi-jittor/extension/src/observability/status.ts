@@ -13,7 +13,7 @@ import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tu
 import { BorderedSelectPanel, type TextMeasure } from "malevich-tui-components";
 import { sessionSecretField } from "../session-identity.ts";
 import { showConfirmDialog, showRouteOverrideMenu } from "../tui-prompts.ts";
-import type { ProviderBudget } from "./footer.ts";
+import { type ProviderBudget, resetAvailabilityText } from "./footer.ts";
 
 export interface JittorPanelClient {
 	call(operation: string, input: unknown): Promise<any>;
@@ -136,6 +136,28 @@ export function buildFooterBudget(
 	metrics: StoredMetricObservation[],
 	now = Date.now(),
 ): ProviderBudget | null | undefined {
+	const budget = buildQuotaBudget(status, metrics, now);
+	if (status.currentRoute?.provider !== "openai-codex" || codexTelemetryState(status, now) !== "available") return budget;
+	const resets = latest(
+		metrics,
+		(row) => row.source === "codex-subscription" && row.scope === "codex:resets" && row.metric === "available-resets",
+	);
+	if (
+		!resets ||
+		typeof resets.value !== "number" ||
+		!Number.isSafeInteger(resets.value) ||
+		resets.value <= 0 ||
+		resets.value > 10000 ||
+		now - resets.observedAt > TELEMETRY_STALE_AFTER_MS
+	)
+		return budget;
+	return {
+		...(budget ?? { kind: "unavailable", label: "Codex", valueText: "usage unavailable" }),
+		availableResets: { count: resets.value, observedAt: resets.observedAt },
+	};
+}
+
+function buildQuotaBudget(status: RouterStatus, metrics: StoredMetricObservation[], now = Date.now()): ProviderBudget | null | undefined {
 	if (!status.currentRoute) return null;
 	if (status.currentRoute.provider === "openai-codex") {
 		const codex = codexWindowForModel(metrics, status.currentRoute.model);
@@ -238,8 +260,12 @@ export function formatFooterStatus(status: RouterStatus, metrics: StoredMetricOb
 	const budget = buildFooterBudget(status, metrics, now);
 	if (!budget) return "";
 	if (budget.kind === "unbounded") return budget.valueText;
-	if (budget.kind === "unavailable") return `${budget.label} ${budget.valueText}`;
-	return `${budget.label} ${(budget.remainingFraction * 100).toFixed(1)}% left`;
+	const resets = resetAvailabilityText(budget, now);
+	const quota =
+		budget.kind === "unavailable"
+			? `${budget.label} ${budget.valueText}`
+			: `${budget.label} ${(budget.remainingFraction * 100).toFixed(1)}% left`;
+	return resets ? `${quota} · ${resets}` : quota;
 }
 
 function nextAction(action: PolicyAction | undefined): string {
@@ -287,6 +313,8 @@ export function buildStatusView(status: RouterStatus, metrics: StoredMetricObser
 	const lines = [status.ready ? "Ready" : "Not ready"];
 	const codex = status.currentRoute?.provider === "openai-codex" ? codexWindowForModel(metrics, status.currentRoute.model) : undefined;
 	const budget = buildFooterBudget(status, metrics, now);
+	const resets = resetAvailabilityText(budget, now);
+	if (resets) lines.push(`Codex: ${resets}`);
 	if (codex && typeof codex.value === "number" && budget?.kind === "bounded") {
 		const seconds = Number(codex.attributes.windowSeconds ?? 0);
 		lines.push(`Codex ${windowName(seconds)}: ${((1 - codex.value) * 100).toFixed(1)}% left`);
@@ -343,9 +371,24 @@ export interface StatusPanelSnapshot {
 /** Shared by the standalone status panel below and the unified /jittor shell, so both fetch identically. */
 export async function fetchStatusSnapshot(client: JittorPanelClient, sessionId: string): Promise<StatusPanelSnapshot> {
 	const status = (await client.call("router.status", { session_id: sessionId })) as RouterStatus;
+	const metrics = await fetchProviderBudgetMetrics(client, status);
+	return { status, metrics };
+}
+
+export async function fetchProviderBudgetMetrics(client: JittorPanelClient, status: RouterStatus): Promise<StoredMetricObservation[]> {
 	const query = providerBudgetMetricQuery(status);
 	const metrics = query ? ((await client.call("metrics.query", query)) as StoredMetricObservation[]) : [];
-	return { status, metrics };
+	if (status.currentRoute?.provider === "openai-codex") {
+		const resets = (await client.call("metrics.query", {
+			source: "codex-subscription",
+			scope: "codex:resets",
+			metric: "available-resets",
+			order: "desc",
+			limit: 1,
+		})) as StoredMetricObservation[];
+		return [...metrics, ...resets];
+	}
+	return metrics;
 }
 
 async function chooseOverride(ctx: ExtensionCommandContext, routes: Route[]): Promise<Route | undefined> {

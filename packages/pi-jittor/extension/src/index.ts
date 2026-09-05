@@ -26,7 +26,6 @@ import {
 	papyrusContextMetric,
 	type Route,
 	type RouterStatus,
-	type StoredMetricObservation,
 	TASK_DOMAINS,
 	TASK_TYPES,
 	type TextTokenCounter,
@@ -61,7 +60,7 @@ import {
 import { LocalRunTelemetry } from "./observability/model-run.ts";
 import { captureProviderContextSnapshot } from "./observability/provider-context-snapshot.ts";
 import { ProviderResponseTelemetry } from "./observability/provider-response.ts";
-import { buildFooterBudget, providerBudgetMetricQuery } from "./observability/status.ts";
+import { buildFooterBudget, fetchProviderBudgetMetrics } from "./observability/status.ts";
 import { showUsagePanel } from "./observability/usage.ts";
 import { candidateIdentityOf, decideAutoMode, newAutoModeSessionState, recordAutoModeDismissal } from "./optimization/auto-mode.ts";
 import { showAutoModeSuggestion } from "./optimization/auto-mode-dialog.ts";
@@ -158,8 +157,7 @@ async function recordMetrics(client: JittorExtensionClient, metrics: MetricObser
 
 async function refreshFooter(client: JittorExtensionClient, state: IntegratedFooterState, sessionId: string): Promise<void> {
 	const status = (await client.call("router.status", { session_id: sessionId })) as RouterStatus;
-	const query = providerBudgetMetricQuery(status);
-	const metrics = query ? ((await client.call("metrics.query", query)) as StoredMetricObservation[]) : [];
+	const metrics = await fetchProviderBudgetMetrics(client, status);
 	state.providerBudget = buildFooterBudget(status, metrics);
 	state.requestRender?.();
 }

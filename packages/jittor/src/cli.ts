@@ -9,6 +9,7 @@ import { CONTEXT_USAGE_LINES, formatContextAssessment, formatContextDelta, runCo
 import { EXPORT_USAGE_LINES, formatExportStatus, runExportCommand } from "./cli-commands/export.ts";
 import { formatCostByTask, formatMetricsQuery, METRICS_USAGE_LINES, runMetricsCommand } from "./cli-commands/metrics.ts";
 import { OP_USAGE_LINES, runOpCommand } from "./cli-commands/op.ts";
+import { RESETS_USAGE_LINES, runResetsCommand } from "./cli-commands/resets.ts";
 import { formatRouterStatus, ROUTER_USAGE_LINES, runRouterCommand, runTelemetryCommand } from "./cli-commands/router.ts";
 import { installService, renderSystemdUnit, runServiceCommand, SERVICE_USAGE_LINES, systemctl } from "./cli-commands/service-daemon.ts";
 import { runSessionCommand, SESSION_USAGE_LINES } from "./cli-commands/session.ts";
@@ -59,6 +60,7 @@ function usage(stderr: (line: string) => void): number {
 			...CACHE_USAGE_LINES,
 			...METRICS_USAGE_LINES,
 			...ROUTER_USAGE_LINES,
+			...RESETS_USAGE_LINES,
 			...SESSION_USAGE_LINES,
 			...OP_USAGE_LINES,
 		].join("\n"),
@@ -87,6 +89,8 @@ export async function runCli(args: string[], deps: CliDependencies = DEFAULT_DEP
 			return runExportCommand(action, rest, deps, fail);
 		case "metrics":
 			return runMetricsCommand(action, rest, deps, fail);
+		case "resets":
+			return runResetsCommand(action, rest, deps, fail);
 		case "telemetry":
 			return runTelemetryCommand(action, rest, deps, fail);
 		case "compaction":

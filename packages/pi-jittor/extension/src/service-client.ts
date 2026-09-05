@@ -15,6 +15,8 @@ let retrying: RetryingClient<JittorClient> = createRetryingClient(() => connecto
  * is classified: only reads may be transparently invoked twice after a connection-shaped error.
  */
 const OPERATION_RETRY_MODE = {
+	"subscription.resets.list": "retry",
+	"subscription.resets.redeem": "once",
 	"metrics.record": "once",
 	"metrics.record_batch": "once",
 	"metrics.query": "retry",

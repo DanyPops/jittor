@@ -28,6 +28,34 @@ function fakeConnectionRefused(): JittorClient {
 }
 
 describe("Jittor vehicle-client retrying client wiring", () => {
+	it("retries reset listing after a stale connection", async () => {
+		let attempts = 0;
+		setJittorClientConnectorForTests(async () => {
+			attempts++;
+			return attempts === 1 ? fakeConnectionRefused() : fakeClient(async () => ({ availableCount: 1, credits: [] }) as never);
+		});
+		expect(operationRetryMode("subscription.resets.list")).toBe("retry");
+		expect(await call("subscription.resets.list", {})).toEqual({ availableCount: 1, credits: [] });
+		expect(attempts).toBe(2);
+	});
+
+	it("attempts reset redemption once on connection failure", async () => {
+		let attempts = 0;
+		setJittorClientConnectorForTests(async () => {
+			attempts++;
+			return fakeConnectionRefused();
+		});
+		expect(operationRetryMode("subscription.resets.redeem")).toBe("once");
+		await expect(
+			call("subscription.resets.redeem", {
+				confirm: true,
+				creditId: "reset-1",
+				idempotencyKey: "00000000-0000-4000-8000-000000000001",
+			}),
+		).rejects.toThrow(MutationOutcomeUnknownError);
+		expect(attempts).toBe(1);
+	});
+
 	it("reconnects and retries once when the cached client's connection is stale, succeeding transparently", async () => {
 		let connectorCalls = 0;
 		setJittorClientConnectorForTests(async () => {
