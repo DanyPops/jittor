@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-jittor",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Pi extension for Jittor token and context observability with optimization controls backed by the @danypops/jittor daemon",
   "license": "MIT",
   "type": "module",
@@ -16,7 +16,7 @@
     "@danypops/vehicle-client": "^0.10.1",
     "@danypops/vehicle-core": "^0.17.1",
     "@danypops/vehicle-server": "^0.25.1",
-    "@danypops/jittor": "^0.22.0",
+    "@danypops/jittor": "^0.23.0",
     "malevich-tui-components": "^0.28.0"
   },
   "peerDependencies": {

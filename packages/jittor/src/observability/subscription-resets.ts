@@ -1,23 +1,6 @@
-export interface SubscriptionReset {
-	id: string;
-	status: string;
-	resetType: string;
-	expiresAt: string | null;
-}
+import type { ResetOutcome, ResetRedemption, SubscriptionResetList } from "./subscription-reset-schema.ts";
 
-export interface SubscriptionResetList {
-	availableCount: number;
-	credits: SubscriptionReset[];
-}
-
-export interface ResetRedemption {
-	creditId: string;
-	idempotencyKey: string;
-}
-
-export interface ResetOutcome {
-	code: "reset" | "already_redeemed" | "nothing_to_reset" | "no_credit";
-}
+export type { ResetOutcome, ResetRedemption, SubscriptionReset, SubscriptionResetList } from "./subscription-reset-schema.ts";
 
 /** Reads account-bound reset grants and redeems an explicitly selected grant. */
 export interface SubscriptionResetProvider {

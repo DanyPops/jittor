@@ -391,6 +391,7 @@ export {
 	type FetchTransport,
 	JittorClient,
 } from "./vehicle/client.ts";
+export { isResetOperation, type ResetOperationName, resetContracts, resetProjections, resetRetryMode } from "./vehicle/reset-contracts.ts";
 export {
 	createApp,
 	EXPECTED_OPERATION_NAMES,

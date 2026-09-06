@@ -1,5 +1,6 @@
-import type { ResetRedemption, SubscriptionResets } from "../observability/subscription-resets.ts";
+import type { SubscriptionResets } from "../observability/subscription-resets.ts";
 import type { OperationHandlerMap } from "./operation-types.ts";
+import { invokeResetContract } from "./reset-contracts.ts";
 
 export function subscriptionResetOperations(resets?: SubscriptionResets): OperationHandlerMap {
 	const configured = () => {
@@ -7,7 +8,8 @@ export function subscriptionResetOperations(resets?: SubscriptionResets): Operat
 		return resets;
 	};
 	return {
-		"subscription.resets.list": () => configured().list(),
-		"subscription.resets.redeem": (input) => configured().redeem(input as unknown as ResetRedemption & { confirm: boolean }),
+		"subscription.resets.list": (input) => invokeResetContract("subscription.resets.list", input, () => configured().list()),
+		"subscription.resets.redeem": (input) =>
+			invokeResetContract("subscription.resets.redeem", input, (parsed) => configured().redeem(parsed)),
 	};
 }

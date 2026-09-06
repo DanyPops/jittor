@@ -8,7 +8,7 @@ import { type ContextSnapshotHistory, MetricContextSnapshotHistory } from "../ob
 import type { CompactionDurationEstimate, ContextAssessment } from "../observability/context-telemetry.ts";
 import type { MetricObservation, MetricQuery, StoredMetricObservation } from "../observability/metric.ts";
 import type { MetricStore } from "../observability/store.ts";
-import type { ResetOutcome, ResetRedemption, SubscriptionResetList, SubscriptionResets } from "../observability/subscription-resets.ts";
+import type { SubscriptionResets } from "../observability/subscription-resets.ts";
 import type { TaskCostSummary } from "../observability/task-cost.ts";
 import type { UsageAggregateRow } from "../observability/usage.ts";
 import type { UsageImportController, UsageImportResult, UsageImportStatus } from "../observability/usage-import.ts";
@@ -37,6 +37,7 @@ import { metricsOperations } from "./metric-operations.ts";
 import { modelRankingOperations } from "./model-ranking-operations.ts";
 import { EXPECTED_OPERATION_NAMES, type OperationHandlerMap, type OperationName } from "./operation-types.ts";
 import { registerJittorVehicleOperations } from "./registration.ts";
+import { isResetOperation, type ResetInputs, type ResetOutputs } from "./reset-contracts.ts";
 import { routerOperations } from "./routing-operations.ts";
 import { sessionIdentityOperations } from "./session-operations.ts";
 import { subscriptionResetOperations } from "./subscription-reset-operations.ts";
@@ -48,9 +49,7 @@ interface RouterScopeInput {
 	session_id?: string;
 	session_secret?: string;
 }
-export interface OperationInputs {
-	"subscription.resets.list": Record<string, never>;
-	"subscription.resets.redeem": ResetRedemption & { confirm: boolean };
+export interface OperationInputs extends ResetInputs {
 	"session.register": { session_id: string };
 	"session.release": { session_id: string; session_secret?: string };
 	"metrics.record": MetricObservation;
@@ -88,9 +87,7 @@ export interface OperationInputs {
 	"router.available_routes": { routes: Route[] } & RouterScopeInput;
 	"cache.economics": { since: number; until: number };
 }
-export interface OperationOutputs {
-	"subscription.resets.list": SubscriptionResetList;
-	"subscription.resets.redeem": ResetOutcome & { telemetryRefreshed: boolean };
+export interface OperationOutputs extends ResetOutputs {
 	"session.register": RegisterSessionIdentityResult;
 	"session.release": { released: boolean };
 	"metrics.record": StoredMetricObservation;
@@ -345,6 +342,8 @@ export function createApp(options: JittorAppOptions): { fetch(request: Request):
 			try {
 				const body = JSON.parse(text) as { op?: unknown; input?: unknown };
 				if (typeof body.op !== "string") throw new Error("op is required");
+				if (isResetOperation(body.op) && (!body.input || typeof body.input !== "object" || Array.isArray(body.input)))
+					throw new Error("Reset input must be an object");
 				const input =
 					typeof body.input === "object" && body.input !== null && !Array.isArray(body.input)
 						? (body.input as Record<string, unknown>)

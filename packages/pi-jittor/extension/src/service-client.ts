@@ -1,4 +1,13 @@
-import { connectJittorClient, type JittorClient, type OperationInputs, type OperationName, type OperationOutputs } from "@danypops/jittor";
+import {
+	connectJittorClient,
+	isResetOperation,
+	type JittorClient,
+	type OperationInputs,
+	type OperationName,
+	type OperationOutputs,
+	type ResetOperationName,
+	resetRetryMode,
+} from "@danypops/jittor";
 import { createRetryingClient, type RetryingClient } from "@danypops/vehicle-client/daemon-client";
 
 type JittorConnector = () => Promise<JittorClient>;
@@ -15,8 +24,6 @@ let retrying: RetryingClient<JittorClient> = createRetryingClient(() => connecto
  * is classified: only reads may be transparently invoked twice after a connection-shaped error.
  */
 const OPERATION_RETRY_MODE = {
-	"subscription.resets.list": "retry",
-	"subscription.resets.redeem": "once",
 	"metrics.record": "once",
 	"metrics.record_batch": "once",
 	"metrics.query": "retry",
@@ -53,10 +60,10 @@ const OPERATION_RETRY_MODE = {
 	"router.current_route": "once",
 	"router.available_routes": "once",
 	"cache.economics": "retry",
-} as const satisfies Record<OperationName, "retry" | "once">;
+} as const satisfies Record<Exclude<OperationName, ResetOperationName>, "retry" | "once">;
 
 export function operationRetryMode(operation: OperationName): "retry" | "once" {
-	return OPERATION_RETRY_MODE[operation];
+	return isResetOperation(operation) ? resetRetryMode(operation) : OPERATION_RETRY_MODE[operation];
 }
 
 export async function callJittor<Name extends OperationName>(

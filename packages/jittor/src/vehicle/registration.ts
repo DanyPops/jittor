@@ -6,12 +6,8 @@
  * uses) -- no behavior change, only a second real transport served
  * alongside (not replacing) the existing /api/v1/ops route.
  *
- * Every jittor operation already validates its own loosely-typed
- * Record<string, unknown> input internally (see each feature's operation module) -- there
- * is no separate Vehicle-side schema to duplicate that logic, so both input
- * and output use passthroughVehicleSchema and let the real handler's own
- * validation (already covered by service.test.ts) be the single source of
- * truth for what's accepted.
+ * Reset operations use executable bounded contracts shared with RPC and CLI clients.
+ * Other capabilities retain handler-owned validation during incremental adoption.
  *
  * jittor's operations are never exposed as Pi tools (confirmed: pi-jittor
  * has zero pi.registerTool() call sites -- its whole surface is consumed
@@ -27,6 +23,7 @@ import { bindVehicleOperation, defineErrorMapping, defineVehicleOperation, passt
 import type { VehicleRegistry } from "@danypops/vehicle-server";
 import { InvalidSessionSecretError } from "../sessions/identity.ts";
 import type { OperationHandlerMap, OperationName } from "./operation-types.ts";
+import { type ResetOperationName, resetContracts } from "./reset-contracts.ts";
 
 /** Preserves the legacy route's 403 for invalid session credentials; every other rejection remains validation. */
 const withJittorErrorParity = defineErrorMapping([
@@ -75,13 +72,7 @@ const WRITE: VehicleIdempotency = { mode: "unsafe" };
  * - cache.economics: read (a pure projection over already-recorded metric
  *   rows plus catalog pricing; never mutates anything).
  */
-const OPERATION_META: Record<OperationName, OperationMeta> = {
-	"subscription.resets.list": { description: "Lists up to 100 Codex banked resets and the authoritative available count.", effect: "read" },
-	"subscription.resets.redeem": {
-		description:
-			"Consumes a selected Codex banked reset. Requires confirm:true, creditId and a UUID idempotencyKey; reuse the same key on retries.",
-		effect: "external-write",
-	},
+const OPERATION_META: Record<Exclude<OperationName, ResetOperationName>, OperationMeta> = {
 	"metrics.record": { description: "Records one metric observation.", effect: "local-write" },
 	"metrics.record_batch": { description: "Records a bounded batch of metric observations as one atomic unit.", effect: "local-write" },
 	"metrics.query": { description: "Queries recorded metric observations.", effect: "read" },
@@ -133,6 +124,17 @@ function permissionsFor(effect: VehicleEffect): readonly string[] {
 }
 
 export function registerJittorVehicleOperations(registry: VehicleRegistry, operations: OperationHandlerMap): void {
+	for (const operation of Object.values(resetContracts)) {
+		const handler = operations[operation.descriptor.name];
+		if (!handler) throw new Error("Reset operation handler is missing");
+		registry.register(
+			OWNER,
+			bindVehicleOperation<unknown, unknown>(
+				operation,
+				() => async (context) => withJittorErrorParity(() => handler(context.input as Record<string, unknown>)),
+			),
+		);
+	}
 	for (const [name, meta] of Object.entries(OPERATION_META) as Array<[OperationName, OperationMeta]>) {
 		const handler = operations[name];
 		if (!handler) throw new Error(`jittor Vehicle registration: no handler configured for operation "${name}"`);

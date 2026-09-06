@@ -1,19 +1,21 @@
 import { AuthenticatedRpcClient, type FetchTransport } from "@danypops/vehicle-client/rpc-client";
 import { ensureAuthToken, type JittorPaths, readDaemonHandle, resolveJittorPaths } from "../state.ts";
+import { invokeResetContract, isResetOperation } from "./reset-contracts.ts";
 import type { OperationInputs, OperationName, OperationOutputs } from "./service.ts";
 
 export type { FetchTransport };
 
-/**
- * Jittor's typed authenticated RPC client, now a thin named subclass of
- * `@danypops/vehicle-client/rpc-client`'s `AuthenticatedRpcClient` -- the shared substrate factored
- * out after jittor's own client.ts and web-spider-daemon's were found byte-identical (see
- * daemon-kit's README). Keeps the old 3-positional-argument constructor so every existing call
- * site is untouched by this migration.
- */
+/** Provides authenticated RPC with contract-validated reset requests and responses. */
 export class JittorClient extends AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs> {
 	constructor(baseUrl: string, token: string, transport: FetchTransport = fetch) {
 		super(baseUrl, token, { label: "Jittor", transport });
+	}
+	override async call<N extends OperationName>(operation: N, input: OperationInputs[N]): Promise<OperationOutputs[N]> {
+		if (isResetOperation(operation))
+			return invokeResetContract(operation, input, (parsed) => super.call(operation, parsed as OperationInputs[N])) as Promise<
+				OperationOutputs[N]
+			>;
+		return super.call(operation, input);
 	}
 }
 
