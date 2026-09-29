@@ -86,6 +86,19 @@ describe("historical Pi usage import", () => {
 		expect(scan).toMatchObject({ filesScanned: 1, entriesScanned: 1, malformedEntries: 1, truncated: true });
 	});
 
+	it("stops within a selected file when its deadline expires, even across blank lines", async () => {
+		const root = mkdtempSync(join(tmpdir(), "jittor-usage-deadline-"));
+		roots.push(root);
+		writeFileSync(join(root, "a.jsonl"), "{}\n\n{}\n{}\n");
+		writeFileSync(join(root, "b.jsonl"), "{}\n");
+		let tick = 0;
+		const scan = await new PiSessionUsageSource(root, {
+			maxDurationMs: 3,
+			clock: () => tick++,
+		}).scan(() => false);
+		expect(scan).toMatchObject({ filesScanned: 1, entriesScanned: 1, malformedEntries: 1, truncated: true });
+	});
+
 	it("extracts only supported content-free usage facts across malformed tails", async () => {
 		const root = fixtureRoot();
 		const source = new PiSessionUsageSource(join(root, "sessions"));

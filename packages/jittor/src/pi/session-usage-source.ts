@@ -142,8 +142,13 @@ export class PiSessionUsageSource implements HistoricalUsageSource {
 			let sessionId: string | null = null;
 			const stateById = new Map<string | null, SessionState>([[null, { provider: null, model: null, thinking: null }]]);
 			for (const line of lines) {
+				if (canceled() || this.options.clock() - startedAt > this.options.maxDurationMs) {
+					truncated = true;
+					stopRequested = true;
+					break;
+				}
 				if (line.trim().length === 0) continue;
-				if (entriesScanned >= this.options.maxEntries || records.length >= this.options.maxRecords || canceled()) {
+				if (entriesScanned >= this.options.maxEntries || records.length >= this.options.maxRecords) {
 					truncated = true;
 					stopRequested = true;
 					break;
