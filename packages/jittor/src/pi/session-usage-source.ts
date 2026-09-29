@@ -123,6 +123,7 @@ export class PiSessionUsageSource implements HistoricalUsageSource {
 		let bytesScanned = 0;
 		let malformedEntries = 0;
 		let truncated = names.length > this.options.maxFiles;
+		let stopRequested = false;
 		let cursor: string | null = null;
 		for (const name of names.slice(0, this.options.maxFiles)) {
 			if (canceled() || this.options.clock() - startedAt > this.options.maxDurationMs) {
@@ -144,6 +145,7 @@ export class PiSessionUsageSource implements HistoricalUsageSource {
 				if (line.trim().length === 0) continue;
 				if (entriesScanned >= this.options.maxEntries || records.length >= this.options.maxRecords || canceled()) {
 					truncated = true;
+					stopRequested = true;
 					break;
 				}
 				entriesScanned += 1;
@@ -187,7 +189,7 @@ export class PiSessionUsageSource implements HistoricalUsageSource {
 					if (resolved) records.push(resolved);
 				}
 			}
-			if (truncated) break;
+			if (stopRequested) break;
 		}
 		return {
 			records,

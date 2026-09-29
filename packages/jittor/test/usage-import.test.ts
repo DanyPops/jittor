@@ -59,6 +59,33 @@ function fixtureRoot(): string {
 }
 
 describe("historical Pi usage import", () => {
+	it("scans the lexical first maxFiles even when additional candidates mark the scan truncated", async () => {
+		const root = mkdtempSync(join(tmpdir(), "jittor-usage-file-cap-"));
+		roots.push(root);
+		for (const name of ["z.jsonl", "b.jsonl", "a.jsonl"]) writeFileSync(join(root, name), "{}\n");
+		const scan = await new PiSessionUsageSource(root, { maxFiles: 2 }).scan(() => false);
+		expect(scan).toMatchObject({ filesScanned: 2, entriesScanned: 2, malformedEntries: 2, truncated: true });
+	});
+
+	it("keeps scanning selected files after an oversized file marks the result incomplete", async () => {
+		const root = mkdtempSync(join(tmpdir(), "jittor-usage-oversize-"));
+		roots.push(root);
+		writeFileSync(join(root, "a.jsonl"), "x".repeat(20));
+		writeFileSync(join(root, "b.jsonl"), "{}\n");
+		writeFileSync(join(root, "c.jsonl"), "{}\n");
+		const scan = await new PiSessionUsageSource(root, { maxFiles: 3, maxFileBytes: 4 }).scan(() => false);
+		expect(scan).toMatchObject({ filesScanned: 2, entriesScanned: 2, malformedEntries: 2, truncated: true });
+	});
+
+	it("stops at the real entry budget after marking truncation", async () => {
+		const root = mkdtempSync(join(tmpdir(), "jittor-usage-entry-cap-"));
+		roots.push(root);
+		writeFileSync(join(root, "a.jsonl"), "{}\n{}\n");
+		writeFileSync(join(root, "b.jsonl"), "{}\n");
+		const scan = await new PiSessionUsageSource(root, { maxEntries: 1 }).scan(() => false);
+		expect(scan).toMatchObject({ filesScanned: 1, entriesScanned: 1, malformedEntries: 1, truncated: true });
+	});
+
 	it("extracts only supported content-free usage facts across malformed tails", async () => {
 		const root = fixtureRoot();
 		const source = new PiSessionUsageSource(join(root, "sessions"));
