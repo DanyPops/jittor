@@ -1,6 +1,7 @@
 import { GOOGLE_VERTEX_BUDGET_MAX_MESSAGES_PER_PULL } from "../constants.ts";
 import type { BudgetWindow } from "../observability/budget.ts";
 import type { MetricObservation } from "../observability/metric.ts";
+import { withDeadline } from "../transport/deadline.ts";
 import type { GoogleAdcTokenProvider } from "./auth.ts";
 import {
 	type GoogleVertexBudgetNotification,
@@ -64,9 +65,13 @@ export class GoogleVertexBudgetTelemetryAdapter {
 	 * schema-drift contract) if any pulled message fails to parse, after acknowledging it so a
 	 * single malformed message cannot wedge every future poll.
 	 */
-	async pull(observedAt = Date.now()): Promise<GoogleVertexBudgetSnapshot | null> {
+	async pull(observedAt = Date.now(), signal?: AbortSignal): Promise<GoogleVertexBudgetSnapshot | null> {
+		return withDeadline((requestSignal) => this.pullWithSignal(observedAt, requestSignal), { signal });
+	}
+
+	private async pullWithSignal(observedAt: number, signal: AbortSignal): Promise<GoogleVertexBudgetSnapshot | null> {
 		const token = await this.tokenProvider();
-		const pullResponse = await this.request(":pull", token, { maxMessages: GOOGLE_VERTEX_BUDGET_MAX_MESSAGES_PER_PULL });
+		const pullResponse = await this.request(":pull", token, { maxMessages: GOOGLE_VERTEX_BUDGET_MAX_MESSAGES_PER_PULL }, signal);
 		const body = (await pullResponse.json()) as { receivedMessages?: RawPubSubMessage[] };
 		const received = Array.isArray(body.receivedMessages) ? body.receivedMessages : [];
 		if (received.length === 0) return null;
@@ -81,7 +86,7 @@ export class GoogleVertexBudgetTelemetryAdapter {
 				parseFailure = error;
 			}
 		}
-		if (ackIds.length > 0) await this.acknowledge(token, ackIds);
+		if (ackIds.length > 0) await this.acknowledge(token, ackIds, signal);
 		if (parseFailure) throw parseFailure;
 		if (parsed.length === 0) return null;
 
@@ -109,21 +114,32 @@ export class GoogleVertexBudgetTelemetryAdapter {
 		return parseGoogleVertexBudgetNotification(decoded, entry.message?.attributes ?? {}, publishedAt);
 	}
 
-	private async acknowledge(token: string, ackIds: string[]): Promise<void> {
-		// Best-effort: a failed ack only causes redelivery after the ack deadline, which the next
-		// poll will drain again; it must never fail the poll that already extracted real metrics.
-		await this.request(":acknowledge", token, { ackIds }).catch(() => undefined);
+	private async acknowledge(token: string, ackIds: string[], signal: AbortSignal): Promise<void> {
+		// Best-effort within the poll deadline; a failed ack causes redelivery on a later poll.
+		await this.request(":acknowledge", token, { ackIds }, signal)
+			.then((response) => response.body?.cancel())
+			.catch(() => undefined);
 	}
 
-	private async request(action: ":pull" | ":acknowledge", token: string, body: Record<string, unknown>): Promise<Response> {
+	private async request(
+		action: ":pull" | ":acknowledge",
+		token: string,
+		body: Record<string, unknown>,
+		signal: AbortSignal,
+	): Promise<Response> {
+		signal.throwIfAborted();
 		const response = await this.transport(
 			new Request(`${PUBSUB_BASE_URL}/${this.subscription}${action}`, {
 				method: "POST",
+				signal,
 				headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
 				body: JSON.stringify(body),
 			}),
 		);
-		if (!response.ok) throw new Error(`Google Cloud Pub/Sub ${action.slice(1)} failed with HTTP ${response.status}`);
+		if (!response.ok) {
+			void response.body?.cancel().catch(() => {});
+			throw new Error(`Google Cloud Pub/Sub ${action.slice(1)} failed with HTTP ${response.status}`);
+		}
 		return response;
 	}
 }

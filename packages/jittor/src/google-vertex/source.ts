@@ -26,9 +26,9 @@ export class GoogleVertexBudgetTelemetrySource implements TelemetrySource {
 		this.adapter = new GoogleVertexBudgetTelemetryAdapter(subscription, tokenProvider, transport, source);
 	}
 
-	async poll(): Promise<TelemetryBatch> {
+	async poll(signal?: AbortSignal): Promise<TelemetryBatch> {
 		const observedAt = this.clock();
-		const snapshot = await this.adapter.pull(observedAt);
+		const snapshot = await this.adapter.pull(observedAt, signal);
 		if (!snapshot) return { observedAt, metrics: [], windows: [] };
 		return { observedAt, metrics: snapshot.metrics, windows: snapshot.window ? [snapshot.window] : [] };
 	}

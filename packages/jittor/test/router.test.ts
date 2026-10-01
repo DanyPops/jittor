@@ -104,6 +104,55 @@ describe("Jittor router controller", () => {
 		expect(router.decide().action).toBe("continue");
 	});
 
+	it("releases a shared stalled poll, fails closed, and discards late metrics before the next poll", async () => {
+		const late = Promise.withResolvers<TelemetryBatch>();
+		const metrics = new MemoryMetrics();
+		let calls = 0;
+		let signal: AbortSignal | undefined;
+		const router = new JittorRouter({
+			metrics,
+			sources: [
+				{
+					id: "codex",
+					provider: "openai-codex",
+					required: true,
+					async poll(value) {
+						signal = value;
+						if (++calls === 1) return late.promise;
+						return { observedAt: now, metrics: [], windows: [] };
+					},
+				},
+				source({ observedAt: now, metrics: [], windows: [] }, false, "openrouter"),
+			],
+			policy: config,
+			routes,
+			currentRoute: routes[0]!,
+			clock: () => now,
+			pollTimeoutMs: 20,
+		});
+		const first = router.poll();
+		const second = router.poll();
+		expect(first).toBe(second);
+		const result = await first;
+		expect(calls).toBe(1);
+		expect(signal?.aborted).toBe(true);
+		expect(result.sources.map(({ ok }) => ok)).toEqual([false, true]);
+		expect(router.status().ready).toBe(false);
+		expect(router.decide().action).toBe("halt");
+		expect(router.decide("other-session").action).toBe("halt");
+		await router.poll();
+		expect(calls).toBe(2);
+		expect(router.status().ready).toBe(true);
+		late.resolve({
+			observedAt: now - 1,
+			metrics: [{ source: "codex", scope: "late", metric: "late", value: 1, unit: "count", observedAt: now - 1 }],
+			windows: [],
+		});
+		await Bun.sleep(1);
+		expect(metrics.rows).toEqual([]);
+		expect(router.status().sources[0]).toMatchObject({ ok: true, observedAt: now });
+	});
+
 	it("fails closed when a required source fails", async () => {
 		const router = new JittorRouter({
 			metrics: new MemoryMetrics(),

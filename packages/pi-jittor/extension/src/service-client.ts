@@ -10,6 +10,10 @@ import {
 } from "@danypops/jittor";
 import { createRetryingClient, type RetryingClient } from "@danypops/vehicle-client/daemon-client";
 
+export interface JittorExtensionClient {
+	call(operation: string, input: unknown, signal?: AbortSignal): Promise<any>;
+}
+
 type JittorConnector = () => Promise<JittorClient>;
 
 function defaultConnector(): Promise<JittorClient> {
@@ -69,8 +73,13 @@ export function operationRetryMode(operation: OperationName): "retry" | "once" {
 export async function callJittor<Name extends OperationName>(
 	operation: Name,
 	input: OperationInputs[Name],
+	signal?: AbortSignal,
 ): Promise<OperationOutputs[Name]> {
-	const invoke = (client: JittorClient) => client.call(operation, input);
+	signal?.throwIfAborted();
+	const invoke = (client: JittorClient) => {
+		signal?.throwIfAborted();
+		return client.call(operation, input, signal);
+	};
 	return operationRetryMode(operation) === "retry" ? retrying.call(invoke) : retrying.callOnce(invoke);
 }
 

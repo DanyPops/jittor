@@ -1,6 +1,7 @@
 import { ROUTER_MAX_SESSION_SCOPES, ROUTER_SESSION_ID_MAX_CHARACTERS } from "../../constants.ts";
 import type { MetricStore } from "../../observability/store.ts";
 import type { TelemetrySource } from "../../observability/telemetry-source.ts";
+import { withDeadline } from "../../transport/deadline.ts";
 import type { RouteOverride, RouterController, RouterStatus, TelemetryPollResult, TelemetrySourceStatus } from "./controller.ts";
 import { type BudgetWindow, evaluateRoutingPolicy, type PolicyConfig, type PolicyDecision, type Route } from "./policy.ts";
 
@@ -11,6 +12,8 @@ export interface JittorRouterOptions {
 	routes: Route[];
 	currentRoute: Route;
 	clock?: () => number;
+	/** Per-source deadline, including credentials and response-body consumption. */
+	pollTimeoutMs?: number;
 }
 
 function sameRoute(left: Route, right: Route): boolean {
@@ -204,7 +207,7 @@ export class JittorRouter implements RouterController {
 		const statuses = await Promise.all(
 			this.options.sources.map(async (source): Promise<TelemetrySourceStatus> => {
 				try {
-					const batch = await source.poll();
+					const batch = await withDeadline((signal) => source.poll(signal), { timeoutMs: this.options.pollTimeoutMs });
 					for (const observation of batch.metrics) this.options.metrics.record(observation);
 					this.windows.set(source.id, batch.windows);
 					return { id: source.id, provider: source.provider, ok: true, metrics: batch.metrics.length, observedAt: batch.observedAt };

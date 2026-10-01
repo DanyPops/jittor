@@ -11,5 +11,5 @@ export interface TelemetrySource {
 	id: string;
 	provider: string;
 	required: boolean;
-	poll(): Promise<TelemetryBatch>;
+	poll(signal?: AbortSignal): Promise<TelemetryBatch>;
 }

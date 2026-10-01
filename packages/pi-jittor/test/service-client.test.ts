@@ -28,6 +28,31 @@ function fakeConnectionRefused(): JittorClient {
 }
 
 describe("Jittor vehicle-client retrying client wiring", () => {
+	it("skips connection setup for a canceled startup call", async () => {
+		let connects = 0;
+		setJittorClientConnectorForTests(async () => {
+			connects++;
+			return fakeClient(async () => ({}) as never);
+		});
+		await expect(callJittor("telemetry.poll", {}, AbortSignal.abort())).rejects.toMatchObject({ name: "AbortError" });
+		expect(connects).toBe(0);
+	});
+
+	it("passes startup cancellation to the transport and stops a reconnect from replaying the request", async () => {
+		const controller = new AbortController();
+		let requests = 0;
+		setJittorClientConnectorForTests(async () =>
+			fakeClient(async (_operation, _input, signal) => {
+				requests++;
+				expect(signal).toBe(controller.signal);
+				controller.abort();
+				throw new TypeError("fetch failed");
+			}),
+		);
+		await expect(callJittor("telemetry.poll", {}, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+		expect(requests).toBe(1);
+	});
+
 	it("retries reset listing after a stale connection", async () => {
 		let attempts = 0;
 		setJittorClientConnectorForTests(async () => {

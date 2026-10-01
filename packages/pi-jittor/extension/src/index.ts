@@ -66,8 +66,8 @@ import { candidateIdentityOf, decideAutoMode, newAutoModeSessionState, recordAut
 import { showAutoModeSuggestion } from "./optimization/auto-mode-dialog.ts";
 import { fetchBenchmarkRanking } from "./optimization/model-selection-panel.ts";
 import { CodexRecoveryCapability, type CodexRecoveryRuntime, SYSTEM_RECOVERY_RUNTIME } from "./optimization/recovery/codex.ts";
-import { callJittor } from "./service-client.ts";
-import { cacheSessionSecret, forgetSessionSecret, sessionSecretField } from "./session-identity.ts";
+import { callJittor, type JittorExtensionClient } from "./service-client.ts";
+import { sessionSecretField } from "./session-identity.ts";
 import {
 	type AutoModeControl,
 	type CodexRecoveryControl,
@@ -75,6 +75,7 @@ import {
 	persistentEnforcementControl,
 	type UsageBudgetControl,
 } from "./settings.ts";
+import { SessionStartup } from "./startup.ts";
 
 export { formatFooterStatus } from "./observability/status.ts";
 export type { CodexRecoveryRuntime } from "./optimization/recovery/codex.ts";
@@ -96,12 +97,10 @@ function textTokenCounters(provider: string | undefined, model: string | undefin
 }
 const RECOVERY_GUIDANCE = "Run /jittor off to disable blocking, or restart the daemon with: systemctl --user restart jittor.service";
 
-export interface JittorExtensionClient {
-	call(operation: string, input: unknown): Promise<any>;
-}
+export type { JittorExtensionClient } from "./service-client.ts";
 
 const daemonClient: JittorExtensionClient = {
-	call: (operation, input) => callJittor(operation as Parameters<typeof callJittor>[0], input as never),
+	call: (operation, input, signal) => callJittor(operation as Parameters<typeof callJittor>[0], input as never, signal),
 };
 
 function usageBudgetControl(enforcement: EnforcementControl): UsageBudgetControl {
@@ -155,9 +154,15 @@ async function recordMetrics(client: JittorExtensionClient, metrics: MetricObser
 	await client.call("metrics.record_batch", { observations: metrics });
 }
 
-async function refreshFooter(client: JittorExtensionClient, state: IntegratedFooterState, sessionId: string): Promise<void> {
+async function refreshFooter(
+	client: JittorExtensionClient,
+	state: IntegratedFooterState,
+	sessionId: string,
+	isCurrent: () => boolean = () => true,
+): Promise<void> {
 	const status = (await client.call("router.status", { session_id: sessionId })) as RouterStatus;
 	const metrics = await fetchProviderBudgetMetrics(client, status);
+	if (!isCurrent()) return;
 	state.providerBudget = buildFooterBudget(status, metrics);
 	state.requestRender?.();
 }
@@ -397,6 +402,8 @@ export function registerJittorExtension(
 	contextGrowth: ContextGrowthCapability = new ContextGrowthCapability(),
 	autoMode: AutoModeControl = autoModeControl(enforcement),
 ): void {
+	const startup = new SessionStartup(client);
+	client = startup;
 	const footerState: IntegratedFooterState = { providerBudget: null };
 	const usageBudgets = usageBudgetControl(enforcement);
 	let compactionTelemetry = new CompactionTelemetry();
@@ -878,8 +885,10 @@ export function registerJittorExtension(
 		},
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
-		currentSessionId = ctx.sessionManager.getSessionId();
+	pi.on("session_start", (_event, ctx) => {
+		const sessionId = ctx.sessionManager.getSessionId();
+		currentSessionId = sessionId;
+		footerState.providerBudget = null;
 		focusedTaskId = null;
 		declaredEffort = null;
 		finishCompactionUi();
@@ -892,24 +901,22 @@ export function registerJittorExtension(
 		providerResponseTelemetry.resetTurn();
 		ctx.ui.setStatus("jittor", undefined);
 		showFooter(ctx);
-		// Registered before any router-mutating call could plausibly happen, closing most of the
-		// first-touch registration window; best-effort -- a registration failure leaves this session
-		// unarmored (opt-in armor), never blocked.
-		try {
-			const { secret } = await client.call("session.register", { session_id: currentSessionId });
-			cacheSessionSecret(currentSessionId, secret);
-		} catch {
-			// Unarmored for this session; every router.* call still works exactly as before.
-		}
-		try {
-			await syncCurrentRoute(pi, client, ctx);
-			await syncAvailableRoutes(pi, client, ctx);
-			await client.call("telemetry.poll", {});
-			await refreshFooter(client, footerState, ctx.sessionManager.getSessionId());
-		} catch {
-			footerState.providerBudget = null;
-			footerState.requestRender?.();
-		}
+		// Pi awaits session_start. Only local UI belongs on that path; identity registration,
+		// route synchronization and telemetry run on the next timer turn. Router mutations share
+		// a separate registration barrier, so early commands also await the registration attempt.
+		startup.start(
+			sessionId,
+			async (sessionClient, isCurrent) => {
+				await syncCurrentRoute(pi, sessionClient, ctx);
+				await syncAvailableRoutes(pi, sessionClient, ctx);
+				await sessionClient.call("telemetry.poll", {});
+				await refreshFooter(sessionClient, footerState, sessionId, isCurrent);
+			},
+			() => {
+				footerState.providerBudget = null;
+				footerState.requestRender?.();
+			},
+		);
 	});
 
 	pi.on("before_agent_start", async (event) => {
@@ -1118,6 +1125,7 @@ export function registerJittorExtension(
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
+		startup.stop();
 		finishCompactionUi();
 		if (compactionTelemetry.hasOpenCompaction())
 			await recordMetrics(client, [compactionTelemetry.abort(Date.now(), "session-shutdown")]).catch(() => undefined);
@@ -1126,10 +1134,6 @@ export function registerJittorExtension(
 		stopContextHub?.();
 		cancelRecovery(true);
 		localRunTelemetry.reset();
-		const session_id = ctx.sessionManager.getSessionId();
-		const secret = sessionSecretField(session_id);
-		if (secret.session_secret) await client.call("session.release", { session_id, ...secret }).catch(() => undefined);
-		forgetSessionSecret(session_id);
 		ctx.ui.setStatus("jittor", undefined);
 		ctx.ui.setFooter(undefined);
 	});

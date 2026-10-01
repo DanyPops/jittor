@@ -12,9 +12,9 @@ export class OpenRouterTelemetrySource implements TelemetrySource {
 		private readonly clock: () => number = Date.now,
 	) {}
 
-	async poll(): Promise<TelemetryBatch> {
+	async poll(signal?: AbortSignal): Promise<TelemetryBatch> {
 		const observedAt = this.clock();
-		const snapshot = await new OpenRouterTelemetryAdapter(this.apiKey, this.transport).readKey(observedAt);
+		const snapshot = await new OpenRouterTelemetryAdapter(this.apiKey, this.transport).readKey(observedAt, signal);
 		return { observedAt, metrics: snapshot.metrics, windows: [] };
 	}
 }

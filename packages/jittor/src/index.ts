@@ -386,6 +386,7 @@ export {
 	type ObservationExporter,
 	type ObservationExportStatus,
 } from "./telemetry-export/exporter.ts";
+export { type DeadlineOptions, TELEMETRY_REQUEST_TIMEOUT_MS, withDeadline } from "./transport/deadline.ts";
 export {
 	connectJittorClient,
 	type FetchTransport,

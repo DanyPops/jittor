@@ -1,3 +1,4 @@
+import { withDeadline } from "../transport/deadline.ts";
 import {
 	type OpenRouterAnalyticsResult,
 	type OpenRouterGeneration,
@@ -34,8 +35,8 @@ export class OpenRouterTelemetryAdapter {
 		if (apiKey.length === 0) throw new Error("OpenRouter API key is required");
 	}
 
-	async readKey(observedAt = Date.now()): Promise<OpenRouterKeySnapshot> {
-		const snapshot = parseOpenRouterKey(await this.request("/key"), observedAt);
+	async readKey(observedAt = Date.now(), signal?: AbortSignal): Promise<OpenRouterKeySnapshot> {
+		const snapshot = parseOpenRouterKey(await this.request("/key", { signal }), observedAt);
 		this.managementCapability = snapshot.management;
 		return snapshot;
 	}
@@ -60,18 +61,25 @@ export class OpenRouterTelemetryAdapter {
 	}
 
 	private async request(path: string, init: RequestInit = {}): Promise<unknown> {
-		const response = await this.transport(
-			new Request(`${this.baseUrl}${path}`, {
-				...init,
-				headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json", ...init.headers },
-			}),
+		return withDeadline(
+			async (signal) => {
+				const response = await this.transport(
+					new Request(`${this.baseUrl}${path}`, {
+						...init,
+						signal,
+						headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json", ...init.headers },
+					}),
+				);
+				if (!response.ok) {
+					void response.body?.cancel().catch(() => {});
+					const retryAfter = response.headers.get("retry-after");
+					throw new Error(
+						`OpenRouter ${path.split("?")[0]} failed with HTTP ${response.status}${retryAfter ? `; retry after ${retryAfter}` : ""}`,
+					);
+				}
+				return response.json();
+			},
+			{ signal: init.signal ?? undefined },
 		);
-		if (!response.ok) {
-			const retryAfter = response.headers.get("retry-after");
-			throw new Error(
-				`OpenRouter ${path.split("?")[0]} failed with HTTP ${response.status}${retryAfter ? `; retry after ${retryAfter}` : ""}`,
-			);
-		}
-		return response.json();
 	}
 }

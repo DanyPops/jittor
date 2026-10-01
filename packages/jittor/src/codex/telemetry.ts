@@ -5,6 +5,7 @@ import {
 	type SubscriptionResetList,
 	validateResetRedemption,
 } from "../observability/subscription-resets.ts";
+import { withDeadline } from "../transport/deadline.ts";
 import { type CodexRateLimitSnapshot, type CodexUsageSnapshot, parseCodexRateLimitHeaders, parseCodexUsage } from "./contracts.ts";
 import { parseResetList, parseResetOutcome, readResetJson } from "./resets.ts";
 
@@ -80,24 +81,34 @@ export class CodexSubscriptionTelemetryAdapter {
 		}
 	}
 
-	async readUsage(observedAt = Date.now()): Promise<CodexUsageSnapshot> {
-		const response = await this.transport(
-			new Request(`${this.baseUrl}/wham/usage`, {
-				headers: {
-					authorization: `Bearer ${this.credentials.accessToken}`,
-					"chatgpt-account-id": this.credentials.accountId,
-					accept: "application/json",
-				},
-			}),
+	async readUsage(observedAt = Date.now(), signal?: AbortSignal): Promise<CodexUsageSnapshot> {
+		return withDeadline(
+			async (requestSignal) => {
+				const response = await this.transport(
+					new Request(`${this.baseUrl}/wham/usage`, {
+						signal: requestSignal,
+						headers: {
+							authorization: `Bearer ${this.credentials.accessToken}`,
+							"chatgpt-account-id": this.credentials.accountId,
+							accept: "application/json",
+						},
+					}),
+				);
+				if (!response.ok) {
+					void response.body?.cancel().catch(() => {});
+					throw new Error(`Codex experimental usage request failed with HTTP ${response.status}`);
+				}
+				let payload: unknown;
+				try {
+					payload = await response.json();
+				} catch {
+					requestSignal.throwIfAborted();
+					throw new Error("Codex experimental usage response was not JSON");
+				}
+				return parseCodexUsage(payload, observedAt);
+			},
+			{ signal },
 		);
-		if (!response.ok) throw new Error(`Codex experimental usage request failed with HTTP ${response.status}`);
-		let payload: unknown;
-		try {
-			payload = await response.json();
-		} catch {
-			throw new Error("Codex experimental usage response was not JSON");
-		}
-		return parseCodexUsage(payload, observedAt);
 	}
 
 	async readResets(): Promise<SubscriptionResetList> {

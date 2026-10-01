@@ -22,6 +22,38 @@ afterEach(async () => {
 });
 
 describe("ambient Jittor routing through a real Pi process", () => {
+	it.each(["session.register", "telemetry.poll"])(
+		"serves RPC and the first prompt while startup %s is delayed",
+		async (operation) => {
+			pi = spawnRealPiProcess({
+				bin: PI_CLI,
+				extensions: [resolveFauxProviderExtensionPath(), DELAYED_JITTOR_EXTENSION],
+				extraArgs: ["--provider", "faux", "--model", "faux-1"],
+				env: {
+					[SCRIPT_ENV_VAR]: encodeFauxScript([{ type: "text", text: "ready during stalled startup" }]),
+					[FIRST_TOKEN_DELAY_ENV_VAR]: "10",
+					PI_JITTOR_TEST_DAEMON_DELAY_MS: "8000",
+					PI_JITTOR_TEST_DELAY_OPERATIONS: operation,
+				},
+			});
+			const events: AgentSessionEvent[] = [];
+			pi.onEvent((event) => events.push(event));
+			pi.send({ type: "get_entries" });
+			await waitForRpcEvent(
+				events,
+				(event) =>
+					(event as unknown as { type: string }).type === "response" &&
+					(event as unknown as { command?: string }).command === "get_entries",
+				{ timeoutMs: 4000 },
+			);
+			pi.sendPrompt("hello");
+			await waitForRpcEvent(events, (event) => event.type === "message_update" && event.assistantMessageEvent.type === "text_delta", {
+				timeoutMs: 2000,
+			});
+		},
+		15_000,
+	);
+
 	it("preserves a 1:1 prompt-to-first-token ratio while daemon operations are slower than the faux model", async () => {
 		const daemonDelayMs = 800;
 		const fauxFirstTokenMs = 500;

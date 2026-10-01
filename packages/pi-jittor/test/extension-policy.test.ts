@@ -281,6 +281,33 @@ function harness(
 }
 
 describe("Jittor Pi actuator", () => {
+	it.each(["session.register", "router.current_route", "router.available_routes", "telemetry.poll", "router.status", "metrics.query"])(
+		"keeps startup and input synchronous while %s is stalled",
+		async (delayedOperation) => {
+			const gate = Promise.withResolvers<void>();
+			let waiting = false;
+			class StalledClient extends FakeClient {
+				override async call(operation: string, input: unknown): Promise<any> {
+					if (operation === delayedOperation) {
+						waiting = true;
+						await gate.promise;
+					}
+					return super.call(operation, input);
+				}
+			}
+			const app = harness(new StalledClient());
+			expect(app.handlers.get("session_start")![0]!({}, app.ctx)).toBeUndefined();
+			expect(app.footers.at(-1)).toBeTypeOf("function");
+			await drainAmbientWork();
+			expect(waiting).toBe(true);
+			expect(app.handlers.get("input")![0]!({ source: "interactive", text: "hello" }, app.ctx)).toEqual({ action: "continue" });
+			await app.handlers.get("session_shutdown")![0]!({}, app.ctx);
+			gate.resolve();
+			await drainAmbientWork();
+			expect(app.footers.at(-1)).toBeUndefined();
+		},
+	);
+
 	it("tracks Pi's public compaction lifecycle for footer animation and cleanup", () => {
 		const app = harness(new FakeClient());
 		expect(app.handlers.get("session_before_compact")).toHaveLength(1);
@@ -819,6 +846,7 @@ describe("Jittor Pi actuator", () => {
 		];
 
 		await app.handlers.get("session_start")![0]!({}, app.ctx);
+		await drainAmbientWork();
 
 		const availableRoutesCall = client.calls.filter((call) => call.operation === "router.available_routes").at(-1)!;
 		const routedIdentities = (availableRoutesCall.input as { routes: Array<{ provider: string; model: string }> }).routes.map(
@@ -833,6 +861,7 @@ describe("Jittor Pi actuator", () => {
 		const app = harness(client);
 
 		await app.handlers.get("session_start")![0]!({}, app.ctx);
+		await drainAmbientWork();
 		expect(client.calls).toContainEqual({ operation: "session.register", input: { session_id: "test-session" } });
 		const mutations = client.calls.filter(
 			(call) => call.operation === "router.current_route" || call.operation === "router.available_routes",

@@ -40,10 +40,10 @@ export class CodexTelemetrySource implements TelemetrySource {
 		private readonly clock: () => number = Date.now,
 	) {}
 
-	async poll(): Promise<TelemetryBatch> {
+	async poll(signal?: AbortSignal): Promise<TelemetryBatch> {
 		const observedAt = this.clock();
 		const adapter = new CodexSubscriptionTelemetryAdapter(loadCodexFileCredentials(this.authFile), this.transport);
-		const snapshot = await adapter.readUsage(observedAt);
+		const snapshot = await adapter.readUsage(observedAt, signal);
 		return {
 			observedAt,
 			metrics: snapshot.metrics,
